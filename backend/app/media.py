@@ -3,38 +3,32 @@
 
 Каждый загруженный файл пережимается: телефоны отдают кадры по 5–8 МБ,
 а на сайте такое фото — это секунды ожидания у гостя и лишние гигабайты
-на диске. Храним WebP шириной не больше settings.image_max_width.
+в хранилище. Храним WebP шириной не больше settings.image_max_width.
+
+Куда именно ложится результат — на диск или в S3 — решает storage.py.
+Здесь только обработка изображения.
 """
 
 import io
 import logging
 import uuid
-from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image, ImageOps
 
 from .config import Settings
+from .storage import get_storage
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 
 
-def _safe_folder(settings: Settings, slug: str) -> Path:
-    """Папка номера внутри media/. Slug проверен схемой, но бережёного бог бережёт."""
+def _safe_slug(slug: str) -> str:
     clean = "".join(ch for ch in slug if ch.isalnum() or ch in "-_")[:60]
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некорректный код номера")
-    folder = settings.upload_path / "rooms" / clean
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
-
-
-def public_url(settings: Settings, relative: str) -> str:
-    """Ссылка, по которой фото увидит сайт."""
-    base = settings.public_media_base.rstrip("/")
-    return f"{base}/media/{relative}" if base else f"/media/{relative}"
+    return clean
 
 
 async def save_room_image(settings: Settings, slug: str, upload: UploadFile) -> str:
@@ -69,32 +63,20 @@ async def save_room_image(settings: Settings, slug: str, upload: UploadFile) -> 
         new_size = (settings.image_max_width, max(1, round(image.height * ratio)))
         image = image.resize(new_size, Image.LANCZOS)
 
-    folder = _safe_folder(settings, slug)
-    filename = f"{uuid.uuid4().hex[:16]}.webp"
-    image.save(folder / filename, "WEBP", quality=82, method=5)
+    buffer = io.BytesIO()
+    image.save(buffer, "WEBP", quality=82, method=5)
 
-    return public_url(settings, f"rooms/{folder.name}/{filename}")
+    key = f"rooms/{_safe_slug(slug)}/{uuid.uuid4().hex[:16]}.webp"
+    return get_storage(settings).save(key, buffer.getvalue(), "image/webp")
 
 
 def delete_room_image(settings: Settings, url: str) -> None:
     """
-    Удаляет файл с диска, если ссылка ведёт в нашу папку media/.
-    Фото из первоначальной поставки (`/images/...`) лежат во фронтенде —
-    их не трогаем, просто убираем ссылку из списка.
+    Убирает файл из хранилища.
+
+    Фотографии из первоначальной поставки (`/images/...`) лежат во
+    фронтенде — их не трогаем, просто убираем ссылку из списка.
     """
-    marker = "/media/rooms/"
-    if marker not in url:
+    if url.startswith("/images/"):
         return
-
-    relative = url.split(marker, 1)[1]
-    target = (settings.upload_path / "rooms" / relative).resolve()
-
-    # Защита от «../»: путь обязан остаться внутри media/
-    if not str(target).startswith(str(settings.upload_path)):
-        logger.warning("Попытка удалить файл вне media/: %s", url)
-        return
-
-    try:
-        target.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("Не удалось удалить %s: %s", target, exc)
+    get_storage(settings).delete(url)

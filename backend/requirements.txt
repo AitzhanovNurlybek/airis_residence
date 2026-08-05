@@ -3,12 +3,16 @@ uvicorn[standard]>=0.38
 pydantic>=2.12
 pydantic-settings>=2.12
 sqlalchemy>=2.0.44
-aiosqlite>=0.21
 httpx>=0.28
 
 # Загрузка и сжатие фотографий из админки
 python-multipart>=0.0.20
 pillow>=11.4
 
-# Для продакшена на PostgreSQL раскомментировать и заменить DATABASE_URL:
-# asyncpg>=0.30
+# Базы: SQLite для локальной разработки, PostgreSQL для облака
+aiosqlite>=0.21
+asyncpg>=0.30
+
+# S3-совместимое хранилище фотографий (Supabase Storage, Cloudflare R2, S3).
+# Нужно там, где нет постоянного диска.
+boto3>=1.35

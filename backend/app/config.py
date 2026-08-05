@@ -12,8 +12,17 @@ class Settings(BaseSettings):
     app_name: str = "Airis Residence API"
     debug: bool = False
 
-    # SQLite для старта; для продакшена подставить postgresql+asyncpg://...
+    # Внешний префикс, под которым доступен бэкенд.
+    # На Vercel это /api/backend (см. vercel.json). Локально — пусто.
+    root_path: str = ""
+
+    # SQLite для локальной разработки.
+    # В облаке: postgresql+asyncpg://user:pass@host/db
+    # ⚠️ Брать строку подключения ЧЕРЕЗ ПУЛЕР (у Neon и Supabase это
+    #    отдельный адрес с -pooler), иначе serverless выест лимит соединений.
     database_url: str = "sqlite+aiosqlite:///./airis.db"
+    # Облачные Postgres требуют TLS; для своего сервера можно выключить.
+    database_ssl: bool = True
 
     # Домены фронтенда, которым разрешён доступ к API
     cors_origins: str = "http://localhost:3000,https://airisresidence.kz,https://www.airisresidence.kz"
@@ -29,13 +38,25 @@ class Settings(BaseSettings):
 
     # ─── Загрузка фотографий ───────────────────────────────────────────
     upload_dir: str = "./media"
-    # Публичный адрес, по которому отдаются загруженные файлы.
-    # Обязателен в проде: без него ссылки будут относительными.
+    # Публичный адрес, по которому отдаются загруженные файлы (для диска).
     public_media_base: str = ""
     max_upload_mb: int = 15
     # Фото ужимаются до этой ширины — оригиналы с телефона по 6 МБ
     # убивают скорость сайта и место на диске.
     image_max_width: int = 2200
+
+    # ─── S3-совместимое хранилище ──────────────────────────────────────
+    # Заполняется, когда диска нет: на Vercel и других serverless-площадках
+    # записать файл некуда. Подходит Supabase Storage, Cloudflare R2, AWS S3.
+    # Пусто — фотографии сохраняются на диск, как обычно.
+    s3_endpoint: str = ""
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "auto"
+    # Адрес, по которому файлы видны снаружи. У Supabase и R2 он отличается
+    # от адреса API, поэтому задаётся отдельно.
+    s3_public_base: str = ""
 
     # Уведомления о заявках
     telegram_bot_token: str = ""
@@ -64,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def admin_configured(self) -> bool:
         return bool(self.admin_password and self.secret_key)
+
+    @property
+    def s3_configured(self) -> bool:
+        return bool(self.s3_bucket and self.s3_access_key and self.s3_secret_key)
 
     @property
     def upload_path(self) -> Path:

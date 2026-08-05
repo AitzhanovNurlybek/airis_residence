@@ -4,13 +4,49 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .config import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(settings.database_url, echo=settings.debug, future=True)
+
+def _engine_options() -> dict:
+    """
+    Настройки подключения зависят от того, где мы работаем.
+
+    Локально это SQLite — файл, ничего настраивать не нужно.
+
+    В облаке это Postgres, к которому serverless-функции подключаются
+    через пулер (pgbouncer у Neon и Supabase). У пулера в режиме
+    транзакций не работают подготовленные запросы, которые asyncpg
+    создаёт по умолчанию, — отсюда ошибки вида «prepared statement
+    already exists». Лечится отключением их кэша.
+
+    Свой пул при этом держать не нужно: пулер снаружи уже всё делает,
+    а каждая функция живёт секунды.
+    """
+    if settings.database_url.startswith("sqlite"):
+        return {}
+
+    return {
+        "poolclass": NullPool,
+        "connect_args": {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            # Облачные Postgres требуют TLS
+            "ssl": "require" if settings.database_ssl else None,
+        },
+    }
+
+
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,
+    future=True,
+    **_engine_options(),
+)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

@@ -69,15 +69,24 @@ async def seed_rooms_if_empty() -> None:
         logger.info("Номера загружены в базу: %s шт.", len(SEED_ROOMS))
 
 
+_initialised = False
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await init_db()
-    await seed_rooms_if_empty()
-    logger.info(
-        "Готово. Админка: %s, платежи: %s",
-        "включена" if settings.admin_configured else "не настроена",
-        settings.payment_provider or "не настроены",
-    )
+    # В serverless этот код выполняется при каждом холодном старте.
+    # Флаг избавляет от лишней работы, пока экземпляр живой.
+    global _initialised
+    if not _initialised:
+        await init_db()
+        await seed_rooms_if_empty()
+        _initialised = True
+        logger.info(
+            "Готово. Хранилище: %s, админка: %s, платежи: %s",
+            "S3" if settings.s3_configured else "диск",
+            "включена" if settings.admin_configured else "не настроена",
+            settings.payment_provider or "не настроены",
+        )
     yield
 
 
@@ -88,6 +97,35 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+class StripPrefixMiddleware:
+    """
+    Убирает внешний префикс из пути запроса.
+
+    На Vercel бэкенд живёт под адресом /api/backend/... — так настроен
+    rewrite в vercel.json. Дойдёт ли до приложения полный путь или уже
+    обрезанный, зависит от площадки, а гадать здесь нельзя: ошибка даст
+    молчаливый 404 на всех эндпоинтах.
+
+    Поэтому обрезаем сами и только если префикс действительно есть.
+    Локально ROOT_PATH пустой и middleware ничего не делает.
+    """
+
+    def __init__(self, app, prefix: str) -> None:
+        self.app = app
+        self.prefix = prefix.rstrip("/")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self.prefix:
+            path = scope.get("path", "")
+            if path.startswith(self.prefix):
+                trimmed = path[len(self.prefix) :] or "/"
+                scope = {**scope, "path": trimmed, "raw_path": trimmed.encode()}
+        await self.app(scope, receive, send)
+
+
+if settings.root_path:
+    app.add_middleware(StripPrefixMiddleware, prefix=settings.root_path)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
@@ -96,8 +134,11 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
 
-# Загруженные из админки фотографии
-app.mount("/media", StaticFiles(directory=str(settings.upload_path)), name="media")
+# Фотографии с диска отдаём сами. Когда включено S3, файлы раздаёт
+# хранилище, а на serverless-площадках папки для них попросту нет —
+# обращаться к upload_path в этом случае нельзя, он пытается её создать.
+if not settings.s3_configured:
+    app.mount("/media", StaticFiles(directory=str(settings.upload_path)), name="media")
 
 app.include_router(rooms_public_router)
 app.include_router(rooms_admin_router)
