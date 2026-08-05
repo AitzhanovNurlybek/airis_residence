@@ -45,6 +45,11 @@ class Room(Base):
     features: Mapped[list] = mapped_column(JSON, default=list)
     images: Mapped[list] = mapped_column(JSON, default=list)
 
+    # Переводы текстовых полей: {"kk": {"shortName": "...", ...}, "en": {...}}
+    # Цена, площадь и фотографии общие для всех языков — их не переводим.
+    # Пустое поле в переводе означает «показать русский вариант».
+    translations: Mapped[dict] = mapped_column(JSON, default=dict)
+
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
 

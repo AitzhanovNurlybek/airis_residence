@@ -23,6 +23,12 @@ class RoomOut(BaseModel):
     isPublished: bool = Field(validation_alias="is_published")
 
 
+class RoomAdminOut(RoomOut):
+    """То же самое, но с переводами — их видит только админка."""
+
+    translations: dict = Field(default_factory=dict)
+
+
 class RoomIn(BaseModel):
     """Создание номера. Slug задаётся один раз и потом не меняется —
     на него завязаны адреса страниц и ссылки в поисковиках."""
@@ -54,6 +60,8 @@ class RoomPatch(BaseModel):
     images: list[str] | None = None
     sortOrder: int | None = None
     isPublished: bool | None = None
+    # {"kk": {"shortName": "...", "summary": "...", ...}, "en": {...}}
+    translations: dict | None = None
 
 
 class LoginIn(BaseModel):

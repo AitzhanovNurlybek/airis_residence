@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { rooms as fallbackRooms, type Room } from "./site";
+import { defaultLocale, type Locale } from "./i18n/config";
 
 /**
  * Источник данных о номерах.
@@ -11,6 +12,11 @@ import { rooms as fallbackRooms, type Room } from "./site";
  * Смысл запаса: сайт никогда не должен падать из-за админки. Упал
  * сервер с базой — гость всё равно видит номера и цены.
  *
+ * ── Про язык ─────────────────────────────────────────────────────
+ * Переводы номеров живут в базе и подставляются на стороне бэкенда.
+ * Если перевода нет, бэкенд отдаёт русский вариант — лучше показать
+ * русское название, чем пустоту.
+ *
  * ── Почему данные не кэшируются ──────────────────────────────────
  * Пробовали ISR с тегами: цена менялась в базе, но посетитель ещё
  * какое-то время видел старую — Next отдаёт устаревшую страницу и
@@ -20,27 +26,28 @@ import { rooms as fallbackRooms, type Room } from "./site";
  *
  * Поэтому страницы рендерятся на каждый запрос. Цена этого — один
  * запрос к своему же бэкенду (миллисекунды), выгода — то, что показано
- * на сайте, всегда совпадает с тем, что в админке. Для отеля на
- * несколько десятков номеров это правильный размен.
+ * на сайте, всегда совпадает с тем, что в админке.
  */
 
 export const BACKEND_URL = (process.env.BACKEND_URL || "").replace(/\/$/, "");
 
-type ApiRoom = Room & { sortOrder?: number; isPublished?: boolean };
-
-function isUsable(data: unknown): data is ApiRoom[] {
-  return Array.isArray(data) && data.length > 0 && typeof data[0]?.slug === "string";
+function isUsable(data: unknown): data is Room[] {
+  return (
+    Array.isArray(data) && data.length > 0 && typeof (data[0] as Room)?.slug === "string"
+  );
 }
 
 /**
  * cache() из React убирает повторные обращения внутри одного рендера:
  * номера нужны и подвалу, и самой странице, а запрос уходит один.
  */
-export const getRooms = cache(async (): Promise<Room[]> => {
+export const getRooms = cache(async (locale: Locale = defaultLocale): Promise<Room[]> => {
   if (!BACKEND_URL) return fallbackRooms;
 
   try {
-    const res = await fetch(`${BACKEND_URL}/api/rooms`, { cache: "no-store" });
+    const res = await fetch(`${BACKEND_URL}/api/rooms?locale=${locale}`, {
+      cache: "no-store",
+    });
     if (!res.ok) {
       console.error("Не удалось получить номера:", res.status);
       return fallbackRooms;
@@ -58,13 +65,16 @@ export const getRooms = cache(async (): Promise<Room[]> => {
   }
 });
 
-export async function getRoomBySlug(slug: string): Promise<Room | undefined> {
-  const list = await getRooms();
+export async function getRoomBySlug(
+  slug: string,
+  locale: Locale = defaultLocale,
+): Promise<Room | undefined> {
+  const list = await getRooms(locale);
   return list.find((room) => room.slug === slug);
 }
 
 /** Минимальная цена по отелю — «номера от …». */
-export async function getPriceFrom(): Promise<number> {
-  const list = await getRooms();
+export async function getPriceFrom(locale: Locale = defaultLocale): Promise<number> {
+  const list = await getRooms(locale);
   return Math.min(...list.map((room) => room.price));
 }

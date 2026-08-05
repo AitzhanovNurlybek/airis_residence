@@ -30,7 +30,7 @@ from .schemas import (
     PaymentInitIn,
     PaymentInitOut,
 )
-from .seed_rooms import SEED_ROOMS
+from .seed_rooms import SEED_ROOMS, TRANSLATIONS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ async def seed_rooms_if_empty() -> None:
                     description=item["description"],
                     features=item["features"],
                     images=item["images"],
+                    translations=TRANSLATIONS.get(item["slug"], {}),
                     sort_order=index,
                     is_published=True,
                 )

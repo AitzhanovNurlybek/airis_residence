@@ -11,6 +11,8 @@
  * └──────────────────────────────────────────────────────────────────┘
  */
 
+import { defaultLocale, localePath, type Locale } from "./i18n/config";
+
 export type BookingMode =
   /** Ссылка на внешний движок брони / платёжную страницу банка. */
   | "engine"
@@ -66,7 +68,10 @@ export type BookingQuery = {
  * До подключения движка — на внутреннюю страницу /bronirovanie
  * с формой заявки. После подключения — на движок/платёжку.
  */
-export function getBookingHref(query: BookingQuery = {}): string {
+export function getBookingHref(
+  query: BookingQuery = {},
+  locale: Locale = defaultLocale,
+): string {
   if (bookingConfig.mode === "engine" && bookingConfig.url) {
     let url: URL;
     try {
@@ -87,7 +92,7 @@ export function getBookingHref(query: BookingQuery = {}): string {
   if (query.adults) params.set("adults", String(query.adults));
   if (query.room) params.set("room", query.room);
   const qs = params.toString();
-  return `/bronirovanie${qs ? `?${qs}` : ""}`;
+  return `${localePath(locale, "/bronirovanie")}${qs ? `?${qs}` : ""}`;
 }
 
 /** Внешняя ссылка открывается в новой вкладке, внутренняя — нет. */

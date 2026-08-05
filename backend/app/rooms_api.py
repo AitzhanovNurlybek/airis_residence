@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from .auth import require_admin
 from .config import Settings, get_settings
 from .db import Room, get_session
 from .media import delete_room_image, save_room_image
-from .schemas import RoomIn, RoomOut, RoomPatch
+from .schemas import RoomAdminOut, RoomIn, RoomOut, RoomPatch
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,46 @@ admin = APIRouter(
     tags=["admin: номера"],
     dependencies=[Depends(require_admin)],
 )
+
+DEFAULT_LOCALE = "ru"
+# Какие поля вообще переводятся. Цена, площадь и фото — общие.
+TRANSLATABLE = ("name", "shortName", "beds", "summary", "description", "features")
+
+
+def localize(room: Room, locale: str) -> dict:
+    """
+    Отдаёт номер на нужном языке.
+
+    Пустое или отсутствующее поле перевода заменяется русским вариантом:
+    лучше показать русское название, чем пустую строку.
+    """
+    data = {
+        "slug": room.slug,
+        "name": room.name,
+        "shortName": room.short_name,
+        "price": room.price,
+        "area": room.area,
+        "capacity": room.capacity,
+        "beds": room.beds,
+        "summary": room.summary,
+        "description": room.description,
+        "features": room.features or [],
+        "images": room.images or [],
+        "sortOrder": room.sort_order,
+        "isPublished": room.is_published,
+    }
+
+    if locale == DEFAULT_LOCALE:
+        return data
+
+    translated = (room.translations or {}).get(locale) or {}
+    for field in TRANSLATABLE:
+        value = translated.get(field)
+        if isinstance(value, str) and value.strip():
+            data[field] = value
+        elif isinstance(value, list) and value:
+            data[field] = value
+    return data
 
 
 async def _get(session: AsyncSession, slug: str) -> Room:
@@ -34,38 +74,45 @@ async def _get(session: AsyncSession, slug: str) -> Room:
 
 
 @public.get("", response_model=list[RoomOut])
-async def list_rooms(session: AsyncSession = Depends(get_session)):
-    """Опубликованные номера в заданном порядке — это читает сайт."""
+async def list_rooms(
+    locale: str = Query(default=DEFAULT_LOCALE, pattern="^[a-z]{2}$"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Опубликованные номера на нужном языке — это читает сайт."""
     result = await session.execute(
         select(Room).where(Room.is_published.is_(True)).order_by(Room.sort_order, Room.id)
     )
-    return list(result.scalars().all())
+    return [localize(room, locale) for room in result.scalars().all()]
 
 
 @public.get("/{slug}", response_model=RoomOut)
-async def get_room(slug: str, session: AsyncSession = Depends(get_session)):
+async def get_room(
+    slug: str,
+    locale: str = Query(default=DEFAULT_LOCALE, pattern="^[a-z]{2}$"),
+    session: AsyncSession = Depends(get_session),
+):
     room = await _get(session, slug)
     if not room.is_published:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Номер не найден")
-    return room
+    return localize(room, locale)
 
 
 # ────────────────────────── Админка ──────────────────────────
 
 
-@admin.get("", response_model=list[RoomOut])
+@admin.get("", response_model=list[RoomAdminOut])
 async def admin_list_rooms(session: AsyncSession = Depends(get_session)):
-    """Все номера, включая скрытые."""
+    """Все номера, включая скрытые, с переводами."""
     result = await session.execute(select(Room).order_by(Room.sort_order, Room.id))
     return list(result.scalars().all())
 
 
-@admin.get("/{slug}", response_model=RoomOut)
+@admin.get("/{slug}", response_model=RoomAdminOut)
 async def admin_get_room(slug: str, session: AsyncSession = Depends(get_session)):
     return await _get(session, slug)
 
 
-@admin.post("", response_model=RoomOut, status_code=201)
+@admin.post("", response_model=RoomAdminOut, status_code=201)
 async def create_room(payload: RoomIn, session: AsyncSession = Depends(get_session)):
     exists = await session.execute(select(Room).where(Room.slug == payload.slug))
     if exists.scalar_one_or_none():
@@ -88,6 +135,7 @@ async def create_room(payload: RoomIn, session: AsyncSession = Depends(get_sessi
         description=payload.description,
         features=payload.features,
         images=[],
+        translations={},
         sort_order=(tail.sort_order + 1) if tail else 0,
         is_published=False,  # новый номер публикуется вручную, после фото
     )
@@ -97,7 +145,7 @@ async def create_room(payload: RoomIn, session: AsyncSession = Depends(get_sessi
     return room
 
 
-@admin.patch("/{slug}", response_model=RoomOut)
+@admin.patch("/{slug}", response_model=RoomAdminOut)
 async def update_room(
     slug: str, payload: RoomPatch, session: AsyncSession = Depends(get_session)
 ):
@@ -116,6 +164,7 @@ async def update_room(
         "images": "images",
         "sortOrder": "sort_order",
         "isPublished": "is_published",
+        "translations": "translations",
     }
     data = payload.model_dump(exclude_unset=True)
     for key, column in fields.items():
@@ -140,7 +189,7 @@ async def delete_room(
     await session.commit()
 
 
-@admin.post("/{slug}/images", response_model=RoomOut)
+@admin.post("/{slug}/images", response_model=RoomAdminOut)
 async def upload_images(
     slug: str,
     files: list[UploadFile] = File(...),
@@ -162,7 +211,7 @@ async def upload_images(
     return room
 
 
-@admin.put("/{slug}/images", response_model=RoomOut)
+@admin.put("/{slug}/images", response_model=RoomAdminOut)
 async def set_images(
     slug: str,
     images: list[str],
@@ -184,7 +233,7 @@ async def set_images(
     return room
 
 
-@admin.post("/reorder", response_model=list[RoomOut])
+@admin.post("/reorder", response_model=list[RoomAdminOut])
 async def reorder_rooms(slugs: list[str], session: AsyncSession = Depends(get_session)):
     """Порядок номеров на сайте — так, как они перечислены."""
     result = await session.execute(select(Room))

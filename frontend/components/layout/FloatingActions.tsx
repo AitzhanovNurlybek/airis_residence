@@ -5,13 +5,15 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { site } from "@/lib/site";
 import { getBookingHref, bookingLinkTarget } from "@/lib/booking";
+import type { Locale } from "@/lib/i18n/config";
+import type { Dictionary } from "@/lib/i18n";
 import { IconPhone, IconTelegram, IconWhatsApp } from "@/components/ui/Icons";
 
 /**
  * Мобильная панель действий снизу + мессенджеры на десктопе.
  * Появляется после первого экрана, чтобы не перекрывать hero.
  */
-export function FloatingActions() {
+export function FloatingActions({ locale, dict }: { locale: Locale; dict: Dictionary }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function FloatingActions() {
                 href={site.contacts.whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Написать в WhatsApp"
+                aria-label={dict.common.writeWhatsApp}
                 className="grid size-13 place-items-center rounded-full bg-[#25D366] text-white shadow-[0_12px_30px_-8px_rgba(37,211,102,0.6)] transition-transform hover:scale-105"
               >
                 <IconWhatsApp className="size-6" />
@@ -47,7 +49,7 @@ export function FloatingActions() {
                 href={site.contacts.telegram}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Написать в Telegram"
+                aria-label="Telegram"
                 className="grid size-13 place-items-center rounded-full bg-[#29a9eb] text-white shadow-[0_12px_30px_-8px_rgba(41,169,235,0.6)] transition-transform hover:scale-105"
               >
                 <IconTelegram className="size-6" />
@@ -79,18 +81,18 @@ export function FloatingActions() {
               </a>
               <a
                 href={`tel:${site.contacts.phonePrimaryRaw}`}
-                aria-label="Позвонить"
+                aria-label={dict.common.call}
                 className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-sand-400/35 text-sand-200"
               >
                 <IconPhone className="size-5" />
               </a>
               <a
-                href={getBookingHref()}
+                href={getBookingHref({}, locale)}
                 target={bookingLinkTarget}
                 rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
                 className="flex h-12 flex-1 items-center justify-center rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-sm font-medium text-white"
               >
-                Забронировать
+                {dict.nav.book}
               </a>
             </div>
           </motion.div>

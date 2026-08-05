@@ -1,31 +1,57 @@
 import type { Metadata } from "next";
 import { rooms as fallbackRooms, site, type Room } from "./site";
+import { defaultLocale, localeMeta, localePath, locales, type Locale } from "./i18n/config";
 
 export const BASE_URL = site.url;
 
-/** Базовые метаданные страницы с каноникалом и OG. */
+/**
+ * Канонический адрес + hreflang на все языковые версии.
+ *
+ * hreflang нужен, чтобы Google не считал русскую, казахскую и английскую
+ * страницы дублями друг друга, а показывал нужную по языку запроса.
+ * x-default указывает на русскую версию — она основная.
+ */
+export function alternates(locale: Locale, path: string): Metadata["alternates"] {
+  const languages: Record<string, string> = {};
+  for (const item of locales) {
+    languages[localeMeta[item].htmlLang] = new URL(
+      localePath(item, path),
+      BASE_URL,
+    ).toString();
+  }
+  languages["x-default"] = new URL(localePath(defaultLocale, path), BASE_URL).toString();
+
+  return {
+    canonical: new URL(localePath(locale, path), BASE_URL).toString(),
+    languages,
+  };
+}
+
+/** Базовые метаданные страницы с каноникалом, hreflang и OG. */
 export function pageMetadata({
   title,
   description,
   path = "/",
+  locale = defaultLocale,
   image = "/og.jpg",
   noindex = false,
 }: {
   title: string;
   description: string;
   path?: string;
+  locale?: Locale;
   image?: string;
   noindex?: boolean;
 }): Metadata {
-  const url = new URL(path, BASE_URL).toString();
+  const url = new URL(localePath(locale, path), BASE_URL).toString();
   return {
     title,
     description,
-    alternates: { canonical: url },
+    alternates: noindex ? { canonical: url } : alternates(locale, path),
     robots: noindex ? { index: false, follow: false } : { index: true, follow: true },
     openGraph: {
       type: "website",
-      locale: site.locale,
+      locale: localeMeta[locale].htmlLang,
       url,
       siteName: site.name,
       title,
@@ -51,7 +77,7 @@ const abs = (p: string) => new URL(p, BASE_URL).toString();
  * Главная разметка. Тип Hotel наследует LocalBusiness — Google
  * использует её для карточки организации и для блока «Отели».
  */
-export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
+export function hotelJsonLd(rooms: Room[] = fallbackRooms, locale: Locale = defaultLocale) {
   return {
     "@context": "https://schema.org",
     "@type": "Hotel",
@@ -113,21 +139,21 @@ export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
       price: room.price,
       priceCurrency: "KZT",
       availability: "https://schema.org/InStock",
-      url: abs(`/nomera/${room.slug}`),
+      url: abs(localePath(locale, `/nomera/${room.slug}`)),
     })),
     sameAs: [site.contacts.whatsapp, site.address.mapUrl],
   };
 }
 
-export function roomJsonLd(room: Room) {
+export function roomJsonLd(room: Room, locale: Locale = defaultLocale) {
   return {
     "@context": "https://schema.org",
     "@type": "HotelRoom",
-    "@id": `${BASE_URL}/nomera/${room.slug}#room`,
+    "@id": `${abs(localePath(locale, `/nomera/${room.slug}`))}#room`,
     name: room.shortName,
     description: room.description,
     image: room.images.map(abs),
-    url: abs(`/nomera/${room.slug}`),
+    url: abs(localePath(locale, `/nomera/${room.slug}`)),
     occupancy: {
       "@type": "QuantitativeValue",
       maxValue: room.capacity,
@@ -145,7 +171,7 @@ export function roomJsonLd(room: Room) {
       price: room.price,
       priceCurrency: "KZT",
       availability: "https://schema.org/InStock",
-      url: abs(`/nomera/${room.slug}`),
+      url: abs(localePath(locale, `/nomera/${room.slug}`)),
       priceSpecification: {
         "@type": "UnitPriceSpecification",
         price: room.price,
