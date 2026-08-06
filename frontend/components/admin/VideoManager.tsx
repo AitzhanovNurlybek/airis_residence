@@ -148,6 +148,19 @@ export function VideoManager({
         // Заставка необязательна: не вышло — плеер просто будет без картинки.
         let posterKey: string | null = null;
         const posterBlob = await grabPoster(file);
+
+        // Кадр не вырезался — значит браузер не смог прочитать файл.
+        // Чаще всего это HEVC с айфона: Safari его играет, Chrome нет.
+        // Промолчать нельзя: ролик загрузится, а половина гостей увидит
+        // чёрный прямоугольник, и никто об этом не узнает.
+        if (!posterBlob) {
+          toast.show(
+            "Браузер не смог прочитать этот файл — скорее всего это HEVC с айфона. " +
+              "У части гостей видео не откроется. Лучше пересохранить ролик в MP4 (H.264).",
+            "error",
+          );
+        }
+
         if (posterBlob && signed.posterUploadUrl) {
           try {
             await putWithProgress(
