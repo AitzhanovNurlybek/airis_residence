@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, func, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .config import get_settings
@@ -25,14 +24,30 @@ def _engine_options() -> dict:
     создаёт по умолчанию, — отсюда ошибки вида «prepared statement
     already exists». Лечится отключением их кэша.
 
-    Свой пул при этом держать не нужно: пулер снаружи уже всё делает,
-    а каждая функция живёт секунды.
+    Пул соединений держим свой, вопреки распространённому совету
+    «на serverless он не нужен». Совет верен, когда база рядом. У нас
+    она в другом полушарии, и полное рукопожатие (TCP, TLS, авторизация)
+    стоит нескольких перелётов через океан — это и было почти две
+    секунды на каждой странице. Экземпляр функции живёт минутами и
+    обслуживает много запросов подряд, поэтому соединение выгоднее
+    переиспользовать.
+
+    Соединений держим мало: их и так ограничивает пулер снаружи.
+    pre_ping — дешёвая проверка «живо ли» (один перелёт вместо
+    рукопожатия целиком), иначе на подобранном мёртвом соединении
+    гость получит ошибку.
     """
     if settings.database_url.startswith("sqlite"):
         return {}
 
     return {
-        "poolclass": NullPool,
+        "pool_size": 1,
+        "max_overflow": 4,
+        "pool_timeout": 10,
+        # Пулер Supabase закрывает простаивающие соединения сам —
+        # обновляем раньше, чем он это сделает.
+        "pool_recycle": 240,
+        "pool_pre_ping": True,
         "connect_args": {
             "statement_cache_size": 0,
             "prepared_statement_cache_size": 0,

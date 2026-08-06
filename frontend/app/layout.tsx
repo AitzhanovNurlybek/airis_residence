@@ -78,9 +78,32 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+/**
+ * Домен хранилища, откуда приходят загруженные фото и видеообзоры.
+ * Браузеру полезно установить соединение заранее: пока он читает
+ * разметку, рукопожатие с чужим доменом уже идёт.
+ */
+function mediaOrigin(): string | null {
+  const base = process.env.NEXT_PUBLIC_MEDIA_BASE;
+  if (!base) return null;
+  try {
+    return new URL(base).origin;
+  } catch {
+    return null;
+  }
+}
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const media = mediaOrigin();
+
   return (
     <html lang="ru" className={`${display.variable} ${sans.variable} antialiased`}>
+      {media && (
+        <head>
+          <link rel="preconnect" href={media} crossOrigin="" />
+          <link rel="dns-prefetch" href={media} />
+        </head>
+      )}
       <body className="flex min-h-dvh flex-col">{children}</body>
     </html>
   );

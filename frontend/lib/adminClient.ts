@@ -5,6 +5,8 @@
  * Всё идёт на свой же домен через /api/admin/* — токен подставит прокси.
  */
 
+import { refreshRoomsCache } from "@/lib/roomsCacheActions";
+
 export class AdminError extends Error {
   /** Код ответа. Нужен, чтобы отличать «так нельзя» от «сломалось»:
    *  например 501 у видео значит «хранилище не выдаёт временные ссылки». */
@@ -59,7 +61,9 @@ export async function adminSend<T>(
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return (await unwrap(res)) as T;
+  const data = (await unwrap(res)) as T;
+  await dropRoomsCache();
+  return data;
 }
 
 /** Загрузка файлов. Content-Type проставит браузер — руками его трогать нельзя. */
@@ -67,7 +71,23 @@ export async function adminUpload<T>(path: string, files: File[]): Promise<T> {
   const form = new FormData();
   for (const file of files) form.append("files", file);
   const res = await fetch(`/api/admin${path}`, { method: "POST", body: form });
-  return (await unwrap(res)) as T;
+  const data = (await unwrap(res)) as T;
+  await dropRoomsCache();
+  return data;
+}
+
+/**
+ * Гасит кэш номеров, чтобы правка была видна на сайте немедленно.
+ *
+ * Сбой сброса не должен ломать сохранение: данные уже в базе, а кэш
+ * протухнет сам. Поэтому ошибку глотаем, но пишем в консоль.
+ */
+async function dropRoomsCache() {
+  try {
+    await refreshRoomsCache();
+  } catch (e) {
+    console.error("Не удалось сбросить кэш номеров", e);
+  }
 }
 
 export async function adminLogout() {

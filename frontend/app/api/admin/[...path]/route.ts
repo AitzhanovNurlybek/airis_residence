@@ -1,6 +1,8 @@
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { ADMIN_COOKIE, BACKEND } from "@/lib/adminServer";
+import { ROOMS_TAG } from "@/lib/rooms";
 
 export const runtime = "nodejs";
 
@@ -59,6 +61,12 @@ async function proxy(request: Request, params: Promise<{ path: string[] }>) {
   if (!res) {
     return NextResponse.json({ error: "Сервер недоступен" }, { status: 502 });
   }
+
+  // Подстраховка. Из админки кэш гасится точно — серверным действием
+  // refreshRoomsCache (см. lib/roomsCacheActions.ts). Здесь на случай,
+  // когда API дёрнули в обход браузера: пометим запись устаревшей,
+  // тогда протухшей она проживёт максимум один запрос.
+  if (MUTATING.has(method) && res.ok) revalidateTag(ROOMS_TAG, "max");
 
   if (res.status === 204) return new NextResponse(null, { status: 204 });
 
