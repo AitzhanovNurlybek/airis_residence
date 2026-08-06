@@ -19,6 +19,7 @@ class RoomOut(BaseModel):
     description: str
     features: list[str]
     images: list[str]
+    video: str = ""
     sortOrder: int = Field(validation_alias="sort_order")
     isPublished: bool = Field(validation_alias="is_published")
 
@@ -54,6 +55,29 @@ class RoomPatch(BaseModel):
     images: list[str] | None = None
     sortOrder: int | None = None
     isPublished: bool | None = None
+
+
+class VideoSignIn(BaseModel):
+    """Запрос ссылки на прямую загрузку видео в хранилище."""
+
+    filename: str = Field(min_length=1, max_length=200)
+    contentType: str = Field(pattern=r"^video/(mp4|webm|quicktime)$")
+    sizeBytes: int = Field(gt=0)
+
+
+class VideoSignOut(BaseModel):
+    uploadUrl: str
+    key: str
+    # Что положить в заголовок запроса: подпись считалась именно под него,
+    # с другим значением хранилище загрузку отклонит.
+    contentType: str
+    maxBytes: int
+
+
+class VideoConfirmIn(BaseModel):
+    """Подтверждение после успешной загрузки: файл проверяем сами."""
+
+    key: str = Field(min_length=1, max_length=300)
 
 
 class LoginIn(BaseModel):

@@ -10,7 +10,15 @@ from .auth import require_admin
 from .config import Settings, get_settings
 from .db import Room, get_session
 from .media import delete_room_image, save_room_image
-from .schemas import RoomIn, RoomOut, RoomPatch
+from .schemas import (
+    RoomIn,
+    RoomOut,
+    RoomPatch,
+    VideoConfirmIn,
+    VideoSignIn,
+    VideoSignOut,
+)
+from .video import build_upload, delete_video, save_video_through_api, verify_uploaded
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +144,7 @@ async def delete_room(
     room = await _get(session, slug)
     for url in room.images or []:
         delete_room_image(settings, url)
+    delete_video(settings, room.video)
     await session.delete(room)
     await session.commit()
 
@@ -181,6 +190,105 @@ async def set_images(
     room.images = images
     await session.commit()
     await session.refresh(room)
+    return room
+
+
+# ────────────────────────── Видеообзор ──────────────────────────
+
+
+@admin.post("/{slug}/video/sign", response_model=VideoSignOut)
+async def sign_video_upload(
+    slug: str,
+    payload: VideoSignIn,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Временная ссылка, по которой браузер зальёт ролик прямо в хранилище.
+
+    Через нас видео не проходит: на Vercel запрос к функции ограничен
+    4.5 МБ. 501 — хранилище так не умеет (локальный диск), админка
+    в этом случае грузит файл обычным способом.
+    """
+    await _get(session, slug)  # заодно проверяем, что номер существует
+
+    upload = build_upload(settings, slug, payload.contentType, payload.sizeBytes)
+    if upload is None:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "Хранилище не выдаёт ссылки на прямую загрузку",
+        )
+
+    key, url = upload
+    return VideoSignOut(
+        uploadUrl=url,
+        key=key,
+        contentType=payload.contentType,
+        maxBytes=settings.max_video_mb * 1024 * 1024,
+    )
+
+
+@admin.post("/{slug}/video/confirm", response_model=RoomOut)
+async def confirm_video_upload(
+    slug: str,
+    payload: VideoConfirmIn,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Браузер закончил загрузку — проверяем файл и прикрепляем к номеру."""
+    room = await _get(session, slug)
+    url = verify_uploaded(settings, slug, payload.key)
+
+    previous = room.video
+    room.video = url
+    await session.commit()
+    await session.refresh(room)
+
+    # Старый ролик удаляем после сохранения: если запись не удастся,
+    # номер останется хотя бы со старым видео, а не без всякого.
+    if previous and previous != url:
+        delete_video(settings, previous)
+    return room
+
+
+@admin.post("/{slug}/video", response_model=RoomOut)
+async def upload_video(
+    slug: str,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Запасной путь для площадок без временных ссылок — обычная загрузка
+    через API. На Vercel сюда попадёт только совсем короткий ролик.
+    """
+    room = await _get(session, slug)
+    url = await save_video_through_api(settings, slug, file)
+
+    previous = room.video
+    room.video = url
+    await session.commit()
+    await session.refresh(room)
+
+    if previous and previous != url:
+        delete_video(settings, previous)
+    return room
+
+
+@admin.delete("/{slug}/video", response_model=RoomOut)
+async def remove_video(
+    slug: str,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    room = await _get(session, slug)
+    previous = room.video
+
+    room.video = ""
+    await session.commit()
+    await session.refresh(room)
+
+    delete_video(settings, previous)
     return room
 
 

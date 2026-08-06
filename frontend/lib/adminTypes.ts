@@ -10,6 +10,8 @@ export type AdminRoom = {
   description: string;
   features: string[];
   images: string[];
+  /** Ссылка на видеообзор. Пусто — ролика нет. */
+  video: string;
   sortOrder: number;
   isPublished: boolean;
 };

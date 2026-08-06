@@ -5,7 +5,16 @@
  * Всё идёт на свой же домен через /api/admin/* — токен подставит прокси.
  */
 
-export class AdminError extends Error {}
+export class AdminError extends Error {
+  /** Код ответа. Нужен, чтобы отличать «так нельзя» от «сломалось»:
+   *  например 501 у видео значит «хранилище не выдаёт временные ссылки». */
+  constructor(
+    message: string,
+    readonly status = 0,
+  ) {
+    super(message);
+  }
+}
 
 async function unwrap(res: Response) {
   if (res.status === 401) {
@@ -28,7 +37,10 @@ async function unwrap(res: Response) {
       (data as { detail?: string; error?: string })?.detail ??
       (data as { error?: string })?.error ??
       `Ошибка ${res.status}`;
-    throw new AdminError(typeof detail === "string" ? detail : "Не удалось сохранить");
+    throw new AdminError(
+      typeof detail === "string" ? detail : "Не удалось сохранить",
+      res.status,
+    );
   }
   return data;
 }

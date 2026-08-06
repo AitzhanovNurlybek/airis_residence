@@ -8,6 +8,7 @@ import { getBookingHref, bookingLinkTarget, isBookingLive } from "@/lib/booking"
 import { breadcrumbJsonLd, pageMetadata, roomJsonLd } from "@/lib/seo";
 import { JsonLd } from "@/components/JsonLd";
 import { RoomGallery } from "@/components/ui/RoomGallery";
+import { RoomVideo } from "@/components/ui/RoomVideo";
 import { BookingBar } from "@/components/ui/BookingBar";
 import { buttonClass } from "@/components/ui/Button";
 import { IconArrow, IconPhone, IconWhatsApp } from "@/components/ui/Icons";
@@ -71,6 +72,10 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
         <div className="mt-10 grid gap-12 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
           <div>
             <RoomGallery images={room.images} name={room.shortName} />
+
+            {room.video && (
+              <RoomVideo src={room.video} poster={room.images[0]} name={room.shortName} />
+            )}
           </div>
 
           <div>

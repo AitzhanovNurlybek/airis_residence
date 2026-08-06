@@ -1,8 +1,9 @@
 """Подключение к базе и модели."""
 
+import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, func, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -80,6 +81,9 @@ class Room(Base):
 
     features: Mapped[list] = mapped_column(JSON, default=list)
     images: Mapped[list] = mapped_column(JSON, default=list)
+    # Ссылка на видеообзор номера. Файл лежит в том же хранилище, что и фото,
+    # но грузится напрямую из браузера — см. rooms_api, выдача временной ссылки.
+    video: Mapped[str] = mapped_column(String(500), default="")
 
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -144,10 +148,43 @@ class Payment(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+logger = logging.getLogger(__name__)
+
+# Колонки, добавленные после первого запуска. Ключ — таблица.
+_LATE_COLUMNS: dict[str, dict[str, str]] = {
+    "rooms": {"video": "VARCHAR(500) DEFAULT ''"},
+}
+
+
+def _add_late_columns(conn) -> None:
+    """
+    Догоняет схему на базе, которая уже существует.
+
+    create_all создаёт только недостающие таблицы и не трогает колонки
+    существующих. Значит новое поле на работающем сайте пришлось бы
+    добавлять руками. Полноценный alembic ради одной-двух колонок —
+    перебор, поэтому добавляем их здесь: проверка дешёвая, а пропущенная
+    миграция на проде стоит дорого.
+    """
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+
+    for table, columns in _LATE_COLUMNS.items():
+        if table not in tables:
+            continue  # create_all только что создал её сразу с колонками
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        for name, ddl in columns.items():
+            if name in existing:
+                continue
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+            logger.info("База: добавлена колонка %s.%s", table, name)
+
+
 async def init_db() -> None:
     """Создаёт таблицы. Для боевого проекта заменить на alembic-миграции."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_late_columns)
 
 
 async def get_session():

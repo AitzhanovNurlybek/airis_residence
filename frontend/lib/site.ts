@@ -76,6 +76,8 @@ export type Room = {
   description: string;
   features: string[];
   images: string[];
+  /** Видеообзор номера. Загружается через админку, в запасном списке пуст. */
+  video?: string;
 };
 
 /**

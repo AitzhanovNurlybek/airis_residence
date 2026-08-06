@@ -36,6 +36,24 @@ class Storage(ABC):
     def delete(self, url: str) -> None:
         """Удаляет файл по ранее выданной ссылке. Чужие ссылки игнорирует."""
 
+    @abstractmethod
+    def public_url(self, key: str) -> str:
+        """Публичная ссылка на файл по его ключу."""
+
+    def signed_upload(self, key: str, content_type: str, expires: int = 900) -> str | None:
+        """
+        Временная ссылка, по которой браузер зальёт файл сам, минуя нас.
+
+        Нужна для видео: у Vercel запрос к функции ограничен 4.5 МБ,
+        и обычная загрузка через API на ролик не рассчитана.
+        None — хранилище так не умеет (диск), грузим обычным способом.
+        """
+        return None
+
+    def stat(self, key: str) -> tuple[int, str] | None:
+        """Размер в байтах и content-type файла. None — файла нет."""
+        return None
+
 
 class LocalStorage(Storage):
     """Файлы на диске, отдаются FastAPI через StaticFiles на /media."""
@@ -49,9 +67,20 @@ class LocalStorage(Storage):
         target = self.settings.upload_path / key
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        return self.public_url(key)
 
+    def public_url(self, key: str) -> str:
         base = self.settings.public_media_base.rstrip("/")
         return f"{base}/media/{key}" if base else f"/media/{key}"
+
+    def stat(self, key: str) -> tuple[int, str] | None:
+        target = self.settings.upload_path / key
+        if not target.is_file():
+            return None
+        import mimetypes
+
+        guessed, _ = mimetypes.guess_type(target.name)
+        return target.stat().st_size, guessed or "application/octet-stream"
 
     def delete(self, url: str) -> None:
         if self.marker not in url:
@@ -87,18 +116,47 @@ class S3Storage(Storage):
                 "Для S3-хранилища нужен boto3: pip install -r requirements.txt"
             ) from exc
 
+        from botocore.config import Config
+
         self.client = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint or None,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region,
+            # Явно v4: без него часть хранилищ выдаёт ссылки старого формата,
+            # и Supabase их не принимает.
+            config=Config(signature_version="s3v4"),
         )
         self.bucket = settings.s3_bucket
 
-    def _public_url(self, key: str) -> str:
+    def public_url(self, key: str) -> str:
         base = settings_public_base(self.settings)
         return f"{base}/{key}"
+
+    # Прежнее имя — им пользуется save(); оставлено, чтобы не плодить правки.
+    _public_url = public_url
+
+    def signed_upload(self, key: str, content_type: str, expires: int = 900) -> str | None:
+        try:
+            return self.client.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+                ExpiresIn=expires,
+            )
+        except Exception:
+            logger.exception("Не удалось выдать ссылку на загрузку %s", key)
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                "Хранилище не выдало ссылку на загрузку. Проверьте настройки S3_*.",
+            )
+
+    def stat(self, key: str) -> tuple[int, str] | None:
+        try:
+            head = self.client.head_object(Bucket=self.bucket, Key=key)
+        except Exception:
+            return None
+        return int(head.get("ContentLength", 0)), head.get("ContentType", "")
 
     def save(self, key: str, data: bytes, content_type: str) -> str:
         try:

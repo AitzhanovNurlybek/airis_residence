@@ -9,6 +9,7 @@ import type { AdminRoom } from "@/lib/adminTypes";
 import { formatPrice } from "@/lib/site";
 import { AdminButton, Field, SaveBar, inputClass, useToast } from "@/components/admin/ui";
 import { PhotoManager } from "@/components/admin/PhotoManager";
+import { VideoManager } from "@/components/admin/VideoManager";
 import { FeatureList } from "@/components/admin/FeatureList";
 
 export function RoomEditor({ room: initial }: { room: AdminRoom }) {
@@ -18,10 +19,10 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
   const toast = useToast();
   const router = useRouter();
 
-  // Фотографии сохраняются отдельно и мгновенно, поэтому в сравнение
-  // «есть ли несохранённые правки» они не входят.
+  // Фотографии и видео сохраняются отдельно и мгновенно, поэтому в
+  // сравнение «есть ли несохранённые правки» они не входят.
   const dirty = useMemo(() => {
-    const strip = ({ images, ...rest }: AdminRoom) => rest;
+    const strip = ({ images, video, ...rest }: AdminRoom) => rest;
     return JSON.stringify(strip(room)) !== JSON.stringify(strip(saved));
   }, [room, saved]);
 
@@ -206,6 +207,18 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
           onChange={(images) => {
             setRoom((prev) => ({ ...prev, images }));
             setSaved((prev) => ({ ...prev, images }));
+            router.refresh();
+          }}
+        />
+
+        {/* ---------- Видеообзор ---------- */}
+        <VideoManager
+          slug={room.slug}
+          video={room.video}
+          poster={room.images[0]}
+          onChange={(video) => {
+            setRoom((prev) => ({ ...prev, video }));
+            setSaved((prev) => ({ ...prev, video }));
             router.refresh();
           }}
         />
