@@ -62,11 +62,18 @@ async function proxy(request: Request, params: Promise<{ path: string[] }>) {
     return NextResponse.json({ error: "Сервер недоступен" }, { status: 502 });
   }
 
-  // Подстраховка. Из админки кэш гасится точно — серверным действием
-  // refreshRoomsCache (см. lib/roomsCacheActions.ts). Здесь на случай,
-  // когда API дёрнули в обход браузера: пометим запись устаревшей,
-  // тогда протухшей она проживёт максимум один запрос.
-  if (MUTATING.has(method) && res.ok) revalidateTag(ROOMS_TAG, "max");
+  // Подстраховка на случай, когда API дёрнули в обход браузера: из
+  // админки кэш гасит серверное действие refreshRoomsCache.
+  //
+  // Вызов с одним аргументом помечен в Next 16 как устаревший, но
+  // именно он гасит запись немедленно. Форма с "max" вместо этого
+  // отдаёт протухшее и обновляет в фоне — то есть ровно тот случай,
+  // из-за которого кэш здесь когда-то и выключили. Когда одноаргументную
+  // форму уберут, переносить сюда нечего: правки из админки закрыты
+  // серверным действием, это только запасной путь.
+  if (MUTATING.has(method) && res.ok) {
+    (revalidateTag as unknown as (tag: string) => void)(ROOMS_TAG);
+  }
 
   if (res.status === 204) return new NextResponse(null, { status: 204 });
 
