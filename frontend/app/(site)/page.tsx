@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { formatPrice, priceFrom, site } from "@/lib/site";
+import { formatPrice, site } from "@/lib/site";
 
 import { Hero } from "@/components/sections/Hero";
 import { About } from "@/components/sections/About";
@@ -15,14 +15,17 @@ import { CtaBook } from "@/components/sections/CtaBook";
 import { JsonLd } from "@/components/JsonLd";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 import { faqItems } from "@/lib/faq";
-import { getRooms } from "@/lib/rooms";
+import { getPriceFrom, getRooms } from "@/lib/rooms";
 
-export const metadata: Metadata = pageMetadata({
-  title: "Airis Residence — отель в центре Алматы | Официальный сайт",
-  description:
-    `Отель Airis Residence в центре Алматы: ${site.roomsCount} номеров, завтрак включён, стойка регистрации 24/7. ${site.address.street}. Номера от ${formatPrice(priceFrom)} за ночь — бронирование напрямую, без комиссии агрегаторов.`,
-  path: "/",
-});
+// Цену берём из базы, а не из запасного списка в коде: её меняют
+// в админке, и описание в выдаче Google обязано совпадать с сайтом.
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata({
+    title: "Airis Residence — отель в центре Алматы | Официальный сайт",
+    description: `Отель Airis Residence в центре Алматы: ${site.roomsCount} номеров, завтрак включён, стойка регистрации 24/7. ${site.address.street}. Номера от ${formatPrice(await getPriceFrom())} за ночь — бронирование напрямую, без комиссии агрегаторов.`,
+    path: "/",
+  });
+}
 
 export default async function HomePage() {
   const rooms = await getRooms();

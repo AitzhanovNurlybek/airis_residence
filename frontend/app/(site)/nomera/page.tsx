@@ -4,15 +4,17 @@ import { Rooms } from "@/components/sections/Rooms";
 import { CtaBook } from "@/components/sections/CtaBook";
 import { JsonLd } from "@/components/JsonLd";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
-import { priceFrom, formatPrice } from "@/lib/site";
-import { getRooms } from "@/lib/rooms";
+import { formatPrice } from "@/lib/site";
+import { getPriceFrom, getRooms } from "@/lib/rooms";
 
-export const metadata: Metadata = pageMetadata({
-  title: `Номера отеля Airis Residence в Алматы — от ${formatPrice(priceFrom)}`,
-  description:
-    "Пять типов номеров в отеле Airis Residence: Standart Single, Standart, Standart Twin, Comfort и Luxe. Площадь от 16 до 30 м², завтрак включён, цены от 25 000 ₸ за ночь.",
-  path: "/nomera",
-});
+export async function generateMetadata(): Promise<Metadata> {
+  const from = formatPrice(await getPriceFrom());
+  return pageMetadata({
+    title: `Номера отеля Airis Residence в Алматы — от ${from}`,
+    description: `Пять типов номеров в отеле Airis Residence: Standart Single, Standart, Standart Twin, Comfort и Comfort Plus. Площадь от 16 до 30 м², завтрак включён, цены от ${from} за ночь.`,
+    path: "/nomera",
+  });
+}
 
 export default async function RoomsPage() {
   const rooms = await getRooms();

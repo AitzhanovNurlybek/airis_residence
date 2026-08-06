@@ -3,7 +3,7 @@ import { Manrope, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
 import { BASE_URL } from "@/lib/seo";
-import { formatPrice, priceFrom, site } from "@/lib/site";
+import { site } from "@/lib/site";
 
 /**
  * Корневой лейаут — только оболочка документа и шрифты.
@@ -32,9 +32,10 @@ export const metadata: Metadata = {
     default: "Airis Residence — отель в центре Алматы | Официальный сайт",
     template: "%s | Airis Residence",
   },
-  // Число номеров и цену берём из site.ts: продублированные в тексте,
-  // они разъезжаются с остальным сайтом при первой же правке.
-  description: `Airis Residence — отель на ${site.roomsCount} номеров в центре Алматы, ${site.address.street}. Завтрак включён, круглосуточная стойка регистрации, номера от ${formatPrice(priceFrom)}. Бронирование на официальном сайте.`,
+  // Без цены: этот текст статичен, а цены правят в админке — цифра
+  // здесь неизбежно разойдётся с сайтом. Цену показывают страницы,
+  // которые считают её из базы (см. generateMetadata на главной).
+  description: `Airis Residence — отель на ${site.roomsCount} номеров в центре Алматы, ${site.address.street}. Завтрак включён, круглосуточная стойка регистрации. Бронирование на официальном сайте.`,
   keywords: [
     "отель Алматы",
     "гостиница Алматы центр",
@@ -56,7 +57,7 @@ export const metadata: Metadata = {
     siteName: site.name,
     title: "Airis Residence — отель в центре Алматы",
     description:
-      `${site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка 24/7, номера от ${formatPrice(priceFrom)} за ночь.`,
+      `${site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка регистрации 24/7.`,
     images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "Airis Residence, Алматы" }],
   },
   twitter: {
