@@ -22,7 +22,7 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
   // Фотографии и видео сохраняются отдельно и мгновенно, поэтому в
   // сравнение «есть ли несохранённые правки» они не входят.
   const dirty = useMemo(() => {
-    const strip = ({ images, video, ...rest }: AdminRoom) => rest;
+    const strip = ({ images, video, videoPoster, ...rest }: AdminRoom) => rest;
     return JSON.stringify(strip(room)) !== JSON.stringify(strip(saved));
   }, [room, saved]);
 
@@ -215,10 +215,11 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
         <VideoManager
           slug={room.slug}
           video={room.video}
-          poster={room.images[0]}
-          onChange={(video) => {
-            setRoom((prev) => ({ ...prev, video }));
-            setSaved((prev) => ({ ...prev, video }));
+          poster={room.videoPoster}
+          onChange={(updated) => {
+            const patch = { video: updated.video, videoPoster: updated.videoPoster };
+            setRoom((prev) => ({ ...prev, ...patch }));
+            setSaved((prev) => ({ ...prev, ...patch }));
             router.refresh();
           }}
         />

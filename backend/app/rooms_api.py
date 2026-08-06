@@ -18,7 +18,13 @@ from .schemas import (
     VideoSignIn,
     VideoSignOut,
 )
-from .video import build_upload, delete_video, save_video_through_api, verify_uploaded
+from .video import (
+    build_upload,
+    delete_video,
+    save_video_through_api,
+    verify_poster,
+    verify_uploaded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +151,7 @@ async def delete_room(
     for url in room.images or []:
         delete_room_image(settings, url)
     delete_video(settings, room.video)
+    delete_video(settings, room.video_poster)
     await session.delete(room)
     await session.commit()
 
@@ -219,12 +226,14 @@ async def sign_video_upload(
             "Хранилище не выдаёт ссылки на прямую загрузку",
         )
 
-    key, url = upload
+    key, url, poster_key, poster_url = upload
     return VideoSignOut(
         uploadUrl=url,
         key=key,
         contentType=payload.contentType,
         maxBytes=settings.max_video_mb * 1024 * 1024,
+        posterUploadUrl=poster_url,
+        posterKey=poster_key,
     )
 
 
@@ -238,16 +247,20 @@ async def confirm_video_upload(
     """Браузер закончил загрузку — проверяем файл и прикрепляем к номеру."""
     room = await _get(session, slug)
     url = verify_uploaded(settings, slug, payload.key)
+    poster = verify_poster(settings, slug, payload.posterKey)
 
-    previous = room.video
+    previous, previous_poster = room.video, room.video_poster
     room.video = url
+    room.video_poster = poster
     await session.commit()
     await session.refresh(room)
 
-    # Старый ролик удаляем после сохранения: если запись не удастся,
+    # Старое удаляем после сохранения: если запись не удастся,
     # номер останется хотя бы со старым видео, а не без всякого.
     if previous and previous != url:
         delete_video(settings, previous)
+    if previous_poster and previous_poster != poster:
+        delete_video(settings, previous_poster)
     return room
 
 
@@ -265,13 +278,17 @@ async def upload_video(
     room = await _get(session, slug)
     url = await save_video_through_api(settings, slug, file)
 
-    previous = room.video
+    previous, previous_poster = room.video, room.video_poster
     room.video = url
+    # Заставку режет браузер, а этим путём файл пришёл без неё.
+    # Оставить старую нельзя — она от прежнего ролика.
+    room.video_poster = ""
     await session.commit()
     await session.refresh(room)
 
     if previous and previous != url:
         delete_video(settings, previous)
+    delete_video(settings, previous_poster)
     return room
 
 
@@ -282,13 +299,15 @@ async def remove_video(
     settings: Settings = Depends(get_settings),
 ):
     room = await _get(session, slug)
-    previous = room.video
+    previous, previous_poster = room.video, room.video_poster
 
     room.video = ""
+    room.video_poster = ""
     await session.commit()
     await session.refresh(room)
 
     delete_video(settings, previous)
+    delete_video(settings, previous_poster)
     return room
 
 

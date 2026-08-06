@@ -24,7 +24,57 @@ type SignResponse = {
   key: string;
   contentType: string;
   maxBytes: number;
+  posterUploadUrl: string;
+  posterKey: string;
+  posterContentType: string;
 };
+
+/**
+ * Вырезает кадр из выбранного файла прямо в браузере.
+ *
+ * Нужен, чтобы до нажатия play показывать настоящий кадр, а не грузить
+ * ролик ради превью и не подставлять фотографию номера: снимают
+ * вертикально, а фото горизонтальные.
+ *
+ * Не получилось — не беда, вернём null и обойдёмся без заставки.
+ */
+function grabPoster(file: File): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let done = false;
+
+    const finish = (blob: Blob | null) => {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(url);
+      resolve(blob);
+    };
+
+    // Кадр берём на второй секунде: первый кадр часто смазан движением руки.
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(2, (video.duration || 0) / 3);
+    };
+    video.onseeked = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d")?.drawImage(video, 0, 0);
+        canvas.toBlob((blob) => finish(blob), "image/jpeg", 0.75);
+      } catch {
+        finish(null);
+      }
+    };
+    video.onerror = () => finish(null);
+    // Кодек, который браузер не играет (HEVC с айфона), кадр не отдаст.
+    setTimeout(() => finish(null), 10_000);
+
+    video.preload = "metadata";
+    video.muted = true;
+    video.src = url;
+  });
+}
 
 function formatSize(bytes: number): string {
   return bytes >= 1024 * 1024
@@ -66,8 +116,8 @@ export function VideoManager({
 }: {
   slug: string;
   video: string;
-  poster?: string;
-  onChange: (video: string) => void;
+  poster: string;
+  onChange: (room: AdminRoom) => void;
 }) {
   const [percent, setPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -94,8 +144,27 @@ export function VideoManager({
 
         await putWithProgress(signed.uploadUrl, file, signed.contentType, setPercent);
         setPercent(100);
+
+        // Заставка необязательна: не вышло — плеер просто будет без картинки.
+        let posterKey: string | null = null;
+        const posterBlob = await grabPoster(file);
+        if (posterBlob && signed.posterUploadUrl) {
+          try {
+            await putWithProgress(
+              signed.posterUploadUrl,
+              new File([posterBlob], "poster.jpg", { type: "image/jpeg" }),
+              signed.posterContentType,
+              () => {},
+            );
+            posterKey = signed.posterKey;
+          } catch {
+            posterKey = null;
+          }
+        }
+
         room = await adminSend<AdminRoom>(`/rooms/${slug}/video/confirm`, "POST", {
           key: signed.key,
+          posterKey,
         });
       } catch (e) {
         // 501 — хранилище без временных ссылок. Грузим через API.
@@ -114,7 +183,7 @@ export function VideoManager({
         room = (await res.json()) as AdminRoom;
       }
 
-      onChange(room.video);
+      onChange(room);
       toast.show("Видео загружено");
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Не удалось загрузить видео", "error");
@@ -128,7 +197,7 @@ export function VideoManager({
     setBusy(true);
     try {
       const room = await adminSend<AdminRoom>(`/rooms/${slug}/video`, "DELETE");
-      onChange(room.video);
+      onChange(room);
       toast.show("Видео удалено");
     } catch (e) {
       toast.show(e instanceof AdminError ? e.message : "Не удалось удалить", "error");
@@ -146,13 +215,15 @@ export function VideoManager({
 
       {video ? (
         <div className="mt-4">
+          {/* Ролики снимают и вертикально, и горизонтально — ограничиваем
+              по высоте, чтобы вертикальный не растянул полстраницы. */}
           <video
             src={video}
-            poster={poster}
+            poster={poster || undefined}
             controls
             preload="metadata"
             playsInline
-            className="w-full max-w-md rounded-xl border border-white/10 bg-ink-950"
+            className="max-h-[60vh] w-auto max-w-full rounded-xl border border-white/10 bg-ink-950"
           />
           <div className="mt-3 flex flex-wrap gap-2">
             <AdminButton

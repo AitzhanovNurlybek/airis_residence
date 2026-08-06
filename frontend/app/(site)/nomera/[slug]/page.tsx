@@ -74,7 +74,11 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
             <RoomGallery images={room.images} name={room.shortName} />
 
             {room.video && (
-              <RoomVideo src={room.video} poster={room.images[0]} name={room.shortName} />
+              <RoomVideo
+                src={room.video}
+                poster={room.videoPoster || undefined}
+                name={room.shortName}
+              />
             )}
           </div>
 

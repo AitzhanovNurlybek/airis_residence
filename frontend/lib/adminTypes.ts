@@ -12,6 +12,8 @@ export type AdminRoom = {
   images: string[];
   /** Ссылка на видеообзор. Пусто — ролика нет. */
   video: string;
+  /** Кадр-заставка из этого же ролика. Пусто — плеер без картинки. */
+  videoPoster: string;
   sortOrder: number;
   isPublished: boolean;
 };

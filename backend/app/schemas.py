@@ -20,6 +20,7 @@ class RoomOut(BaseModel):
     features: list[str]
     images: list[str]
     video: str = ""
+    videoPoster: str = Field(default="", validation_alias="video_poster")
     sortOrder: int = Field(validation_alias="sort_order")
     isPublished: bool = Field(validation_alias="is_published")
 
@@ -73,11 +74,19 @@ class VideoSignOut(BaseModel):
     contentType: str
     maxBytes: int
 
+    # Кадр-заставка. Браузер вырезает его из выбранного файла сам и грузит
+    # туда же — иначе на месте плеера пришлось бы показывать фотографию
+    # номера, а она горизонтальная и с вертикальным роликом не совпадает.
+    posterUploadUrl: str
+    posterKey: str
+    posterContentType: str = "image/jpeg"
+
 
 class VideoConfirmIn(BaseModel):
     """Подтверждение после успешной загрузки: файл проверяем сами."""
 
     key: str = Field(min_length=1, max_length=300)
+    posterKey: str | None = Field(default=None, max_length=300)
 
 
 class LoginIn(BaseModel):

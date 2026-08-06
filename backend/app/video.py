@@ -62,6 +62,12 @@ def _check_size(settings: Settings, size: int) -> None:
         )
 
 
+POSTER_TYPE = "image/jpeg"
+# Кадр-заставка режется браузером и весит десятки килобайт.
+# Мегабайт — заведомо больше любого разумного кадра.
+POSTER_MAX_BYTES = 1024 * 1024
+
+
 def new_key(slug: str, content_type: str) -> str:
     """Имя файла в хранилище. Случайный хвост — чтобы старый ролик
     не подменялся новым по тому же адресу и не залипал в кэше."""
@@ -69,15 +75,28 @@ def new_key(slug: str, content_type: str) -> str:
     return f"rooms/{_safe_slug(slug)}/video-{uuid.uuid4().hex[:16]}.{ext}"
 
 
+def new_poster_key(slug: str) -> str:
+    return f"rooms/{_safe_slug(slug)}/video-poster-{uuid.uuid4().hex[:16]}.jpg"
+
+
 def build_upload(
     settings: Settings, slug: str, content_type: str, size: int
-) -> tuple[str, str] | None:
-    """Ключ и временная ссылка на загрузку. None — хранилище так не умеет."""
+) -> tuple[str, str, str, str] | None:
+    """
+    Ключи и временные ссылки для ролика и его заставки.
+    None — хранилище временных ссылок не выдаёт.
+    """
     _check_size(settings, size)
-    key = new_key(slug, content_type)
+    storage = get_storage(settings)
 
-    url = get_storage(settings).signed_upload(key, content_type)
-    return (key, url) if url else None
+    key = new_key(slug, content_type)
+    url = storage.signed_upload(key, content_type)
+    if not url:
+        return None
+
+    poster_key = new_poster_key(slug)
+    poster_url = storage.signed_upload(poster_key, POSTER_TYPE)
+    return key, url, poster_key, poster_url or ""
 
 
 def verify_uploaded(settings: Settings, slug: str, key: str) -> str:
@@ -107,6 +126,31 @@ def verify_uploaded(settings: Settings, slug: str, key: str) -> str:
     except HTTPException:
         storage.delete(storage.public_url(key))
         raise
+
+    return storage.public_url(key)
+
+
+def verify_poster(settings: Settings, slug: str, key: str | None) -> str:
+    """
+    Проверяет заставку. В отличие от ролика — необязательна: не вышло
+    вырезать кадр, значит покажем плеер без картинки, но видео работает.
+    """
+    if not key:
+        return ""
+
+    storage = get_storage(settings)
+    if not key.startswith(f"rooms/{_safe_slug(slug)}/video-poster-"):
+        logger.warning("Заставка с чужим ключом: %s", key)
+        return ""
+
+    found = storage.stat(key)
+    if not found:
+        return ""
+
+    size, content_type = found
+    if content_type != POSTER_TYPE or size > POSTER_MAX_BYTES:
+        storage.delete(storage.public_url(key))
+        return ""
 
     return storage.public_url(key)
 

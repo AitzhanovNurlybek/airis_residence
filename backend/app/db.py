@@ -84,6 +84,9 @@ class Room(Base):
     # Ссылка на видеообзор номера. Файл лежит в том же хранилище, что и фото,
     # но грузится напрямую из браузера — см. rooms_api, выдача временной ссылки.
     video: Mapped[str] = mapped_column(String(500), default="")
+    # Кадр из этого же ролика. Обложка из фотографий не годится: снимают
+    # вертикально, а фото горизонтальные — при клике картинка прыгала бы.
+    video_poster: Mapped[str] = mapped_column(String(500), default="")
 
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -152,7 +155,10 @@ logger = logging.getLogger(__name__)
 
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
-    "rooms": {"video": "VARCHAR(500) DEFAULT ''"},
+    "rooms": {
+        "video": "VARCHAR(500) DEFAULT ''",
+        "video_poster": "VARCHAR(500) DEFAULT ''",
+    },
 }
 
 
