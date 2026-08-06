@@ -212,8 +212,8 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
         />
 
         {/* ---------- Видеообзор ---------- */}
-        <VideoManager
-          slug={room.slug}
+        <VideoManager<AdminRoom>
+          endpoint={`/rooms/${room.slug}`}
           video={room.video}
           poster={room.videoPoster}
           onChange={(updated) => {

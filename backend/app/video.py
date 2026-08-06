@@ -37,8 +37,18 @@ ALLOWED_TYPES = {
 def _safe_slug(slug: str) -> str:
     clean = "".join(ch for ch in slug if ch.isalnum() or ch in "-_")[:60]
     if not clean:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некорректный код номера")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некорректный код")
     return clean
+
+
+def folder_for(kind: str, slug: str) -> str:
+    """
+    Папка в хранилище. Ролики бывают не только у номеров: обзор кухни
+    или общих зон к номеру не привязан и живёт в site/.
+    """
+    if kind not in {"rooms", "site"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный раздел")
+    return f"{kind}/{_safe_slug(slug)}"
 
 
 def _check_type(content_type: str) -> str:
@@ -68,19 +78,19 @@ POSTER_TYPE = "image/jpeg"
 POSTER_MAX_BYTES = 1024 * 1024
 
 
-def new_key(slug: str, content_type: str) -> str:
+def new_key(folder: str, content_type: str) -> str:
     """Имя файла в хранилище. Случайный хвост — чтобы старый ролик
     не подменялся новым по тому же адресу и не залипал в кэше."""
     ext = _check_type(content_type)
-    return f"rooms/{_safe_slug(slug)}/video-{uuid.uuid4().hex[:16]}.{ext}"
+    return f"{folder}/video-{uuid.uuid4().hex[:16]}.{ext}"
 
 
-def new_poster_key(slug: str) -> str:
-    return f"rooms/{_safe_slug(slug)}/video-poster-{uuid.uuid4().hex[:16]}.jpg"
+def new_poster_key(folder: str) -> str:
+    return f"{folder}/video-poster-{uuid.uuid4().hex[:16]}.jpg"
 
 
 def build_upload(
-    settings: Settings, slug: str, content_type: str, size: int
+    settings: Settings, folder: str, content_type: str, size: int
 ) -> tuple[str, str, str, str] | None:
     """
     Ключи и временные ссылки для ролика и его заставки.
@@ -89,17 +99,17 @@ def build_upload(
     _check_size(settings, size)
     storage = get_storage(settings)
 
-    key = new_key(slug, content_type)
+    key = new_key(folder, content_type)
     url = storage.signed_upload(key, content_type)
     if not url:
         return None
 
-    poster_key = new_poster_key(slug)
+    poster_key = new_poster_key(folder)
     poster_url = storage.signed_upload(poster_key, POSTER_TYPE)
     return key, url, poster_key, poster_url or ""
 
 
-def verify_uploaded(settings: Settings, slug: str, key: str) -> str:
+def verify_uploaded(settings: Settings, folder: str, key: str) -> str:
     """
     Проверяет реально загруженный файл и возвращает публичную ссылку.
 
@@ -109,7 +119,7 @@ def verify_uploaded(settings: Settings, slug: str, key: str) -> str:
     """
     storage = get_storage(settings)
 
-    if not key.startswith(f"rooms/{_safe_slug(slug)}/video-"):
+    if not key.startswith(f"{folder}/video-"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ссылка не от этого номера")
 
     found = storage.stat(key)
@@ -130,7 +140,7 @@ def verify_uploaded(settings: Settings, slug: str, key: str) -> str:
     return storage.public_url(key)
 
 
-def verify_poster(settings: Settings, slug: str, key: str | None) -> str:
+def verify_poster(settings: Settings, folder: str, key: str | None) -> str:
     """
     Проверяет заставку. В отличие от ролика — необязательна: не вышло
     вырезать кадр, значит покажем плеер без картинки, но видео работает.
@@ -139,7 +149,7 @@ def verify_poster(settings: Settings, slug: str, key: str | None) -> str:
         return ""
 
     storage = get_storage(settings)
-    if not key.startswith(f"rooms/{_safe_slug(slug)}/video-poster-"):
+    if not key.startswith(f"{folder}/video-poster-"):
         logger.warning("Заставка с чужим ключом: %s", key)
         return ""
 
@@ -155,7 +165,7 @@ def verify_poster(settings: Settings, slug: str, key: str | None) -> str:
     return storage.public_url(key)
 
 
-async def save_video_through_api(settings: Settings, slug: str, upload) -> str:
+async def save_video_through_api(settings: Settings, folder: str, upload) -> str:
     """
     Обычная загрузка — файл идёт через нас.
 
@@ -168,7 +178,7 @@ async def save_video_through_api(settings: Settings, slug: str, upload) -> str:
     raw = await upload.read()
     _check_size(settings, len(raw))
 
-    key = new_key(slug, content_type)
+    key = new_key(folder, content_type)
     return get_storage(settings).save(key, raw, content_type)
 
 

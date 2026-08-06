@@ -29,7 +29,7 @@ import { rooms as fallbackRooms, type Room } from "./site";
  */
 
 /** Общий тег кэша. Сбрасывается из app/api/admin/[...path]/route.ts. */
-export const ROOMS_TAG = "rooms";
+export const CONTENT_TAG = "rooms";
 
 export const BACKEND_URL = (process.env.BACKEND_URL || "").replace(/\/$/, "");
 
@@ -48,7 +48,7 @@ export const getRooms = cache(async (): Promise<Room[]> => {
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/rooms`, {
-      next: { revalidate: 3600, tags: [ROOMS_TAG] },
+      next: { revalidate: 3600, tags: [CONTENT_TAG] },
     });
     if (!res.ok) {
       console.error("Не удалось получить номера:", res.status);

@@ -111,6 +111,34 @@ class Room(Base):
     )
 
 
+class SiteVideo(Base):
+    """
+    Видеообзор, не привязанный к номеру: кухня, лобби, общие зоны.
+
+    Отдельная таблица, а не поле у номера, потому что таких роликов
+    со временем становится больше одного, и каждому нужен свой
+    заголовок и своё место в списке.
+    """
+
+    __tablename__ = "site_videos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+
+    title: Mapped[str] = mapped_column(String(160), default="")
+    summary: Mapped[str] = mapped_column(String(400), default="")
+
+    video: Mapped[str] = mapped_column(String(500), default="")
+    video_poster: Mapped[str] = mapped_column(String(500), default="")
+
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Lead(Base):
     """Заявка на бронирование, оставленная через форму на сайте."""
 

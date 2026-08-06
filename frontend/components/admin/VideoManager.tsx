@@ -3,11 +3,11 @@
 import { useRef, useState } from "react";
 
 import { adminSend, AdminError } from "@/lib/adminClient";
-import type { AdminRoom } from "@/lib/adminTypes";
 import { AdminButton, useToast } from "@/components/admin/ui";
 
 /**
- * Видеообзор номера.
+ * Загрузка видеообзора. Общий блок: используется и у номера,
+ * и у роликов на главной — отличаются только адресом в API.
  *
  * Ролик не идёт через наш сервер: у площадки запрос к функции ограничен
  * 4.5 МБ. Поэтому бэкенд выдаёт временную ссылку, браузер грузит файл
@@ -108,16 +108,19 @@ function putWithProgress(
   });
 }
 
-export function VideoManager({
-  slug,
+export function VideoManager<T extends { video: string; videoPoster: string }>({
+  endpoint,
   video,
   poster,
+  hint,
   onChange,
 }: {
-  slug: string;
+  /** Путь к сущности в админском API: /rooms/standart, /site-videos/kitchen */
+  endpoint: string;
   video: string;
   poster: string;
-  onChange: (room: AdminRoom) => void;
+  hint?: string;
+  onChange: (item: T) => void;
 }) {
   const [percent, setPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -134,9 +137,9 @@ export function VideoManager({
   const upload = async (file: File) => {
     setPercent(0);
     try {
-      let room: AdminRoom;
+      let item: T;
       try {
-        const signed = await adminSend<SignResponse>(`/rooms/${slug}/video/sign`, "POST", {
+        const signed = await adminSend<SignResponse>(`${endpoint}/video/sign`, "POST", {
           filename: file.name,
           contentType: file.type,
           sizeBytes: file.size,
@@ -175,7 +178,7 @@ export function VideoManager({
           }
         }
 
-        room = await adminSend<AdminRoom>(`/rooms/${slug}/video/confirm`, "POST", {
+        item = await adminSend<T>(`${endpoint}/video/confirm`, "POST", {
           key: signed.key,
           posterKey,
         });
@@ -185,7 +188,7 @@ export function VideoManager({
 
         const form = new FormData();
         form.append("file", file);
-        const res = await fetch(`/api/admin/rooms/${slug}/video`, {
+        const res = await fetch(`/api/admin${endpoint}/video`, {
           method: "POST",
           body: form,
         });
@@ -193,10 +196,10 @@ export function VideoManager({
           const data = await res.json().catch(() => null);
           throw new AdminError(data?.detail ?? "Не удалось загрузить", res.status);
         }
-        room = (await res.json()) as AdminRoom;
+        item = (await res.json()) as T;
       }
 
-      onChange(room);
+      onChange(item);
       toast.show("Видео загружено");
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Не удалось загрузить видео", "error");
@@ -206,11 +209,11 @@ export function VideoManager({
   };
 
   const remove = async () => {
-    if (!confirm("Удалить видеообзор этого номера?")) return;
+    if (!confirm("Удалить этот видеообзор?")) return;
     setBusy(true);
     try {
-      const room = await adminSend<AdminRoom>(`/rooms/${slug}/video`, "DELETE");
-      onChange(room);
+      const item = await adminSend<T>(`${endpoint}/video`, "DELETE");
+      onChange(item);
       toast.show("Видео удалено");
     } catch (e) {
       toast.show(e instanceof AdminError ? e.message : "Не удалось удалить", "error");
@@ -223,7 +226,7 @@ export function VideoManager({
     <section className="rounded-card border border-white/10 bg-ink-900 p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-xl text-cream">Видеообзор</h2>
-        <p className="text-xs text-muted">MP4 до 40 МБ · лучше 15–30 секунд</p>
+        <p className="text-xs text-muted">{hint ?? "MP4 до 40 МБ · лучше 15–30 секунд"}</p>
       </div>
 
       {video ? (

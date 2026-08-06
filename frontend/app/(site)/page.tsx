@@ -6,6 +6,7 @@ import { Rooms } from "@/components/sections/Rooms";
 import { Amenities } from "@/components/sections/Amenities";
 import { Gallery } from "@/components/sections/Gallery";
 import { Tour3D } from "@/components/sections/Tour3D";
+import { VideoShowcase } from "@/components/sections/VideoShowcase";
 import { Location } from "@/components/sections/Location";
 import { Faq } from "@/components/sections/Faq";
 import { CtaBook } from "@/components/sections/CtaBook";
@@ -33,6 +34,7 @@ export default async function HomePage() {
       <Rooms rooms={rooms} />
       <Amenities />
       <Gallery />
+      <VideoShowcase />
       <Tour3D />
       <Location />
       <Faq />

@@ -2,7 +2,7 @@
 
 import { updateTag } from "next/cache";
 
-import { ROOMS_TAG } from "@/lib/rooms";
+import { CONTENT_TAG } from "@/lib/rooms";
 
 /**
  * Сброс кэша номеров после правки в админке.
@@ -16,5 +16,5 @@ import { ROOMS_TAG } from "@/lib/rooms";
  * в серверных действиях.
  */
 export async function refreshRoomsCache(): Promise<void> {
-  updateTag(ROOMS_TAG);
+  updateTag(CONTENT_TAG);
 }

@@ -2,7 +2,7 @@ import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { ADMIN_COOKIE, BACKEND } from "@/lib/adminServer";
-import { ROOMS_TAG } from "@/lib/rooms";
+import { CONTENT_TAG } from "@/lib/rooms";
 
 export const runtime = "nodejs";
 
@@ -14,8 +14,8 @@ export const runtime = "nodejs";
  *  · браузер ходит на свой же домен, поэтому нет возни с CORS;
  *  · бэкенд не обязан быть открыт наружу — достаточно доступа с сервера.
  *
- * Сбрасывать кэш после изменений не нужно: публичные страницы читают
- * номера напрямую при каждом запросе (см. lib/rooms.ts).
+ * Публичные страницы кэшируются, поэтому после каждой правки кэш
+ * нужно гасить — см. ниже и lib/rooms.ts.
  */
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -72,7 +72,7 @@ async function proxy(request: Request, params: Promise<{ path: string[] }>) {
   // форму уберут, переносить сюда нечего: правки из админки закрыты
   // серверным действием, это только запасной путь.
   if (MUTATING.has(method) && res.ok) {
-    (revalidateTag as unknown as (tag: string) => void)(ROOMS_TAG);
+    (revalidateTag as unknown as (tag: string) => void)(CONTENT_TAG);
   }
 
   if (res.status === 204) return new NextResponse(null, { status: 204 });

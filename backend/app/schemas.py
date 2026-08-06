@@ -58,6 +58,31 @@ class RoomPatch(BaseModel):
     isPublished: bool | None = None
 
 
+class SiteVideoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str
+    title: str
+    summary: str
+    video: str
+    videoPoster: str = Field(default="", validation_alias="video_poster")
+    sortOrder: int = Field(validation_alias="sort_order")
+    isPublished: bool = Field(validation_alias="is_published")
+
+
+class SiteVideoIn(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,58}$")
+    title: str = Field(min_length=2, max_length=160)
+    summary: str = Field(default="", max_length=400)
+
+
+class SiteVideoPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=160)
+    summary: str | None = Field(default=None, max_length=400)
+    sortOrder: int | None = None
+    isPublished: bool | None = None
+
+
 class VideoSignIn(BaseModel):
     """Запрос ссылки на прямую загрузку видео в хранилище."""
 

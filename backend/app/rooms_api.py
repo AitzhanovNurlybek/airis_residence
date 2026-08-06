@@ -20,6 +20,7 @@ from .schemas import (
 )
 from .video import (
     build_upload,
+    folder_for,
     delete_video,
     save_video_through_api,
     verify_poster,
@@ -219,7 +220,7 @@ async def sign_video_upload(
     """
     await _get(session, slug)  # заодно проверяем, что номер существует
 
-    upload = build_upload(settings, slug, payload.contentType, payload.sizeBytes)
+    upload = build_upload(settings, folder_for("rooms", slug), payload.contentType, payload.sizeBytes)
     if upload is None:
         raise HTTPException(
             status.HTTP_501_NOT_IMPLEMENTED,
@@ -246,8 +247,8 @@ async def confirm_video_upload(
 ):
     """Браузер закончил загрузку — проверяем файл и прикрепляем к номеру."""
     room = await _get(session, slug)
-    url = verify_uploaded(settings, slug, payload.key)
-    poster = verify_poster(settings, slug, payload.posterKey)
+    url = verify_uploaded(settings, folder_for("rooms", slug), payload.key)
+    poster = verify_poster(settings, folder_for("rooms", slug), payload.posterKey)
 
     previous, previous_poster = room.video, room.video_poster
     room.video = url
@@ -276,7 +277,7 @@ async def upload_video(
     через API. На Vercel сюда попадёт только совсем короткий ролик.
     """
     room = await _get(session, slug)
-    url = await save_video_through_api(settings, slug, file)
+    url = await save_video_through_api(settings, folder_for("rooms", slug), file)
 
     previous, previous_poster = room.video, room.video_poster
     room.video = url
