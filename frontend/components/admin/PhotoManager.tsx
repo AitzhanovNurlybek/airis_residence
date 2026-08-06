@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 
 import { adminSend, adminUpload, AdminError } from "@/lib/adminClient";
+import { compressImage } from "@/lib/imageCompress";
 import type { AdminRoom } from "@/lib/adminTypes";
 import { AdminButton, useToast } from "@/components/admin/ui";
 import { AdminThumb } from "@/components/admin/AdminThumb";
@@ -38,7 +39,24 @@ export function PhotoManager({
 
     setUploading(true);
     try {
-      const room = await adminUpload<AdminRoom>(`/rooms/${slug}/images`, list);
+      // Ужимаем до отправки: снимок с телефона в 12 МБ не пролезет
+      // в лимит запроса и вернёт непонятную «Ошибку 413».
+      const prepared = await Promise.all(list.map(compressImage));
+
+      const stuck = prepared.filter((r) => r.untouched && r.file.size > 4 * 1024 * 1024);
+      if (stuck.length > 0) {
+        toast.show(
+          `Не удалось открыть ${stuck.length === 1 ? "файл" : "файлы"} для сжатия, ` +
+            "а без него он слишком большой. Пересохраните фото в JPG и попробуйте снова.",
+          "error",
+        );
+        return;
+      }
+
+      const room = await adminUpload<AdminRoom>(
+        `/rooms/${slug}/images`,
+        prepared.map((r) => r.file),
+      );
       onChange(room.images);
       toast.show(
         list.length === 1 ? "Фотография загружена" : `Загружено фотографий: ${list.length}`,
@@ -105,7 +123,7 @@ export function PhotoManager({
           onClick={() => fileInput.current?.click()}
           disabled={uploading}
         >
-          {uploading ? "Загружаем…" : "Выбрать файлы"}
+          {uploading ? "Готовим и загружаем…" : "Выбрать файлы"}
         </AdminButton>
       </div>
 
@@ -144,7 +162,8 @@ export function PhotoManager({
           </button>
         </p>
         <p className="mt-2 text-xs text-muted/80">
-          JPG, PNG или WebP. Большие снимки с телефона ужимаются автоматически — грузите как есть.
+          JPG, PNG или WebP. Снимки с телефона ужимаются прямо здесь, перед отправкой —
+          грузите как есть, ничего заранее уменьшать не нужно.
         </p>
       </div>
 
