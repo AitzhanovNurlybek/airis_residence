@@ -34,6 +34,12 @@ function mediaPatterns(): NonNullable<NextConfig["images"]>["remotePatterns"] {
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: mediaPatterns(),
+    // На Vercel проект собран как два сервиса (vercel.json), и в этом режиме
+    // адрес /_next/image не поднимается — оптимизатор отдавал 404, а с ним
+    // не грузилась ни одна фотография. Поэтому картинки отдаём как есть:
+    // исходники в public/ заранее сжаты (ширина ≤1800, качество 82),
+    // а фото из админки жмёт бэкенд (Pillow → WebP) при загрузке.
+    unoptimized: true,
   },
 };
 
