@@ -172,7 +172,9 @@ export default function HeroScene() {
       <pointLight position={[-5, -2, 3]} intensity={38} color={WINE} distance={16} decay={2} />
       <pointLight position={[5, 3, -2]} intensity={26} color={SAND} distance={18} decay={2} />
       <Rig scrollRef={scrollRef} />
-      <fog attach="fog" args={["#0a0809", 8, 17]} />
+      {/* Цвет тумана обязан совпадать с --color-ink-950, иначе на границе
+          сцены и страницы видно стык */}
+      <fog attach="fog" args={["#1a1417", 8, 17]} />
     </Canvas>
   );
 }
