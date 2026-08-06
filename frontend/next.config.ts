@@ -32,6 +32,16 @@ function mediaPatterns(): NonNullable<NextConfig["images"]>["remotePatterns"] {
 }
 
 const nextConfig: NextConfig = {
+  /**
+   * Номер «Comfort Plus» раньше назывался Luxe, и адрес его страницы был
+   * /nomera/luxe. Код переименован, но старая ссылка могла разойтись —
+   * попасть в поиск, в переписку, в рекламу. Постоянный редирект (308)
+   * переносит и гостя, и накопленный вес страницы на новый адрес.
+   */
+  async redirects() {
+    return [{ source: "/nomera/luxe", destination: "/nomera/comfort-plus", permanent: true }];
+  },
+
   images: {
     remotePatterns: mediaPatterns(),
     // На Vercel проект собран как два сервиса (vercel.json), и в этом режиме

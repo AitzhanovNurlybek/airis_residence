@@ -14,7 +14,7 @@ ROOM_NAMES = {
     "standart": "Standart",
     "standart-twin": "Standart Twin",
     "comfort": "Comfort",
-    "luxe": "Luxe",
+    "comfort-plus": "Comfort Plus",
 }
 
 

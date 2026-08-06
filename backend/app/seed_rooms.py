@@ -123,9 +123,9 @@ SEED_ROOMS: list[dict] = [
         ],
     },
     {
-        "slug": "luxe",
-        "name": 'Номер "Luxe"',
-        "short_name": "Luxe",
+        "slug": "comfort-plus",
+        "name": 'Номер "Comfort Plus"',
+        "short_name": "Comfort Plus",
         "price": 70000,
         "area": "30 м²",
         "capacity": 2,

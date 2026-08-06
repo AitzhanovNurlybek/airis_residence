@@ -8,7 +8,7 @@ import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
 
 const shots = [
   { src: "/images/hotel/lobby.jpg", alt: "Лобби и зона отдыха Airis Residence", caption: "Лобби" },
-  { src: "/images/rooms/luxe/01.jpg", alt: "Номер Luxe, 30 м²", caption: "Luxe · 30 м²" },
+  { src: "/images/rooms/luxe/01.jpg", alt: "Номер Comfort Plus, 30 м²", caption: "Comfort Plus · 30 м²" },
   { src: "/images/breakfast/01.jpg", alt: "Завтрак — шведский стол", caption: "Завтрак включён" },
   { src: "/images/hotel/bath-03.jpg", alt: "Ванная комната с тропическим душем", caption: "Ванная комната" },
   { src: "/images/rooms/standart-twin/01.jpg", alt: "Номер Standart Twin", caption: "Standart Twin" },

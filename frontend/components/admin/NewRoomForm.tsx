@@ -85,7 +85,7 @@ export function NewRoomForm() {
       </p>
 
       <form onSubmit={submit} className="mt-8 space-y-5">
-        <Field label="Название" hint="Так номер будет называться в списке: Standart, Luxe, Полулюкс">
+        <Field label="Название" hint="Так номер будет называться в списке: Standart, Comfort Plus, Полулюкс">
           <input
             className={inputClass}
             value={shortName}

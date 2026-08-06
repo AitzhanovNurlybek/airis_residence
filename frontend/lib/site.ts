@@ -88,8 +88,11 @@ export type Room = {
 
 /**
  * ⚠️ Фото разложены по типам номеров по визуальному признаку с сайта.
- * Comfort и Luxe стоит перепроверить и переназначить — папки
- * public/images/rooms/<slug>/, порядок задаётся здесь.
+ * Comfort и Comfort Plus стоит перепроверить и переназначить.
+ *
+ * Папка с картинками у Comfort Plus осталась `luxe`: это внутренний
+ * путь, гость его не видит, а переименование сломало бы ссылки на уже
+ * загруженные фото. Код номера при этом comfort-plus.
  */
 export const rooms: Room[] = [
   {
@@ -192,9 +195,9 @@ export const rooms: Room[] = [
     ],
   },
   {
-    slug: "luxe",
-    name: 'Номер "Luxe"',
-    shortName: "Luxe",
+    slug: "comfort-plus",
+    name: 'Номер "Comfort Plus"',
+    shortName: "Comfort Plus",
     price: 70000,
     area: "30 м²",
     capacity: 2,

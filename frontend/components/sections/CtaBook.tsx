@@ -17,7 +17,7 @@ export async function CtaBook() {
           <div className="relative overflow-hidden rounded-card border border-white/10 shadow-deep">
             <Image
               src="/images/rooms/luxe/02.jpg"
-              alt="Номер Luxe в отеле Airis Residence"
+              alt="Номер Comfort Plus в отеле Airis Residence"
               fill
               sizes="100vw"
               className="object-cover"
