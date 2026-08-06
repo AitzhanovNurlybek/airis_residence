@@ -17,7 +17,7 @@
       "destination": { "type": "service", "service": "backend" }
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!_next/image).*)",
       "destination": { "type": "service", "service": "frontend" }
     }
   ]

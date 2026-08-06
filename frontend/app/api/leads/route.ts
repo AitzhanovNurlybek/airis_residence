@@ -70,13 +70,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Гостей может не быть в форме. Ноль бэкенд не принимает (минимум 1),
+  // поэтому неизвестное значение не отправляем вовсе — там свой умолчание.
+  const adults = Number(body.adults);
   const lead = {
     name: clean(body.name, 120),
     phone: clean(body.phone, 40),
     email: clean(body.email, 160),
     checkIn: clean(body.checkIn, 20),
     checkOut: clean(body.checkOut, 20),
-    adults: Number.isFinite(body.adults) ? Number(body.adults) : 0,
+    adults: Number.isFinite(adults) && adults >= 1 ? Math.min(adults, 10) : undefined,
     room: clean(body.room, 60),
     comment: clean(body.comment, 1000),
   };
@@ -86,6 +89,9 @@ export async function POST(request: Request) {
   }
 
   const roomName = rooms.find((r) => r.slug === lead.room)?.shortName ?? "не выбран";
+
+  // Заявка считается принятой, только если её кто-то реально забрал.
+  let delivered = false;
 
   // 1. Пересылаем в собственный бэкенд, если он поднят
   if (BACKEND_URL) {
@@ -98,7 +104,8 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify(lead),
       });
-      if (!res.ok) console.error("backend lead failed", res.status, await res.text());
+      if (res.ok) delivered = true;
+      else console.error("backend lead failed", res.status, await res.text());
     } catch (e) {
       console.error("backend lead error", e);
     }
@@ -132,18 +139,20 @@ export async function POST(request: Request) {
           disable_web_page_preview: true,
         }),
       });
-      if (!res.ok) console.error("telegram failed", res.status, await res.text());
+      if (res.ok) delivered = true;
+      else console.error("telegram failed", res.status, await res.text());
     } catch (e) {
       console.error("telegram error", e);
     }
   }
 
-  // Ни один канал не настроен — заявка потеряется, честно сообщаем об этом.
-  if (!BACKEND_URL && !(TELEGRAM_TOKEN && TELEGRAM_CHAT_ID)) {
-    console.warn("Заявка получена, но каналы доставки не настроены:", lead);
+  // Заявку не забрал никто: каналы не настроены либо оба отказали.
+  // Молчать нельзя — гость уйдёт уверенным, что его ждут.
+  if (!delivered) {
+    console.error("Заявка никуда не доставлена:", lead);
     return NextResponse.json(
       {
-        error: `Форма ещё не подключена к CRM. Позвоните ${site.contacts.phonePrimary}.`,
+        error: `Не удалось отправить заявку. Позвоните ${site.contacts.phonePrimary}.`,
       },
       { status: 503 },
     );
