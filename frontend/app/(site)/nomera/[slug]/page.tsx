@@ -25,7 +25,7 @@ export async function generateMetadata(props: PageProps<"/nomera/[slug]">): Prom
 
   return pageMetadata({
     title: `${room.shortName} — ${room.area}, от ${formatPrice(room.price)} за ночь`,
-    description: `${room.summary} Отель Airis Residence, ${site.address.city}, ${site.address.street}. Завтрак включён, заселение круглосуточно.`,
+    description: `${room.summary} Отель Airis Residence, ${site.address.city}, ${site.address.street}. Завтрак включён, стойка регистрации круглосуточно.`,
     path: `/nomera/${room.slug}`,
     image: room.images[0],
   });

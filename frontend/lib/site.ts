@@ -13,7 +13,7 @@ export const site = {
   tagline: "Отель в центре Алматы",
   url: "https://airisresidence.kz",
   locale: "ru_RU",
-  roomsCount: 36,
+  roomsCount: 34,
 
   contacts: {
     phonePrimary: "+7 (777) 531-00-09",
@@ -52,7 +52,11 @@ export const site = {
   policy: {
     checkIn: "14:00",
     checkOut: "12:00",
-    earlyCheckIn: "Ранний заезд и поздний выезд — по запросу, при наличии свободных номеров",
+    // Платная услуга. Формулировки на сайте берутся отсюда — цену
+    // и условия менять в одном месте, иначе страницы разъедутся.
+    earlyCheckInFee: 20000,
+    earlyCheckIn:
+      "Ранний заезд и поздний выезд — платная услуга, 20 000 ₸, при наличии свободных номеров",
     pets: false,
     smoking: false,
     children: "Дети до 6 лет размещаются бесплатно на существующих спальных местах",
@@ -221,7 +225,7 @@ export const priceFrom = Math.min(...rooms.map((r) => r.price));
 
 export const amenities = [
   { title: "Завтрак включён", note: "Шведский стол каждое утро", icon: "breakfast" },
-  { title: "Стойка 24/7", note: "Заезд в любое время суток", icon: "reception" },
+  { title: "Стойка 24/7", note: "Сотрудник на месте днём и ночью", icon: "reception" },
   { title: "Wi-Fi на всей территории", note: "Бесплатно, без ограничений", icon: "wifi" },
   { title: "Кондиционер в каждом номере", note: "Индивидуальное управление", icon: "climate" },
   { title: "Сейф и мини-бар", note: "В каждом номере", icon: "safe" },

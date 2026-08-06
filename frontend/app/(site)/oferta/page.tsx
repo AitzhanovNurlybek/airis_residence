@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { JsonLd } from "@/components/JsonLd";
 import { PageHeader, Prose } from "@/components/ui/Prose";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
-import { site } from "@/lib/site";
+import { formatPrice, site } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata({
   title: "Публичная оферта — отель Airis Residence",
@@ -83,6 +83,10 @@ export default function OfferPage() {
             </li>
             <li>
               Расчётный час: заезд с {site.policy.checkIn}, выезд до {site.policy.checkOut}.
+            </li>
+            <li>
+              Ранний заезд и поздний выезд предоставляются при наличии свободных номеров
+              и оплачиваются отдельно — {formatPrice(site.policy.earlyCheckInFee)}.
             </li>
           </ul>
 

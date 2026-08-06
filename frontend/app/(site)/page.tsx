@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { formatPrice, priceFrom, site } from "@/lib/site";
+
 import { Hero } from "@/components/sections/Hero";
 import { About } from "@/components/sections/About";
 import { Rooms } from "@/components/sections/Rooms";
@@ -18,7 +20,7 @@ import { getRooms } from "@/lib/rooms";
 export const metadata: Metadata = pageMetadata({
   title: "Airis Residence — отель в центре Алматы | Официальный сайт",
   description:
-    "Отель Airis Residence в центре Алматы: 36 номеров, завтрак включён, стойка регистрации 24/7. ул. Наурызбай батыра 134/2. Номера от 25 000 ₸ за ночь — бронирование напрямую, без комиссии агрегаторов.",
+    `Отель Airis Residence в центре Алматы: ${site.roomsCount} номеров, завтрак включён, стойка регистрации 24/7. ${site.address.street}. Номера от ${formatPrice(priceFrom)} за ночь — бронирование напрямую, без комиссии агрегаторов.`,
   path: "/",
 });
 

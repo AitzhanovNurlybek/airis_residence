@@ -108,7 +108,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             transition={{ duration: 0.9, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
             {site.roomsCount} номеров в двух шагах от проспекта Абая. Завтрак включён,
-            заселение круглосуточно. От{" "}
+            стойка регистрации круглосуточно. От{" "}
             <span className="text-sand-200">{formatPrice(priceFrom)}</span> за ночь.
           </motion.p>
 

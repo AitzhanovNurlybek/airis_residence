@@ -3,7 +3,7 @@ import { Manrope, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
 import { BASE_URL } from "@/lib/seo";
-import { site } from "@/lib/site";
+import { formatPrice, priceFrom, site } from "@/lib/site";
 
 /**
  * Корневой лейаут — только оболочка документа и шрифты.
@@ -32,8 +32,9 @@ export const metadata: Metadata = {
     default: "Airis Residence — отель в центре Алматы | Официальный сайт",
     template: "%s | Airis Residence",
   },
-  description:
-    "Airis Residence — отель на 36 номеров в центре Алматы, ул. Наурызбай батыра 134/2. Завтрак включён, круглосуточная стойка регистрации, номера от 25 000 ₸. Бронирование на официальном сайте.",
+  // Число номеров и цену берём из site.ts: продублированные в тексте,
+  // они разъезжаются с остальным сайтом при первой же правке.
+  description: `Airis Residence — отель на ${site.roomsCount} номеров в центре Алматы, ${site.address.street}. Завтрак включён, круглосуточная стойка регистрации, номера от ${formatPrice(priceFrom)}. Бронирование на официальном сайте.`,
   keywords: [
     "отель Алматы",
     "гостиница Алматы центр",
@@ -55,13 +56,13 @@ export const metadata: Metadata = {
     siteName: site.name,
     title: "Airis Residence — отель в центре Алматы",
     description:
-      "36 номеров в центре Алматы. Завтрак включён, стойка 24/7, номера от 25 000 ₸ за ночь.",
+      `${site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка 24/7, номера от ${formatPrice(priceFrom)} за ночь.`,
     images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "Airis Residence, Алматы" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Airis Residence — отель в центре Алматы",
-    description: "36 номеров в центре Алматы. Завтрак включён, стойка 24/7.",
+    description: `${site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка 24/7.`,
     images: ["/og.jpg"],
   },
   robots: {

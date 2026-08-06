@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
 
-import { site } from "@/lib/site";
+import { formatPrice, site } from "@/lib/site";
 import { useIsDesktop, usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
@@ -15,8 +15,8 @@ const points = [
     text: "Наурызбай батыра 134/2 — 800 метров до проспекта Абая и 700 до метро «Байконур». Двор закрытый, окна выходят не на трассу.",
   },
   {
-    title: "Заезд в любое время",
-    text: "Стойка регистрации работает круглосуточно. Прилетели ночным рейсом — вас заселят без доплаты за поздний заезд.",
+    title: "Стойка регистрации 24/7",
+    text: `Заезд с ${site.policy.checkIn}, выезд до ${site.policy.checkOut}. Ночью на стойке всегда есть сотрудник. Ранний заезд и поздний выезд — ${formatPrice(site.policy.earlyCheckInFee)}, если номер свободен.`,
   },
   {
     title: "Завтрак уже в цене",
@@ -35,11 +35,15 @@ function CheckTimes({ floating = false }: { floating?: boolean }) {
       }
     >
       <div className={floating ? "" : "text-center"}>
-        <span className="block font-display text-2xl text-sand-200 md:text-3xl">14:00</span>
+        <span className="block font-display text-2xl text-sand-200 md:text-3xl">
+          {site.policy.checkIn}
+        </span>
         <span className="text-[0.65rem] tracking-[0.14em] text-muted uppercase">заезд</span>
       </div>
       <div className={floating ? "mt-3" : "text-center"}>
-        <span className="block font-display text-2xl text-sand-200 md:text-3xl">12:00</span>
+        <span className="block font-display text-2xl text-sand-200 md:text-3xl">
+          {site.policy.checkOut}
+        </span>
         <span className="text-[0.65rem] tracking-[0.14em] text-muted uppercase">выезд</span>
       </div>
     </div>
