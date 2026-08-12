@@ -93,6 +93,19 @@ body {
   padding-bottom: var(--action-bar-h);
 }
 
+body > .skiptranslate,
+.goog-te-banner-frame,
+.goog-te-gadget,
+.goog-te-balloon-frame {
+  display: none !important;
+}
+
+html.translated-ltr,
+html.translated-rtl,
+body {
+  top: 0 !important;
+}
+
 /* Ничего не должно вылезать за ширину экрана и давать горизонтальный скролл */
 img,
 video,

@@ -1,8 +1,18 @@
-/**
- * Логотипа у отеля нет — собран словесный знак (логотип-надпись).
- * Монограмма: арка «A» с точкой — отсылка к дверному проёму и к букве A.
- * Если появится готовый логотип, заменить только этот компонент.
- */
+import Image from "next/image";
+
+const logoAssets = {
+  mark: {
+    src: "/images/brand/airis-mark.png",
+    width: 909,
+    height: 885,
+  },
+  wordmark: {
+    src: "/images/brand/airis-wordmark.png",
+    width: 720,
+    height: 442,
+  },
+};
+
 export function Logo({
   className = "",
   withMark = true,
@@ -11,44 +21,30 @@ export function Logo({
   withMark?: boolean;
 }) {
   return (
-    <span className={`flex items-center gap-2.5 ${className}`}>
+    <span className={`inline-flex items-center gap-2.5 overflow-hidden rounded-sm bg-white px-1.5 py-0.5 leading-none ${className}`}>
       {withMark && (
-        <svg
-          viewBox="0 0 40 40"
-          className="h-full w-auto shrink-0"
-          fill="none"
+        <Image
+          src={logoAssets.mark.src}
+          width={logoAssets.mark.width}
+          height={logoAssets.mark.height}
+          alt=""
           aria-hidden
-        >
-          <path
-            d="M20 3.5c-8 0-14 6-14 14V36"
-            stroke="url(#airis-mark)"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-          <path
-            d="M20 3.5c8 0 14 6 14 14V36"
-            stroke="url(#airis-mark)"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-          <path d="M11.5 25.5h17" stroke="url(#airis-mark)" strokeWidth="1.6" strokeLinecap="round" />
-          <circle cx="20" cy="14" r="2.2" fill="currentColor" className="text-wine-400" />
-          <defs>
-            <linearGradient id="airis-mark" x1="20" y1="3.5" x2="20" y2="36" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#e8dcc8" />
-              <stop offset="1" stopColor="#ad8d5b" />
-            </linearGradient>
-          </defs>
-        </svg>
+          className="block h-full w-auto shrink-0"
+          decoding="async"
+          draggable={false}
+          unoptimized
+        />
       )}
-      <span className="flex flex-col justify-center leading-none">
-        <span className="font-display text-[1.35em] leading-[1] font-semibold tracking-[0.14em] text-cream">
-          AIRIS
-        </span>
-        <span className="mt-[0.25em] text-[0.5em] leading-[1] font-medium tracking-[0.42em] text-sand-400">
-          RESIDENCE
-        </span>
-      </span>
+      <Image
+        src={logoAssets.wordmark.src}
+        width={logoAssets.wordmark.width}
+        height={logoAssets.wordmark.height}
+        alt="Airis Residence"
+        className="block h-full w-auto shrink-0"
+        decoding="async"
+        draggable={false}
+        unoptimized
+      />
     </span>
   );
 }

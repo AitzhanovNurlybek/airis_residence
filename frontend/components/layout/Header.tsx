@@ -8,6 +8,7 @@ import { navLinks, site } from "@/lib/site";
 import { getBookingHref, bookingLinkTarget } from "@/lib/booking";
 import { buttonClass } from "@/components/ui/Button";
 import { IconClose, IconMenu, IconPhone } from "@/components/ui/Icons";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { Logo } from "@/components/ui/Logo";
 
 export function Header() {
@@ -56,6 +57,8 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-3">
+            <LanguageSwitcher className="hidden sm:flex" withGoogleElement />
+
             <a
               href={`tel:${site.contacts.phonePrimaryRaw}`}
               className="hidden items-center gap-2 text-sm text-cream/80 transition-colors hover:text-sand-300 md:flex"
@@ -107,6 +110,8 @@ export function Header() {
             </div>
 
             <nav className="container-page mt-6 flex flex-col" aria-label="Мобильная навигация">
+              <LanguageSwitcher className="mb-5 w-fit" />
+
               {navLinks.map((link, i) => (
                 <motion.div
                   key={link.href}
