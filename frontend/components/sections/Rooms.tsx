@@ -64,7 +64,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
                   Подробнее
                 </Link>
                 <a
-                  href={getBookingHref({ room: room.slug })}
+                  href={`/booking?room-type=${room.beRoomType}`}
                   target={bookingLinkTarget}
                   rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
                   aria-label={`Забронировать ${room.shortName}`}

@@ -87,7 +87,7 @@ export function getBookingHref(query: BookingQuery = {}): string {
   if (query.adults) params.set("adults", String(query.adults));
   if (query.room) params.set("room", query.room);
   const qs = params.toString();
-  return `/bronirovanie${qs ? `?${qs}` : ""}`;
+  return `/booking${qs ? `?${qs}` : ""}`;
 }
 
 /** Внешняя ссылка открывается в новой вкладке, внутренняя — нет. */

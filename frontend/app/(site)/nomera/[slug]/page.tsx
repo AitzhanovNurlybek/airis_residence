@@ -12,6 +12,7 @@ import { RoomVideo } from "@/components/ui/RoomVideo";
 import { BookingBar } from "@/components/ui/BookingBar";
 import { buttonClass } from "@/components/ui/Button";
 import { IconArrow, IconPhone, IconWhatsApp } from "@/components/ui/Icons";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export async function generateStaticParams() {
   const rooms = await getRooms();
@@ -51,6 +52,10 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
       />
 
       <div className="container-page pt-[calc(var(--header-h)+2.5rem)]">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <nav aria-label="Хлебные крошки" className="text-xs text-muted">
           <ol className="flex flex-wrap items-center gap-2">
             <li>
@@ -103,7 +108,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
 
             <div className="mt-6 flex flex-wrap gap-3">
               <a
-                href={getBookingHref({ room: room.slug })}
+                href={`/booking?room-type=${room.beRoomType}`}
                 target={bookingLinkTarget}
                 rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
                 className={buttonClass("primary", "lg")}
@@ -151,7 +156,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
           </div>
         </div>
 
-        <div className="mt-16">
+        <div className="mt-16 be-hidden">
           <BookingBar roomSlug={room.slug} compact />
         </div>
 

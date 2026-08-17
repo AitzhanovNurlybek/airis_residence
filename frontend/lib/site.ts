@@ -84,6 +84,7 @@ export type Room = {
   video?: string;
   /** Кадр-заставка из ролика — показывается до нажатия play. */
   videoPoster?: string;
+  beRoomType: string;
 };
 
 /**
@@ -121,6 +122,7 @@ export const rooms: Room[] = [
       "/images/rooms/standart-single/03.jpg",
       "/images/rooms/standart-single/04.jpg",
     ],
+    beRoomType: "5054709",
   },
   {
     slug: "standart",
@@ -147,6 +149,7 @@ export const rooms: Room[] = [
       "/images/rooms/standart/03.jpg",
       "/images/rooms/standart/04.jpg",
     ],
+    beRoomType: "5050493",
   },
   {
     slug: "standart-twin",
@@ -168,6 +171,7 @@ export const rooms: Room[] = [
       "Зона отдыха с креслом",
     ],
     images: ["/images/rooms/standart-twin/01.jpg", "/images/rooms/standart-twin/02.jpg"],
+    beRoomType: "5050494",
   },
   {
     slug: "comfort",
@@ -193,6 +197,7 @@ export const rooms: Room[] = [
       "/images/rooms/comfort/02.jpg",
       "/images/rooms/comfort/03.jpg",
     ],
+    beRoomType: "5050496",
   },
   {
     slug: "comfort-plus",
@@ -215,6 +220,7 @@ export const rooms: Room[] = [
       "Рабочее место",
     ],
     images: ["/images/rooms/luxe/01.jpg", "/images/rooms/luxe/02.jpg", "/images/rooms/luxe/03.jpg"],
+    beRoomType: "5050495",
   },
 ];
 

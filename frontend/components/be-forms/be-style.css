@@ -1,0 +1,61 @@
+#be-booking-form {
+    width: 100%;
+    max-width: 1264px;
+    margin: 3rem auto 0;
+}
+
+#tl-booking-cart {
+    z-index: 1 !important;
+}
+
+#block-search,
+#block-search * {
+    box-sizing: border-box;
+}
+
+.block-search-wrapper {
+    position: relative;
+}
+
+#block-search {
+    max-width: 1266px;
+    margin: 0 auto;
+    background: #3d313b;
+    border: 1px solid #695961;
+    border-radius: 20px;
+}
+
+.be-container {
+    padding: 0 30px;
+}
+
+body:has(#be-booking-form) .be-socials,
+.be-hidden {
+    display: none;
+}
+
+iframe[id*="tlFrame"] {
+    color-scheme: light !important;
+}
+
+@media screen and (min-width: 1280px) and (min-height: 600px) {
+    #block-search {
+        background: rgba(61, 49, 59, 0.7);
+    }
+
+    #block-search.block-search--main {
+        position: absolute;
+        bottom: 190px;
+        right: 0;
+        width: 100%;
+        max-width: 342px;
+        margin: 0;
+        backdrop-filter: blur(13.8px);
+    }
+}
+
+@media screen and (min-width: 1340px) and (min-height: 600px) {
+    #block-search.block-search--main {
+        right: calc((100% - 1344px) / 2 + 40px);
+    }
+}

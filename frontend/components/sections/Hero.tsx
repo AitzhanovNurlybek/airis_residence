@@ -11,6 +11,8 @@ import { BookingBar } from "@/components/ui/BookingBar";
 import { useIsDesktop, usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { buttonClass } from "@/components/ui/Button";
 import { IconPhone, IconPin } from "@/components/ui/Icons";
+import '../be-forms/be-style.css';
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 // WebGL грузится только в браузере, только на десктопе и только после
 // основного контента: на телефоне это лишние ~500 КБ и нагрев батареи.
@@ -135,7 +137,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
         </div>
 
         <motion.div
-          className="mt-8 max-w-4xl md:mt-12"
+          className="mt-8 max-w-4xl md:mt-12 be-hidden"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.6, ease: [0.16, 1, 0.3, 1] }}
@@ -160,10 +162,16 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             </a>
           </div>
 
-          <div className="hidden sm:block">
+          <div className="hidden sm:block be-hidden">
             <BookingBar />
           </div>
         </motion.div>
+      </motion.div>
+
+      <motion.div>
+        <div className="container-page mt-6">
+          <BeSearchForm formType={"main"} />
+        </div>
       </motion.div>
 
       {/* Подсказка «крути вниз» */}

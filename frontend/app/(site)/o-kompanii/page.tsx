@@ -7,6 +7,7 @@ import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { site, formatPrice } from "@/lib/site";
 import { getRooms } from "@/lib/rooms";
 import { buttonClass } from "@/components/ui/Button";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export const metadata: Metadata = pageMetadata({
   title: "О компании — ТОО INCOME HOUSE, отель Airis Residence",
@@ -28,6 +29,10 @@ export default async function AboutCompanyPage() {
       />
 
       <div className="container-page pt-[calc(var(--header-h)+3rem)] pb-8">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <PageHeader
           eyebrow="О компании"
           title="Airis Residence"

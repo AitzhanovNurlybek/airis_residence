@@ -6,6 +6,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { formatPrice } from "@/lib/site";
 import { getPriceFrom, getRooms } from "@/lib/rooms";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export async function generateMetadata(): Promise<Metadata> {
   const from = formatPrice(await getPriceFrom());
@@ -28,6 +29,10 @@ export default async function RoomsPage() {
         ])}
       />
       <div className="pt-[calc(var(--header-h)+3.5rem)]">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <header className="container-page max-w-3xl">
           <p className="eyebrow">Размещение</p>
           <h1 className="mt-4 font-display text-[clamp(2.2rem,5vw,3.6rem)] leading-[1.05] font-semibold text-cream">

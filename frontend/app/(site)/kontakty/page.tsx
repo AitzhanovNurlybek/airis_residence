@@ -4,6 +4,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { PageHeader } from "@/components/ui/Prose";
 import { Location } from "@/components/sections/Location";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export const metadata: Metadata = pageMetadata({
   title: "Контакты отеля Airis Residence в Алматы",
@@ -24,6 +25,10 @@ export default function ContactsPage() {
 
       <div className="pt-[calc(var(--header-h)+3rem)]">
         <div className="container-page">
+          <div className="mb-10">
+              <BeSearchForm />
+          </div>
+
           <PageHeader
             eyebrow="Контакты"
             title="Как нас найти"

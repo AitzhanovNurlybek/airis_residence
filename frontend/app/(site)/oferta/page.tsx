@@ -4,6 +4,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { PageHeader, Prose } from "@/components/ui/Prose";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { formatPrice, site } from "@/lib/site";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export const metadata: Metadata = pageMetadata({
   title: "Публичная оферта — отель Airis Residence",
@@ -23,6 +24,10 @@ export default function OfferPage() {
       />
 
       <div className="container-page pt-[calc(var(--header-h)+3rem)] pb-8">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <PageHeader
           eyebrow="Документы"
           title="Публичная оферта"
