@@ -11,6 +11,7 @@ import { Tour3D } from "@/components/sections/Tour3D";
 import { VideoShowcase } from "@/components/sections/VideoShowcase";
 import { Location } from "@/components/sections/Location";
 import { Faq } from "@/components/sections/Faq";
+import { Corporate } from "@/components/sections/Corporate";
 import { CtaBook } from "@/components/sections/CtaBook";
 import { JsonLd } from "@/components/JsonLd";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
@@ -43,6 +44,7 @@ export default async function HomePage() {
       <Tour3D />
       <Location />
       <Faq />
+      <Corporate />
       <CtaBook />
     </>
   );

@@ -5,6 +5,7 @@ import { BookingComposer } from "@/components/corp/BookingComposer";
 import { CorpHeader } from "@/components/corp/CorpHeader";
 import { getDictionary } from "@/lib/corp/dictionary";
 import { getCorpLocale, getCorpMe, getCorpRooms } from "@/lib/corp/server";
+import { site } from "@/lib/site";
 
 export default async function CorpBookingPage() {
   const locale = await getCorpLocale();
@@ -38,7 +39,13 @@ export default async function CorpBookingPage() {
             {dict.common.error}
           </p>
         ) : (
-          <BookingComposer rooms={rooms} dict={dict} locale={locale} />
+          <BookingComposer
+            rooms={rooms}
+            dict={dict}
+            locale={locale}
+            hotelName={site.name}
+            hotelCity={site.address.city}
+          />
         )}
       </main>
     </>

@@ -108,6 +108,7 @@ const ru = {
     adults: "Взрослых",
     children: "Детей",
     pickRooms: "Выберите номера",
+    details: "Подробнее",
     add: "Выбрать",
     remove: "Убрать",
     count: "Номеров",
@@ -169,6 +170,32 @@ const ru = {
     mismatch: "Пароли не совпадают",
     tooShort: "Новый пароль короче 8 символов",
     wrongCurrent: "Текущий пароль не подходит",
+  },
+
+  finance: {
+    title: "Финансы",
+    subtitle: "Что уже оплачено, что ждёт счёта и сколько за компанией",
+    awaitingConfirm: "Ждут подтверждения",
+    awaitingPayment: "Ждут оплаты",
+    paid: "Оплачено",
+    debt: "К оплате",
+    debtHint: "Подтверждённые и выставленные счета, которые ещё не оплачены",
+    invoices: "Счета",
+    noInvoices: "Счетов пока нет.",
+    invoiceNumber: "Счёт",
+    booking: "Бронирование",
+    terms: "Условия оплаты",
+  },
+
+  reports: {
+    title: "Отчёты",
+    subtitle: "Расходы по сотрудникам за всё время. Отменённые заявки не считаются.",
+    employee: "Сотрудник",
+    bookingsCount: "Бронирований",
+    nights: "Ночей",
+    amount: "Сумма",
+    total: "Итого",
+    empty: "Считать пока нечего — бронирований нет.",
   },
 
   status: {
@@ -284,6 +311,7 @@ const kk: Dictionary = {
     adults: "Ересектер",
     children: "Балалар",
     pickRooms: "Нөмірлерді таңдаңыз",
+    details: "Толығырақ",
     add: "Таңдау",
     remove: "Алып тастау",
     count: "Нөмір саны",
@@ -345,6 +373,32 @@ const kk: Dictionary = {
     mismatch: "Құпиясөздер сәйкес келмейді",
     tooShort: "Жаңа құпиясөз 8 таңбадан қысқа",
     wrongCurrent: "Ағымдағы құпиясөз дұрыс емес",
+  },
+
+  finance: {
+    title: "Қаржы",
+    subtitle: "Не төленді, не шотты күтуде және компанияда қанша қарыз бар",
+    awaitingConfirm: "Растауды күтуде",
+    awaitingPayment: "Төлемді күтуде",
+    paid: "Төленді",
+    debt: "Төлеуге",
+    debtHint: "Расталған және шоты ұсынылған, бірақ әлі төленбеген брондар",
+    invoices: "Шоттар",
+    noInvoices: "Әзірге шот жоқ.",
+    invoiceNumber: "Шот",
+    booking: "Брондау",
+    terms: "Төлем шарттары",
+  },
+
+  reports: {
+    title: "Есептер",
+    subtitle: "Барлық уақыттағы қызметкерлер бойынша шығындар. Болдырылмаған өтінімдер есептелмейді.",
+    employee: "Қызметкер",
+    bookingsCount: "Брондау саны",
+    nights: "Түн",
+    amount: "Сома",
+    total: "Жиыны",
+    empty: "Әзірге санайтын ештеңе жоқ — брондау жасалмаған.",
   },
 
   status: {
@@ -448,6 +502,7 @@ const en: Dictionary = {
     adults: "Adults",
     children: "Children",
     pickRooms: "Choose rooms",
+    details: "Details",
     add: "Select",
     remove: "Remove",
     count: "Rooms",
@@ -509,6 +564,32 @@ const en: Dictionary = {
     mismatch: "Passwords do not match",
     tooShort: "The new password is shorter than 8 characters",
     wrongCurrent: "The current password is wrong",
+  },
+
+  finance: {
+    title: "Finance",
+    subtitle: "What is paid, what is awaiting an invoice and what the company owes",
+    awaitingConfirm: "Awaiting confirmation",
+    awaitingPayment: "Awaiting payment",
+    paid: "Paid",
+    debt: "Outstanding",
+    debtHint: "Confirmed and invoiced bookings that are not paid yet",
+    invoices: "Invoices",
+    noInvoices: "No invoices yet.",
+    invoiceNumber: "Invoice",
+    booking: "Booking",
+    terms: "Payment terms",
+  },
+
+  reports: {
+    title: "Reports",
+    subtitle: "Spend by employee, all time. Cancelled requests are not counted.",
+    employee: "Employee",
+    bookingsCount: "Bookings",
+    nights: "Nights",
+    amount: "Amount",
+    total: "Total",
+    empty: "Nothing to count yet — there are no bookings.",
   },
 
   status: {

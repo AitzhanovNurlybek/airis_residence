@@ -33,11 +33,15 @@ function Counter({
   onChange,
   labelMinus,
   labelPlus,
+  min = 0,
 }: {
   value: number;
   onChange: (next: number) => void;
   labelMinus: string;
   labelPlus: string;
+  /** Нижняя граница. Без неё минус у взрослых оставался активным на единице
+      и на нажатие не отвечал — кнопка, которая ничего не делает. */
+  min?: number;
 }) {
   const btn =
     "grid size-9 place-items-center rounded-full border border-ink-600/20 text-lg leading-none text-ink-900 transition-colors hover:border-wine-500/60 disabled:opacity-30";
@@ -47,7 +51,7 @@ function Counter({
         type="button"
         className={btn}
         aria-label={labelMinus}
-        disabled={value === 0}
+        disabled={value <= min}
         onClick={() => onChange(value - 1)}
       >
         −
@@ -64,10 +68,14 @@ export function BookingComposer({
   rooms,
   dict,
   locale,
+  hotelName,
+  hotelCity,
 }: {
   rooms: CorpRoom[];
   dict: Dictionary;
   locale: Locale;
+  hotelName: string;
+  hotelCity: string;
 }) {
   const router = useRouter();
   const t = dict.booking;
@@ -153,15 +161,21 @@ export function BookingComposer({
   const field =
     "h-12 w-full rounded-xl border border-ink-600/15 bg-white px-4 text-ink-950 outline-none focus:border-wine-500/60";
   const label = "block text-xs tracking-wide text-ink-700/60 uppercase";
+  const labelOnWine = "block text-xs tracking-wide text-white/70 uppercase";
 
   return (
     <form onSubmit={submit} className="mt-8 grid gap-6 lg:grid-cols-[1fr_20rem] lg:items-start">
       <div className="grid gap-6">
-        <section className="rounded-3xl bg-white p-6 shadow-sm">
+        <div className="inline-flex flex-col rounded-2xl bg-wine-500 px-5 py-3 text-white">
+          <span className="font-medium">{hotelName}</span>
+          <span className="text-xs text-white/70">{hotelCity}</span>
+        </div>
+
+        <section className="rounded-3xl bg-wine-500 p-6 text-white shadow-sm">
           <h2 className="font-display text-xl">{t.dates}</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className={label} htmlFor="checkIn">
+              <label className={labelOnWine} htmlFor="checkIn">
                 {t.checkIn}
               </label>
               <input
@@ -174,7 +188,7 @@ export function BookingComposer({
               />
             </div>
             <div>
-              <label className={label} htmlFor="checkOut">
+              <label className={labelOnWine} htmlFor="checkOut">
                 {t.checkOut}
               </label>
               <input
@@ -190,16 +204,17 @@ export function BookingComposer({
 
           <h2 className="mt-7 font-display text-xl">{t.guests}</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <div className="flex items-center justify-between rounded-xl border border-ink-600/12 px-4 py-3">
+            <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 text-ink-950">
               <span className="text-sm">{t.adults}</span>
               <Counter
                 value={adults}
+                min={1}
                 onChange={(n) => setAdults(Math.max(1, n))}
                 labelMinus={`${t.adults} −`}
                 labelPlus={`${t.adults} +`}
               />
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-ink-600/12 px-4 py-3">
+            <div className="flex items-center justify-between rounded-xl bg-white px-4 py-3 text-ink-950">
               <span className="text-sm">{t.children}</span>
               <Counter
                 value={children}
@@ -216,7 +231,7 @@ export function BookingComposer({
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             {rooms.map((room) => {
               const count = picked[room.slug] ?? 0;
-              const tooSmall = count === 0 && guests > room.capacity;
+              const tooSmall = guests > room.capacity * Math.max(count, 1);
               const saving = room.publicPrice - room.corpPrice;
               return (
                 <article
@@ -226,6 +241,7 @@ export function BookingComposer({
                   }`}
                 >
                   {room.images[0] && (
+                    <div className="relative">
                     /* Обычный img, не next/image: оптимизатор на Vercel выключен
                        (images.unoptimized), исходники ужаты заранее, а next/image
                        потребовал бы прописанного домена хранилища. */
@@ -236,6 +252,12 @@ export function BookingComposer({
                       loading="lazy"
                       className="h-40 w-full object-cover"
                     />
+                    {room.images.length > 1 && (
+                      <span className="absolute top-3 right-3 rounded-md bg-ink-950/70 px-2 py-1 text-[0.65rem] text-white">
+                        {room.images.length} фото
+                      </span>
+                    )}
+                    </div>
                   )}
                   <div className="p-5">
                     <h3 className="font-display text-lg">{room.shortName}</h3>
@@ -259,6 +281,15 @@ export function BookingComposer({
                     )}
 
                     {tooSmall && <p className="mt-3 text-xs text-wine-600">{t.tooSmall}</p>}
+
+                    <a
+                      href={`/nomera/${room.slug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 inline-block text-xs text-wine-600 underline underline-offset-2"
+                    >
+                      {t.details}
+                    </a>
 
                     <div className="mt-4 flex items-center justify-between">
                       <span className="text-xs text-ink-700/60">{t.count}</span>
@@ -334,7 +365,9 @@ export function BookingComposer({
                   {line.room.shortName} × {line.count}
                 </span>
                 <span className="whitespace-nowrap tabular-nums">
-                  {formatMoney(line.amount)} {dict.common.currency}
+                  {nights > 0
+                    ? `${formatMoney(line.amount)} ${dict.common.currency}`
+                    : `${formatMoney(line.room.corpPrice)} ${dict.common.currency} / ${t.perNightShort}`}
                 </span>
               </li>
             ))}
@@ -350,8 +383,12 @@ export function BookingComposer({
 
         <p className="mt-4 flex items-baseline justify-between border-t border-ink-600/10 pt-4">
           <span className="text-sm text-ink-700/70">{t.summary}</span>
+          {/* Без дат ночей ноль, и сумма вышла бы «0 ₸» — читается как
+              «бесплатно». Пока дат нет, честнее прочерк. */}
           <span className="font-display text-2xl text-wine-500 tabular-nums">
-            {formatMoney(total)} {dict.common.currency}
+            {nights > 0 && lines.length > 0
+              ? `${formatMoney(total)} ${dict.common.currency}`
+              : "—"}
           </span>
         </p>
 

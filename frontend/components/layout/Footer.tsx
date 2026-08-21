@@ -68,6 +68,16 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
           <nav aria-label="Информация">
             <h2 className="eyebrow">Информация</h2>
             <ul className="mt-5 space-y-3 text-sm">
+              {/* Корпоративный раздел — сначала объяснение, потом вход:
+                  ссылка «Кабинет» в подвале отеля читается как служебная. */}
+              <li>
+                <Link
+                  href="/korporativnym-klientam"
+                  className="text-cream/75 transition-colors hover:text-sand-300"
+                >
+                  Корпоративным клиентам
+                </Link>
+              </li>
               {legalLinks.map((link) => (
                 <li key={link.href}>
                   <Link

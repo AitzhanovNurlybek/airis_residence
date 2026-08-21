@@ -104,8 +104,11 @@ export function EmployeeManager({
                 </td>
                 <td className="px-5 py-4 text-ink-700/80">{person.email}</td>
                 <td className="px-5 py-4">
+                  {/* Значение берём из данных сервера, а не из локального
+                      состояния: если сохранение упадёт, список не должен
+                      показывать роль, которой на самом деле нет. */}
                   <select
-                    defaultValue={person.role}
+                    value={person.role}
                     disabled={busy || person.id === meId}
                     onChange={(e) =>
                       send(`employees/${person.id}`, "PATCH", { role: e.target.value })

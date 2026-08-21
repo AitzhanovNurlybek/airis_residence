@@ -14,7 +14,7 @@ export default async function CorpLoginPage() {
 
   return (
     <>
-      <CorpHeader dict={dict} locale={locale} />
+      <CorpHeader dict={dict} locale={locale} signedIn={false} />
       <main className="grid min-h-[calc(100dvh-4rem)] place-items-center px-5 py-14">
         <div className="w-full max-w-md">
           <h1 className="text-center font-display text-[clamp(1.8rem,4vw,2.6rem)] leading-tight font-semibold text-ink-950">

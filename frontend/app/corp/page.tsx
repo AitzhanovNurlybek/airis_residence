@@ -111,12 +111,26 @@ export default async function CorpCabinetPage() {
             title={dict.cabinet.tiles.bookings}
             hint={dict.cabinet.tiles.bookingsHint}
           />
+          {/* Деньги и отчёты по всей компании — дело ответственного:
+              рядовому сотруднику эти цифры ничего не говорят. */}
           {isBoss && (
-            <Tile
-              href="/corp/employees"
-              title={dict.cabinet.tiles.employees}
-              hint={dict.cabinet.tiles.employeesHint}
-            />
+            <>
+              <Tile
+                href="/corp/finance"
+                title={dict.cabinet.tiles.finance}
+                hint={dict.cabinet.tiles.financeHint}
+              />
+              <Tile
+                href="/corp/reports"
+                title={dict.cabinet.tiles.reports}
+                hint={dict.cabinet.tiles.reportsHint}
+              />
+              <Tile
+                href="/corp/employees"
+                title={dict.cabinet.tiles.employees}
+                hint={dict.cabinet.tiles.employeesHint}
+              />
+            </>
           )}
         </section>
       </main>

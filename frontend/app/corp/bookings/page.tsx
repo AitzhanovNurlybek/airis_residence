@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { buttonClass } from "@/components/ui/Button";
+
 import { CancelBooking } from "@/components/corp/CancelBooking";
 import { CorpHeader } from "@/components/corp/CorpHeader";
 import {
@@ -50,6 +52,10 @@ export default async function CorpBookingsPage() {
         <h1 className="mt-5 font-display text-[clamp(1.9rem,4vw,2.8rem)] leading-tight font-semibold">
           {dict.bookings.title}
         </h1>
+
+        <Link href="/corp/booking" className={buttonClass("primary", "md", "mt-6")}>
+          + {dict.bookings.create}
+        </Link>
 
         {bookings.length === 0 ? (
           <div className="mt-8 rounded-3xl bg-white p-10 text-center shadow-sm">

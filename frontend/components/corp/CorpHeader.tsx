@@ -14,11 +14,14 @@ export function CorpHeader({
   locale,
   companyName,
   userName,
+  signedIn = true,
 }: {
   dict: Dictionary;
   locale: Locale;
   companyName?: string;
   userName?: string;
+  /** На форме входа ссылок в кабинет и кнопки выхода быть не должно. */
+  signedIn?: boolean;
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/8 bg-ink-950">
@@ -34,13 +37,17 @@ export function CorpHeader({
               {userName ? ` · ${userName}` : ""}
             </span>
           )}
-          <Link
-            href="/corp"
-            className="text-sm text-cream/85 transition-colors hover:text-cream"
-          >
-            {dict.nav.cabinet}
-          </Link>
-          <SignOut label={dict.nav.signOut} />
+          {signedIn && (
+            <>
+              <Link
+                href="/corp"
+                className="text-sm text-cream/85 transition-colors hover:text-cream"
+              >
+                {dict.nav.cabinet}
+              </Link>
+              <SignOut label={dict.nav.signOut} />
+            </>
+          )}
           <LangSwitch current={locale} />
         </div>
       </div>

@@ -273,6 +273,106 @@ acode=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $CORP_T
 check "$([ "$acode" = "401" ] && echo 1 || echo 0)" "корп-токен не пускает в админку отеля (получили $acode)"
 
 echo
+echo "── Админка компаний ──"
+curl -s -c "$T/ajar" -X POST "$F/api/admin/login" -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"live-admin-pass"}' -o "$T/al.json"
+check "$(has "$T/al.json" '"ok":true')" "администратор отеля вошёл через фронт"
+
+curl -s -b "$T/ajar" -o "$T/list.html" "$F/admin/kompanii"
+check "$(has "$T/list.html" 'Корпоративные клиенты')" "список компаний открылся"
+check "$(has "$T/list.html" 'Компания-пример А')" "компания в списке"
+check "$(has "$T/list.html" 'Активна')" "видно состояние договора"
+
+curl -s -b "$T/ajar" -o "$T/co.html" "$F/admin/kompanii/company-a"
+check "$(has "$T/co.html" 'Реквизиты и договор')" "карточка компании открылась"
+check "$(has "$T/co.html" 'Корпоративный прайс')" "раздел прайса на месте"
+check "$(has "$T/co.html" 'admin@company-a.example')" "сотрудники подтянулись"
+check "$(has "$T/co.html" 'Заявки компании')" "раздел заявок на месте"
+check "$(has "$T/co.html" 'driver@company-a.example')" "заведённый в кабинете сотрудник виден и отелю"
+
+acode=$(curl -s -o /dev/null -w "%{http_code}" "$F/admin/kompanii")
+check "$([ "$acode" = "307" ] && echo 1 || echo 0)" "без входа админка уводит на форму (получили $acode)"
+
+# Приостановка договора должна немедленно закрывать кабинет — это главный
+# рычаг отеля, если компания перестала платить.
+curl -s -b "$T/ajar" -X PATCH "$F/api/admin/corp/companies/company-a" \
+  -H 'Content-Type: application/json' -d '{"isActive":false}' -o "$T/off.json"
+check "$(has "$T/off.json" '"isActive":false')" "договор приостановлен"
+ccode=$(curl -s -b "$T/jar" -o /dev/null -w "%{http_code}" "$F/api/corp/me")
+check "$([ "$ccode" = "403" ] && echo 1 || echo 0)" "кабинет закрылся сразу (получили $ccode)"
+
+curl -s -b "$T/ajar" -X PATCH "$F/api/admin/corp/companies/company-a" \
+  -H 'Content-Type: application/json' -d '{"isActive":true}' -o /dev/null
+ccode=$(curl -s -b "$T/jar" -o /dev/null -w "%{http_code}" "$F/api/corp/me")
+check "$([ "$ccode" = "200" ] && echo 1 || echo 0)" "и открылся обратно (получили $ccode)"
+
+# Прайс: ставим точечную цену и проверяем, что её видит компания.
+cat > "$T/rates.json" <<'JSON'
+[{"roomSlug":"comfort","price":31000}]
+JSON
+curl -s -b "$T/ajar" -X PUT "$F/api/admin/corp/companies/company-a/rates" \
+  -H 'Content-Type: application/json' --data-binary @"$T/rates.json" -o "$T/rr.json"
+check "$(has "$T/rr.json" '31000')" "цена по договору сохранена"
+curl -s -b "$T/jar" -o "$T/rooms.json" "$F/api/corp/rooms"
+check "$(has "$T/rooms.json" '"corpPrice":31000')" "компания видит новую цену"
+
+echo
+echo "── Финансы и отчёты ──"
+# Язык к этому моменту переключён на английский предыдущей секцией. Возвращаем
+# русский: заодно проверяем, что переключение работает в обе стороны.
+curl -s -b "$T/jar" -c "$T/jar" -o /dev/null "$F/api/corp/lang?to=ru&next=/corp"
+curl -s -b "$T/jar" -o "$T/ru.html" "$F/corp"
+check "$(has "$T/ru.html" 'Кабинет компании')" "русский вернулся"
+
+curl -s -b "$T/jar" -o "$T/fin.html" "$F/corp/finance"
+check "$(has "$T/fin.html" 'Финансы')" "финансы открылись"
+check "$(has "$T/fin.html" 'К оплате')" "видна сумма долга"
+check "$(has "$T/fin.html" 'постоплата')" "условия оплаты из договора подтянулись"
+
+# Отчёт не считает отменённые заявки, а единственная к этому моменту уже
+# отменена — иначе проверяли бы пустой экран и ничего не узнали.
+cat > "$T/rep_booking.json" <<JSON
+{"checkIn":"$IN","checkOut":"$OUT","adults":1,"items":[{"roomSlug":"standart","roomsCount":1}]}
+JSON
+curl -s -b "$T/jar" -X POST "$F/api/corp/bookings"   -H 'Content-Type: application/json' --data-binary @"$T/rep_booking.json" -o "$T/rb.json"
+check "$(has "$T/rb.json" '"number":"K-')" "для отчёта создана свежая бронь"
+
+curl -s -b "$T/jar" -o "$T/rep.html" "$F/corp/reports"
+check "$(has "$T/rep.html" 'Отчёты')" "отчёты открылись"
+check "$(has "$T/rep.html" 'Сотрудник')" "разбивка по сотрудникам есть"
+check "$(has "$T/rep.html" 'Айгуль')" "в отчёте виден автор брони"
+check "$(has "$T/rep.html" 'Итого')" "строка итога посчитана"
+
+# Деньги всей компании рядовому сотруднику не показываем.
+curl -s -b "$T/jar3" -L -o "$T/finemp.html" "$F/corp/finance"
+check "$(grep -qa 'К оплате' "$T/finemp.html" && echo 0 || echo 1)" "сотруднику финансы закрыты"
+curl -s -b "$T/jar3" -L -o "$T/repemp.html" "$F/corp/reports"
+check "$(grep -qa 'Итого' "$T/repemp.html" && echo 0 || echo 1)" "сотруднику отчёты закрыты"
+
+echo
+echo "── Сверка с образцом заказчика ──"
+check "$(has "$T/pick.html" 'Airis Residence')" "чип отеля над панелью поиска"
+check "$(has "$T/pick.html" 'Подробнее')" "ссылка «Подробнее» у номера"
+check "$(has "$T/pick.html" 'фото')" "бейдж с числом фотографий"
+curl -s -b "$T/jar" -o "$T/bk3.html" "$F/corp/bookings"
+check "$(has "$T/bk3.html" 'Новое бронирование')" "кнопка «+ Новое бронирование» в истории"
+
+echo
+echo "── Публичная страница для компаний ──"
+code=$(curl -s -o "$T/pub.html" -w "%{http_code}" "$F/korporativnym-klientam")
+check "$([ "$code" = "200" ] && echo 1 || echo 0)" "страница отдаёт 200 (получили $code)"
+check "$(has "$T/pub.html" 'Кому это подходит')" "объяснение для кого"
+check "$(has "$T/pub.html" 'Как подключиться')" "порядок подключения"
+check "$(has "$T/pub.html" '/corp/login')" "кнопка входа в кабинет"
+check "$(has "$T/pub.html" 'заявка из кабинета')" "честно сказано про подтверждение менеджером"
+
+curl -s -o "$T/home2.html" "$F/"
+check "$(has "$T/home2.html" 'Размещаете сотрудников регулярно')" "блок для компаний на главной"
+check "$(has "$T/home2.html" 'korporativnym-klientam')" "ссылка в подвале"
+curl -s -o "$T/sm.xml" "$F/sitemap.xml"
+check "$(has "$T/sm.xml" 'korporativnym-klientam')" "страница попала в sitemap"
+
+echo
 echo "── Публичный сайт и админка не задеты ──"
 curl -s -o "$T/home.html" "$F/"
 check "$(has "$T/home.html" 'Airis Residence')" "главная жива"

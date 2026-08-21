@@ -221,6 +221,10 @@ class CompanyOut(BaseModel):
     managerEmail: str = Field(default="", validation_alias="manager_email")
     managerPhone: str = Field(default="", validation_alias="manager_phone")
     discountPercent: int = Field(default=0, validation_alias="discount_percent")
+    # Договор приостановлен или нет. Правку админка принимала и раньше, а
+    # увидеть текущее состояние было негде — в списке компаний приостановленная
+    # выглядела как обычная.
+    isActive: bool = Field(default=True, validation_alias="is_active")
 
 
 class CompanyUserOut(BaseModel):
