@@ -39,7 +39,17 @@ const nextConfig: NextConfig = {
    * переносит и гостя, и накопленный вес страницы на новый адрес.
    */
   async redirects() {
-    return [{ source: "/nomera/luxe", destination: "/nomera/comfort-plus", permanent: true }];
+    return [
+      { source: "/nomera/luxe", destination: "/nomera/comfort-plus", permanent: true },
+      /**
+       * Бронь переехала с нашей формы-заявки на форму Exely (/booking).
+       * Старый адрес успел попасть в поиск — и, пока редиректа не было,
+       * оставался в sitemap с высоким приоритетом: гость шёл по выдаче
+       * мимо движка бронирования. Страница /bronirovanie не удалена
+       * намеренно — если Exely придётся отключать, откат в одну строку.
+       */
+      { source: "/bronirovanie", destination: "/booking", permanent: true },
+    ];
   },
 
   images: {

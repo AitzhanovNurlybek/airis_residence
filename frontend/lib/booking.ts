@@ -51,7 +51,28 @@ export const bookingConfig = {
 } as const;
 
 /** Движок подключён — кнопка «Забронировать» ведёт на реальную бронь. */
-export const isBookingLive = bookingConfig.mode !== "request";
+/**
+ * Бронь онлайн работает.
+ *
+ * Раньше это зависело от переменных окружения: движка не было, и сайт честно
+ * звал оставить заявку. С августа 2026 формы Exely встроены в страницы кодом
+ * (components/be-forms), то есть бронь живая независимо от того, что стоит в
+ * NEXT_PUBLIC_BOOKING_MODE. Прежняя проверка держала на кнопках «Оставить
+ * заявку» там, где открывается настоящая форма бронирования.
+ */
+export const isBookingLive = true;
+
+/**
+ * Онлайн-оплата картой при бронировании.
+ *
+ * Это НЕ то же самое, что живая бронь, хотя раньше было завязано на одну
+ * проверку. Форма Exely работает всегда, а приём карт появляется в ней
+ * только когда отель подключит эквайринг — ответа банка пока нет. Оставить
+ * их слитыми значило бы пообещать гостю оплату картой заодно с бронью.
+ *
+ * Когда эквайринг подключат — поменять на true, больше ничего не нужно.
+ */
+export const isOnlinePaymentLive = false;
 
 export type BookingQuery = {
   checkIn?: string; // YYYY-MM-DD
@@ -88,6 +109,18 @@ export function getBookingHref(query: BookingQuery = {}): string {
   if (query.room) params.set("room", query.room);
   const qs = params.toString();
   return `/booking${qs ? `?${qs}` : ""}`;
+}
+
+/**
+ * Ссылка на бронь конкретного типа номера.
+ *
+ * Форма Exely читает номер из параметра room-type и открывается сразу на нём.
+ * Если ID неизвестен (номер завели в админке, а в Exely его ещё нет) — ведём
+ * на общую форму: пусть гость выберет сам. Это лучше пустого параметра,
+ * на котором движок спотыкается.
+ */
+export function getRoomBookingHref(beRoomType?: string): string {
+  return beRoomType ? `/booking?room-type=${encodeURIComponent(beRoomType)}` : "/booking";
 }
 
 /** Внешняя ссылка открывается в новой вкладке, внутренняя — нет. */

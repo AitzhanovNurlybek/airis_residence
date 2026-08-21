@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { rooms as fallbackRooms, formatPrice, type Room } from "@/lib/site";
-import { getBookingHref, bookingLinkTarget } from "@/lib/booking";
+import { getRoomBookingHref } from "@/lib/booking";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
 import { TiltCard } from "@/components/ui/TiltCard";
@@ -64,9 +64,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
                   Подробнее
                 </Link>
                 <a
-                  href={`/booking?room-type=${room.beRoomType}`}
-                  target={bookingLinkTarget}
-                  rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
+                  href={getRoomBookingHref(room.beRoomType)}
                   aria-label={`Забронировать ${room.shortName}`}
                   className="grid size-10 place-items-center rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-white transition-transform hover:scale-105"
                 >

@@ -5,7 +5,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { PageHeader, Prose } from "@/components/ui/Prose";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
-import { isBookingLive } from "@/lib/booking";
+import { isOnlinePaymentLive } from "@/lib/booking";
 import { buttonClass } from "@/components/ui/Button";
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
@@ -49,7 +49,7 @@ export default function PaymentPage() {
             </li>
             <li>
               <strong>Онлайн-оплата картой</strong> —{" "}
-              {isBookingLive
+              {isOnlinePaymentLive
                 ? "доступна при бронировании на сайте."
                 : "подключается: сейчас бронь подтверждается менеджером, оплата на месте."}
             </li>

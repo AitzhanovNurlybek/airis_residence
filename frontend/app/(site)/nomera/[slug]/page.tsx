@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 
 import { formatPrice, site } from "@/lib/site";
 import { getRooms, getRoomBySlug } from "@/lib/rooms";
-import { getBookingHref, bookingLinkTarget, isBookingLive } from "@/lib/booking";
+import { getRoomBookingHref, isBookingLive } from "@/lib/booking";
 import { breadcrumbJsonLd, pageMetadata, roomJsonLd } from "@/lib/seo";
 import { JsonLd } from "@/components/JsonLd";
 import { RoomGallery } from "@/components/ui/RoomGallery";
@@ -108,9 +108,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
 
             <div className="mt-6 flex flex-wrap gap-3">
               <a
-                href={`/booking?room-type=${room.beRoomType}`}
-                target={bookingLinkTarget}
-                rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
+                href={getRoomBookingHref(room.beRoomType)}
                 className={buttonClass("primary", "lg")}
               >
                 {isBookingLive ? "Забронировать" : "Оставить заявку"}

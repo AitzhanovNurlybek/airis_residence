@@ -60,12 +60,28 @@ export const getRooms = cache(async (): Promise<Room[]> => {
       console.error("API вернул пустой или неожиданный список номеров");
       return fallbackRooms;
     }
-    return data;
+    return withBeRoomType(data);
   } catch (e) {
     console.error("Бэкенд недоступен, показываем запасной список номеров:", e);
     return fallbackRooms;
   }
 });
+
+/**
+ * ID типов номеров в Exely хранятся в site.ts и в базу не попадают: движок
+ * бронирования — внешняя система, его идентификаторы не редактируют в админке.
+ *
+ * Но номера страницы берут из базы, а не из site.ts, и оттуда поле не приходит
+ * вовсе. Пока его не сшивали по slug, кнопка «Забронировать» вела на
+ * /booking?room-type=undefined — гость выбирал номер, а в Exely приезжал мусор.
+ */
+const beRoomTypeBySlug = new Map(fallbackRooms.map((room) => [room.slug, room.beRoomType]));
+
+function withBeRoomType(list: ApiRoom[]): Room[] {
+  return list.map((room) =>
+    room.beRoomType ? room : { ...room, beRoomType: beRoomTypeBySlug.get(room.slug) },
+  );
+}
 
 export async function getRoomBySlug(slug: string): Promise<Room | undefined> {
   const list = await getRooms();
