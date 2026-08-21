@@ -54,6 +54,7 @@ ok=0; bad=0
 check() { if [ "$1" = "1" ]; then echo "  ✅ $2"; ok=$((ok+1)); else echo "  ❌ $2"; bad=$((bad+1)); fi; }
 has() { grep -qa "$2" "$1" && echo 1 || echo 0; }
 
+
 # ─────────────────────────── Бэкенд и данные ───────────────────────────
 
 cd "$ROOT/backend" || exit 1
@@ -134,6 +135,109 @@ check "$(has "$T/cab.html" 'airisresidence-kz@gmail.com')" "менеджер о�
 curl -s -b "$T/jar" -o "$T/bk.html" "$F/corp/bookings"
 check "$(has "$T/bk.html" 'Мои бронирования')" "страница броней открылась"
 check "$(has "$T/bk.html" 'Бронирований пока нет')" "пустое состояние показано"
+
+echo
+echo "── Подбор номеров ──"
+curl -s -b "$T/jar" -o "$T/pick.html" "$F/corp/booking"
+check "$(has "$T/pick.html" 'Новое бронирование')" "экран подбора открылся"
+check "$(has "$T/pick.html" 'Standart')" "номера показаны"
+# Прайс компании: скидка 12 % от 45 000 округляется вниз до сотни = 39 600.
+# Суммы печатаются с неразрывным пробелом: так и задумано, иначе число
+# рвётся переносом строки посередине. В UTF-8 он занимает ДВА байта, а grep
+# здесь работает побайтово — отсюда две точки в шаблоне вместо пробела.
+check "$(has "$T/pick.html" '39..600')" "корпоративная цена посчитана и показана"
+check "$(has "$T/pick.html" '45..000')" "публичная цена рядом — выгода видна"
+
+echo
+echo "── Оформление брони ──"
+IN=$(date -d "+10 days" +%F)
+OUT=$(date -d "+13 days" +%F)
+cat > "$T/booking.json" <<JSON
+{"checkIn":"$IN","checkOut":"$OUT","adults":2,"children":0,"guestName":"Guest","guestPhone":"+7 700 000 00 00","comment":"","items":[{"roomSlug":"comfort","roomsCount":1}]}
+JSON
+curl -s -b "$T/jar" -X POST "$F/api/corp/bookings" \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data-binary @"$T/booking.json" -o "$T/nb.json"
+check "$(has "$T/nb.json" '"number":"K-')" "бронь создана через прокси"
+check "$(has "$T/nb.json" '"nights":3')" "ночей посчитано верно"
+check "$(has "$T/nb.json" '"status":"new"')" "статус — заявка, а не подтверждение"
+
+# Цена в строке брони — снимок: она не должна зависеть от того, что потом
+# поменяют в прайсе.
+check "$(has "$T/nb.json" '"pricePerNight"')" "цена зафиксирована в строке брони"
+
+curl -s -b "$T/jar" -o "$T/bk2.html" "$F/corp/bookings"
+check "$(has "$T/bk2.html" 'K-0001')" "бронь видна в истории"
+check "$(has "$T/bk2.html" 'Ожидает подтверждения')" "статус подписан по-человечески"
+
+# Заявка на прошедшую дату уходить не должна.
+cat > "$T/past.json" <<'JSON'
+{"checkIn":"2020-01-01","checkOut":"2020-01-03","adults":1,"items":[{"roomSlug":"comfort","roomsCount":1}]}
+JSON
+pcode=$(curl -s -b "$T/jar" -X POST "$F/api/corp/bookings" \
+  -H 'Content-Type: application/json' --data-binary @"$T/past.json" -o /dev/null -w "%{http_code}")
+check "$([ "$pcode" = "400" ] && echo 1 || echo 0)" "прошедшая дата отклонена (получили $pcode)"
+
+# Номер на одного не должен принимать пятерых.
+cat > "$T/over.json" <<JSON
+{"checkIn":"$IN","checkOut":"$OUT","adults":5,"items":[{"roomSlug":"standart-single","roomsCount":1}]}
+JSON
+ocode=$(curl -s -b "$T/jar" -X POST "$F/api/corp/bookings" \
+  -H 'Content-Type: application/json' --data-binary @"$T/over.json" -o /dev/null -w "%{http_code}")
+check "$([ "$ocode" = "400" ] && echo 1 || echo 0)" "перебор гостей отклонён (получили $ocode)"
+
+echo
+echo "── Сотрудники ──"
+curl -s -b "$T/jar" -o "$T/emp.html" "$F/corp/employees"
+check "$(has "$T/emp.html" 'Сотрудники')" "раздел сотрудников открылся"
+check "$(has "$T/emp.html" 'admin@company-a.example')" "ответственный в списке"
+
+cat > "$T/newemp.json" <<'JSON'
+{"email":"driver@company-a.example","fullName":"Ержан Сотрудник","role":"employee","password":"staff-pass-123"}
+JSON
+curl -s -b "$T/jar" -X POST "$F/api/corp/employees" \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data-binary @"$T/newemp.json" -o "$T/ne.json"
+check "$(has "$T/ne.json" 'driver@company-a.example')" "сотрудник заведён"
+
+curl -s -c "$T/jar3" -X POST "$F/api/corp/login" -H 'Content-Type: application/json' \
+  -d '{"email":"driver@company-a.example","password":"staff-pass-123"}' -o "$T/le.json"
+check "$(has "$T/le.json" '"ok":true')" "новый сотрудник входит"
+
+# Рядовой сотрудник не видит чужих броней и не управляет коллегами.
+curl -s -b "$T/jar3" -o "$T/ebk.json" "$F/api/corp/bookings"
+check "$([ "$(cat "$T/ebk.json")" = "[]" ] && echo 1 || echo 0)" "чужие брони сотруднику не видны"
+ecode=$(curl -s -b "$T/jar3" -o /dev/null -w "%{http_code}" "$F/api/corp/employees")
+check "$([ "$ecode" = "403" ] && echo 1 || echo 0)" "список сотрудников ему закрыт (получили $ecode)"
+curl -s -b "$T/jar3" -L -o "$T/eredir.html" "$F/corp/employees"
+check "$(grep -qa 'Сотрудники' "$T/eredir.html" && echo 0 || echo 1)" "страница сотрудников его уводит в кабинет"
+
+echo
+echo "── Смена пароля ──"
+wcode=$(curl -s -b "$T/jar3" -X POST "$F/api/corp/password" -H 'Content-Type: application/json' \
+  -d '{"current_password":"wrong","new_password":"another-pass-123"}' -o /dev/null -w "%{http_code}")
+check "$([ "$wcode" = "400" ] && echo 1 || echo 0)" "неверный текущий пароль не принят (получили $wcode)"
+
+ncode=$(curl -s -b "$T/jar3" -X POST "$F/api/corp/password" -H 'Content-Type: application/json' \
+  -d '{"current_password":"staff-pass-123","new_password":"another-pass-123"}' -o /dev/null -w "%{http_code}")
+check "$([ "$ncode" = "204" ] && echo 1 || echo 0)" "пароль сменён (получили $ncode)"
+
+curl -s -X POST "$F/api/corp/login" -H 'Content-Type: application/json' \
+  -d '{"email":"driver@company-a.example","password":"another-pass-123"}' -o "$T/l2.json"
+check "$(has "$T/l2.json" '"ok":true')" "вход с новым паролем"
+
+curl -s -X POST "$F/api/corp/login" -H 'Content-Type: application/json' \
+  -d '{"email":"driver@company-a.example","password":"staff-pass-123"}' -o "$T/l3.json"
+check "$(has "$T/l3.json" 'error')" "старый пароль больше не работает"
+
+echo
+echo "── Отмена брони ──"
+BID=$(cat "$T/nb.json" | "$PY" -c "import sys,json;print(json.load(sys.stdin)['id'])")
+curl -s -b "$T/jar" -X POST "$F/api/corp/bookings/$BID/cancel" \
+  -H 'Content-Type: application/json' -d '{"reason":""}' -o "$T/cc.json"
+check "$(has "$T/cc.json" '"status":"cancelled"')" "бронь отменена"
+curl -s -b "$T/jar" -o "$T/me2.json" "$F/api/corp/me"
+check "$(has "$T/me2.json" '"activeBookings":0')" "счётчик активных вернулся к нулю"
 
 echo
 echo "── Языки ──"

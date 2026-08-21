@@ -66,6 +66,12 @@ export default async function CorpCabinetPage() {
         <h1 className="font-display text-[clamp(1.9rem,4vw,2.8rem)] leading-tight font-semibold">
           {dict.cabinet.title}
         </h1>
+        <Link
+          href="/corp/password"
+          className="mt-3 inline-block text-sm text-wine-600 underline underline-offset-4"
+        >
+          {dict.cabinet.changePassword}
+        </Link>
 
         <p className="mt-5 max-w-3xl rounded-xl border-l-2 border-wine-500 bg-white/70 px-4 py-3 text-sm leading-relaxed text-ink-700/85">
           {dict.notice}
@@ -92,15 +98,26 @@ export default async function CorpCabinetPage() {
           <Counter value={formatMoney(me.paidAmount)} label={dict.cabinet.paidAmount} />
         </section>
 
-        {/* Плитка появляется вместе со своей страницей. Подбор номеров,
-            финансы, отчёты и сотрудники — следующие заходы; ссылка в никуда
-            хуже её отсутствия, гость жмёт и получает 404. */}
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Плитка появляется вместе со своей страницей: ссылка в никуда хуже
+            её отсутствия. Финансы и отчёты — следующий заход. */}
+        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Tile
+            href="/corp/booking"
+            title={dict.cabinet.tiles.book}
+            hint={dict.cabinet.tiles.bookHint}
+          />
           <Tile
             href="/corp/bookings"
             title={dict.cabinet.tiles.bookings}
             hint={dict.cabinet.tiles.bookingsHint}
           />
+          {isBoss && (
+            <Tile
+              href="/corp/employees"
+              title={dict.cabinet.tiles.employees}
+              hint={dict.cabinet.tiles.employeesHint}
+            />
+          )}
         </section>
       </main>
     </>

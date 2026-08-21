@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 
 import { DEFAULT_LOCALE, isLocale, type Locale } from "./dictionary";
-import type { CorpBooking, CorpMe, CorpRoom } from "./types";
+import type { CorpBooking, CorpMe, CorpRoom, CorpUser } from "./types";
 
 /**
  * Серверная часть корпоративного кабинета.
@@ -79,4 +79,9 @@ export function getCorpBookings(): Promise<CorpBooking[] | null> {
 
 export function getCorpRooms(): Promise<CorpRoom[] | null> {
   return readJson<CorpRoom[]>("/rooms");
+}
+
+/** Список сотрудников. Бэкенд отдаёт его только ответственному. */
+export function getCorpEmployees(): Promise<CorpUser[] | null> {
+  return readJson<CorpUser[]>("/employees");
 }
