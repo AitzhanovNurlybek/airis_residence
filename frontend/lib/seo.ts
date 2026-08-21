@@ -18,8 +18,17 @@ export function pageMetadata({
   noindex?: boolean;
 }): Metadata {
   const url = new URL(path, BASE_URL).toString();
+
+  // Корневой лейаут дописывает к каждому заголовку «| Airis Residence».
+  // Половина страниц называет отель и сама — в выдаче получалось
+  // «Airis Residence, Алматы — официальный сайт | Airis Residence», а на
+  // странице бронирования бренд стоял дважды при длине 88 символов.
+  // Если имя отеля в заголовке уже есть, отдаём absolute и не даём шаблону
+  // приписать его второй раз.
+  const brandAlreadyThere = title.includes(site.name);
+
   return {
-    title,
+    title: brandAlreadyThere ? { absolute: title } : title,
     description,
     alternates: { canonical: url },
     robots: noindex ? { index: false, follow: false } : { index: true, follow: true },

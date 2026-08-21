@@ -45,15 +45,25 @@ export function Header() {
           </Link>
 
           <nav className="hidden items-center gap-7 lg:flex" aria-label="Основная навигация">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="relative py-2 text-sm text-cream/75 transition-colors hover:text-cream after:absolute after:inset-x-0 after:-bottom-0.5 after:h-px after:origin-left after:scale-x-0 after:bg-sand-300 after:transition-transform after:duration-300 hover:after:scale-x-100"
-              >
-                {link.label}
-              </Link>
-            ))}
+            {navLinks.map((link) =>
+              "accent" in link && link.accent ? (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-full border border-sand-400/40 px-4 py-1.5 text-sm text-sand-200 transition-colors hover:border-sand-300/70 hover:bg-sand-300/8 hover:text-cream"
+                >
+                  {link.label}
+                </Link>
+              ) : (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="relative py-2 text-sm text-cream/75 transition-colors hover:text-cream after:absolute after:inset-x-0 after:-bottom-0.5 after:h-px after:origin-left after:scale-x-0 after:bg-sand-300 after:transition-transform after:duration-300 hover:after:scale-x-100"
+                >
+                  {link.label}
+                </Link>
+              ),
+            )}
           </nav>
 
           <div className="flex items-center gap-3">
@@ -122,7 +132,9 @@ export function Header() {
                   <Link
                     href={link.href}
                     onClick={() => setOpen(false)}
-                    className="block border-b border-white/8 py-4 font-display text-2xl text-cream sm:py-5 sm:text-3xl"
+                    className={`block border-b border-white/8 py-4 font-display text-2xl sm:py-5 sm:text-3xl ${
+                      "accent" in link && link.accent ? "text-sand-300" : "text-cream"
+                    }`}
                   >
                     {link.label}
                   </Link>

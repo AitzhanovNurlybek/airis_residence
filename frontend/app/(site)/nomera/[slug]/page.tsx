@@ -25,8 +25,12 @@ export async function generateMetadata(props: PageProps<"/nomera/[slug]">): Prom
   if (!room) return pageMetadata({ title: "Номер не найден", description: "", noindex: true });
 
   return pageMetadata({
-    title: `${room.shortName} — ${room.area}, от ${formatPrice(room.price)} за ночь`,
-    description: `${room.summary} Отель Airis Residence, ${site.address.city}, ${site.address.street}. Завтрак включён, стойка регистрации круглосуточно.`,
+    // Без «за ночь»: с шаблоном бренда заголовок переваливал за 60 символов
+    // и обрезался ровно на цене — то есть на самом полезном месте.
+    title: `${room.shortName} — ${room.area}, от ${formatPrice(room.price)}`,
+    // Хвост про адрес и завтрак повторялся на каждом номере и съедал 110
+    // символов из 160, вытесняя то, чем номера отличаются друг от друга.
+    description: `${room.summary} ${site.address.city}, завтрак включён, заезд с ${site.policy.checkIn}.`,
     path: `/nomera/${room.slug}`,
     image: room.images[0],
   });

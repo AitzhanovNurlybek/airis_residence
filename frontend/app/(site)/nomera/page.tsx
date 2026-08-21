@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const from = formatPrice(await getPriceFrom());
   return pageMetadata({
     title: `Номера отеля Airis Residence в Алматы — от ${from}`,
-    description: `Пять типов номеров в отеле Airis Residence: Standart Single, Standart, Standart Twin, Comfort и Comfort Plus. Площадь от 16 до 30 м², завтрак включён, цены от ${from} за ночь.`,
+    description: `Пять типов номеров от ${from} за ночь: Standart Single, Standart, Standart Twin, Comfort и Comfort Plus. Площадь от 16 до 30 м², завтрак включён.`,
     path: "/nomera",
   });
 }

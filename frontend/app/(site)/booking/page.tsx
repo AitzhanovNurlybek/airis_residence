@@ -5,7 +5,9 @@ import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import {BeBookingForm} from "@/components/be-forms/BeBookingForm";
 
 export const metadata: Metadata = pageMetadata({
-  title: "Бронирование номера в отеле Airis Residence, Алматы - Официальный сайт",
+  // Было «Бронирование номера в отеле Airis Residence, Алматы - Официальный
+  // сайт» — 88 символов, и бренд в выдаче повторялся дважды.
+  title: "Бронирование номера — Airis Residence, Алматы",
   description:
     "Забронируйте номер в отеле Airis Residence напрямую: без комиссии агрегаторов, завтрак включён, подтверждение брони в течение 15 минут.",
   path: "/booking",

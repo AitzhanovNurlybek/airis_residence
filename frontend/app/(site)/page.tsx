@@ -24,7 +24,7 @@ import { getPriceFrom, getRooms } from "@/lib/rooms";
 export async function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
     title: "Airis Residence, Алматы - Официальный сайт",
-    description: `Отель Airis Residence в центре Алматы: ${site.roomsCount} номеров, завтрак включён, стойка регистрации 24/7. ${site.address.street}. Номера от ${formatPrice(await getPriceFrom())} за ночь — бронирование напрямую, без комиссии агрегаторов.`,
+    description: `${site.roomsCount} номера в центре Алматы, ${site.address.street}. Завтрак включён, стойка регистрации 24/7. От ${formatPrice(await getPriceFrom())} за ночь — напрямую, без комиссии агрегаторов.`,
     path: "/",
   });
 }

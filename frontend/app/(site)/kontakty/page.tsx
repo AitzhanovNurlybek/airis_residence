@@ -9,7 +9,7 @@ import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 export const metadata: Metadata = pageMetadata({
   title: "Контакты отеля Airis Residence в Алматы",
   description:
-    "Адрес: Алматы, ул. Наурызбай батыра 134/2. Телефоны +7 (777) 531-00-09 и +7 (727) 277-20-20, почта airisresidence.kz@gmail.com. Стойка регистрации работает круглосуточно.",
+    "Алматы, ул. Наурызбай батыра 134/2. Телефон +7 (777) 531-00-09, почта airisresidence.kz@gmail.com. Стойка регистрации работает круглосуточно.",
   path: "/kontakty",
 });
 

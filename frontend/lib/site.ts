@@ -327,6 +327,10 @@ export const navLinks = [
   { href: "/#raspolozhenie", label: "Расположение" },
   { href: "/kak-oplatit", label: "Оплата" },
   { href: "/kontakty", label: "Контакты" },
+  // Отдельный вход для компаний. Помечен accent: это не соседняя
+  // страница сайта, а другой сценарий и другой посетитель — он должен
+  // находиться взглядом, не читая всё меню подряд.
+  { href: "/korporativnym-klientam", label: "Компаниям", accent: true },
 ] as const;
 
 export const formatPrice = (value: number) =>

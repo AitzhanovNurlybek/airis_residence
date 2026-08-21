@@ -20,8 +20,8 @@ import { getPriceFrom } from "@/lib/rooms";
 export async function generateMetadata(): Promise<Metadata> {
   const from = formatPrice(await getPriceFrom());
   return pageMetadata({
-    title: "Корпоративным клиентам — отель Airis Residence, Алматы",
-    description: `Размещение сотрудников и командированных в центре Алматы по договору: цены закреплены, оплата по счёту на юрлицо, закрытый кабинет для бронирования. Номера от ${from} за ночь, завтрак включён.`,
+    title: "Корпоративным клиентам — Airis Residence, Алматы",
+    description: `Размещение сотрудников по договору в центре Алматы: цены закреплены, оплата по счёту на юрлицо, свой кабинет для брони. Номера от ${from}, завтрак включён.`,
     path: "/korporativnym-klientam",
   });
 }
