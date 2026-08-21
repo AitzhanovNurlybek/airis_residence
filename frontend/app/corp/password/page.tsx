@@ -23,7 +23,7 @@ export default async function CorpPasswordPage() {
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
-        <Link href="/corp" className="text-sm text-wine-600 underline underline-offset-4">
+        <Link href="/corp" prefetch={false} className="text-sm text-wine-600 underline underline-offset-4">
           ← {dict.nav.back}
         </Link>
 

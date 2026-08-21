@@ -16,13 +16,13 @@ export default async function CorpFinancePage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
 
-  const me = await getCorpMe();
+  const [me, bookingsResult] = await Promise.all([getCorpMe(), getCorpBookings()]);
   if (!me) redirect("/corp/login");
   // Деньги компании — дело ответственного. Рядовой сотрудник видит только свои
   // брони, и сводка по всей компании ему ничего не скажет, кроме лишнего.
   if (me.user.role !== "admin") redirect("/corp");
 
-  const bookings = (await getCorpBookings()) ?? [];
+  const bookings = bookingsResult ?? [];
   const t = dict.finance;
 
   const sum = (list: typeof bookings) => list.reduce((acc, b) => acc + b.totalAmount, 0);
@@ -52,7 +52,7 @@ export default async function CorpFinancePage() {
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
-        <Link href="/corp" className="text-sm text-wine-600 underline underline-offset-4">
+        <Link href="/corp" prefetch={false} className="text-sm text-wine-600 underline underline-offset-4">
           ← {dict.nav.back}
         </Link>
 

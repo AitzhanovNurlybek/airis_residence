@@ -28,6 +28,7 @@ function Tile({ href, title, hint }: { href: string; title: string; hint: string
   return (
     <Link
       href={href}
+      prefetch={false}
       className="rounded-2xl bg-white px-6 py-5 shadow-sm transition-shadow hover:shadow-md"
     >
       <div className="font-display text-lg text-wine-500">{title}</div>
@@ -68,6 +69,7 @@ export default async function CorpCabinetPage() {
         </h1>
         <Link
           href="/corp/password"
+          prefetch={false}
           className="mt-3 inline-block text-sm text-wine-600 underline underline-offset-4"
         >
           {dict.cabinet.changePassword}

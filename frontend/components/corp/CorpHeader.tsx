@@ -26,7 +26,10 @@ export function CorpHeader({
   return (
     <header className="sticky top-0 z-40 border-b border-white/8 bg-ink-950">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-5 md:px-8">
-        <Link href="/corp" className="shrink-0" aria-label={dict.brand}>
+        {/* prefetch выключен по всему кабинету. Каждая его страница
+            динамическая и ходит в базу; предзагрузка означала бы рендер на
+            сервере с запросом через полмира на каждое наведение мыши. */}
+        <Link href="/corp" prefetch={false} className="shrink-0" aria-label={dict.brand}>
           <Logo className="h-8 w-auto" />
         </Link>
 
@@ -41,6 +44,7 @@ export function CorpHeader({
             <>
               <Link
                 href="/corp"
+                prefetch={false}
                 className="text-sm text-cream/85 transition-colors hover:text-cream"
               >
                 {dict.nav.cabinet}

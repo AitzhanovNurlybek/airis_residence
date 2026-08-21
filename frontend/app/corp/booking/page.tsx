@@ -11,10 +11,9 @@ export default async function CorpBookingPage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
 
-  const me = await getCorpMe();
+  const [me, roomsResult] = await Promise.all([getCorpMe(), getCorpRooms()]);
   if (!me) redirect("/corp/login");
-
-  const rooms = (await getCorpRooms()) ?? [];
+  const rooms = roomsResult ?? [];
 
   return (
     <>
@@ -26,7 +25,7 @@ export default async function CorpBookingPage() {
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
-        <Link href="/corp" className="text-sm text-wine-600 underline underline-offset-4">
+        <Link href="/corp" prefetch={false} className="text-sm text-wine-600 underline underline-offset-4">
           ← {dict.nav.back}
         </Link>
 

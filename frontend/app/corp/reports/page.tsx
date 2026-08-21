@@ -15,11 +15,11 @@ export default async function CorpReportsPage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
 
-  const me = await getCorpMe();
+  const [me, bookingsResult] = await Promise.all([getCorpMe(), getCorpBookings()]);
   if (!me) redirect("/corp/login");
   if (me.user.role !== "admin") redirect("/corp");
 
-  const bookings = ((await getCorpBookings()) ?? []).filter((b) => b.status !== "cancelled");
+  const bookings = (bookingsResult ?? []).filter((b) => b.status !== "cancelled");
   const t = dict.reports;
 
   const byEmployee = new Map<string, { count: number; nights: number; amount: number }>();
@@ -51,7 +51,7 @@ export default async function CorpReportsPage() {
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
-        <Link href="/corp" className="text-sm text-wine-600 underline underline-offset-4">
+        <Link href="/corp" prefetch={false} className="text-sm text-wine-600 underline underline-offset-4">
           ← {dict.nav.back}
         </Link>
 

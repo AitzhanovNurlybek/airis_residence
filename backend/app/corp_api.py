@@ -15,7 +15,7 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import require_admin
@@ -203,13 +203,29 @@ async def corp_me(
     """Первый экран кабинета: карточка компании и три счётчика."""
     company = await session.get(Company, user.company_id)
 
-    result = await session.execute(
-        select(CorpBooking).where(CorpBooking.company_id == user.company_id)
+    # Считаем в базе, а не в питоне. Раньше сюда тянулись ВСЕ брони компании
+    # целиком со всеми полями — ради трёх чисел на первом экране. У активного
+    # клиента их за год накапливаются сотни, и каждая загрузка кабинета
+    # везла их через полмира: база в Сиднее, приложение в Вашингтоне.
+    totals = await session.execute(
+        select(
+            CorpBooking.status,
+            func.count(CorpBooking.id),
+            func.coalesce(func.sum(CorpBooking.total_amount), 0),
+        )
+        .where(CorpBooking.company_id == user.company_id)
+        .group_by(CorpBooking.status)
     )
-    bookings = list(result.scalars().all())
 
-    active = [b for b in bookings if b.status in ACTIVE_STATUSES]
-    paid = [b for b in bookings if b.status == "paid"]
+    active_count = 0
+    active_sum = 0
+    paid_sum = 0
+    for status_value, count, amount in totals.all():
+        if status_value in ACTIVE_STATUSES:
+            active_count += count
+            active_sum += amount
+        elif status_value == "paid":
+            paid_sum += amount
 
     user_out = CompanyUserOut.model_validate(user)
     user_out.hasPassword = bool(user.password_hash)
@@ -217,9 +233,9 @@ async def corp_me(
     return CorpMeOut(
         user=user_out,
         company=CompanyOut.model_validate(company),
-        activeBookings=len(active),
-        totalAmount=sum(b.total_amount for b in active),
-        paidAmount=sum(b.total_amount for b in paid),
+        activeBookings=active_count,
+        totalAmount=active_sum,
+        paidAmount=paid_sum,
     )
 
 

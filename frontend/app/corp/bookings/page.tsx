@@ -27,10 +27,10 @@ export default async function CorpBookingsPage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
 
-  const me = await getCorpMe();
+  // Запросы независимы, поэтому идут вместе: последовательные await здесь
+  // складываются в два перелёта до базы вместо одного по времени.
+  const [me, bookings] = await Promise.all([getCorpMe(), getCorpBookings()]);
   if (!me) redirect("/corp/login");
-
-  const bookings = (await getCorpBookings()) ?? [];
 
   return (
     <>
@@ -44,6 +44,7 @@ export default async function CorpBookingsPage() {
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
         <Link
           href="/corp"
+          prefetch={false}
           className="text-sm text-wine-600 underline underline-offset-4"
         >
           ← {dict.nav.back}
@@ -53,11 +54,11 @@ export default async function CorpBookingsPage() {
           {dict.bookings.title}
         </h1>
 
-        <Link href="/corp/booking" className={buttonClass("primary", "md", "mt-6")}>
+        <Link href="/corp/booking" prefetch={false} className={buttonClass("primary", "md", "mt-6")}>
           + {dict.bookings.create}
         </Link>
 
-        {bookings.length === 0 ? (
+        {(bookings ?? []).length === 0 ? (
           <div className="mt-8 rounded-3xl bg-white p-10 text-center shadow-sm">
             <p className="text-lg text-ink-950">{dict.bookings.empty}</p>
             <p className="mt-2 text-sm text-ink-700/60">{dict.bookings.emptyHint}</p>
@@ -80,7 +81,7 @@ export default async function CorpBookingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {bookings.map((booking) => (
+                {(bookings ?? []).map((booking) => (
                   <tr key={booking.id} className="border-b border-ink-600/8 last:border-0">
                     <td className="px-5 py-4 whitespace-nowrap">{booking.number}</td>
                     <td className="px-5 py-4 whitespace-nowrap">

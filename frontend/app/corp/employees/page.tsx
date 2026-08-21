@@ -10,13 +10,13 @@ export default async function CorpEmployeesPage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
 
-  const me = await getCorpMe();
+  const [me, employeesResult] = await Promise.all([getCorpMe(), getCorpEmployees()]);
   if (!me) redirect("/corp/login");
   // Раздел для ответственного. Бэкенд отказал бы и так, но лучше увести
   // человека в кабинет, чем показать ему пустой экран с ошибкой.
   if (me.user.role !== "admin") redirect("/corp");
 
-  const employees = (await getCorpEmployees()) ?? [];
+  const employees = employeesResult ?? [];
 
   return (
     <>
@@ -28,7 +28,7 @@ export default async function CorpEmployeesPage() {
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
-        <Link href="/corp" className="text-sm text-wine-600 underline underline-offset-4">
+        <Link href="/corp" prefetch={false} className="text-sm text-wine-600 underline underline-offset-4">
           ← {dict.nav.back}
         </Link>
 
