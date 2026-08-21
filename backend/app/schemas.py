@@ -1,6 +1,6 @@
 """Схемы запросов и ответов."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -181,3 +181,210 @@ class PaymentInitOut(BaseModel):
     order_id: str
     payment_url: str
     status: str
+
+
+# ────────────────────── Корпоративный кабинет (B2B) ──────────────────────
+
+
+class CorpLoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=160)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class CorpLoginOut(BaseModel):
+    token: str
+    expires_at: int
+    role: str
+    company_name: str
+
+
+class CorpPasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    # Восемь символов — нижняя граница, ниже которой пароль перестаёт быть
+    # паролем. Требовать спецсимволы не стали: люди в ответ пишут Qwerty1!
+    # и записывают на бумажке, а длина работает лучше.
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class CompanyOut(BaseModel):
+    """Карточка компании — то, что сотрудник видит в шапке кабинета."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str
+    name: str
+    bin: str
+    contractNumber: str = Field(default="", validation_alias="contract_number")
+    contractDate: date | None = Field(default=None, validation_alias="contract_date")
+    paymentTerms: str = Field(default="", validation_alias="payment_terms")
+    managerName: str = Field(default="", validation_alias="manager_name")
+    managerEmail: str = Field(default="", validation_alias="manager_email")
+    managerPhone: str = Field(default="", validation_alias="manager_phone")
+    discountPercent: int = Field(default=0, validation_alias="discount_percent")
+
+
+class CompanyUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    fullName: str = Field(default="", validation_alias="full_name")
+    phone: str = ""
+    role: str
+    isActive: bool = Field(default=True, validation_alias="is_active")
+    lastLoginAt: datetime | None = Field(default=None, validation_alias="last_login_at")
+    # Заведён ли пароль. Само значение наружу не отдаём никогда —
+    # только признак, чтобы в списке сотрудников было видно, кто ещё не вошёл.
+    hasPassword: bool = False
+
+
+class CorpMeOut(BaseModel):
+    """Всё, что нужно кабинету на первом экране, одним запросом."""
+
+    user: CompanyUserOut
+    company: CompanyOut
+    activeBookings: int = 0
+    totalAmount: int = 0
+    paidAmount: int = 0
+
+
+class CorpRoomOut(BaseModel):
+    """Номер с корпоративной ценой — витрина подбора."""
+
+    slug: str
+    name: str
+    shortName: str
+    area: str
+    capacity: int
+    beds: str
+    summary: str
+    features: list[str]
+    images: list[str]
+    publicPrice: int
+    corpPrice: int
+
+
+class CorpBookingItemIn(BaseModel):
+    roomSlug: str = Field(min_length=1, max_length=60)
+    roomsCount: int = Field(default=1, ge=1, le=50)
+
+
+class CorpBookingItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    roomSlug: str = Field(validation_alias="room_slug")
+    roomName: str = Field(default="", validation_alias="room_name")
+    roomsCount: int = Field(default=1, validation_alias="rooms_count")
+    pricePerNight: int = Field(default=0, validation_alias="price_per_night")
+    amount: int = 0
+
+
+class CorpBookingIn(BaseModel):
+    checkIn: date
+    checkOut: date
+    adults: int = Field(default=1, ge=1, le=50)
+    children: int = Field(default=0, ge=0, le=50)
+    guestName: str = Field(default="", max_length=200)
+    guestPhone: str = Field(default="", max_length=40)
+    comment: str = Field(default="", max_length=2000)
+    items: list[CorpBookingItemIn] = Field(min_length=1, max_length=20)
+
+    @field_validator("checkOut")
+    @classmethod
+    def _after_check_in(cls, value: date, info):
+        check_in = info.data.get("checkIn")
+        if check_in and value <= check_in:
+            raise ValueError("Дата выезда должна быть позже даты заезда")
+        return value
+
+
+class CorpBookingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    number: str
+    hotelSlug: str = Field(default="airis", validation_alias="hotel_slug")
+    checkIn: date = Field(validation_alias="check_in")
+    checkOut: date = Field(validation_alias="check_out")
+    nights: int
+    adults: int
+    children: int
+    guestName: str = Field(default="", validation_alias="guest_name")
+    guestPhone: str = Field(default="", validation_alias="guest_phone")
+    comment: str = ""
+    status: str
+    totalAmount: int = Field(default=0, validation_alias="total_amount")
+    invoiceNumber: str = Field(default="", validation_alias="invoice_number")
+    createdAt: datetime = Field(validation_alias="created_at")
+    cancelReason: str = Field(default="", validation_alias="cancel_reason")
+    # Кто оформил — в таблице «Мои бронирования» есть колонка «Сотрудник».
+    createdByName: str = ""
+    items: list[CorpBookingItemOut] = []
+
+
+class CorpCancelIn(BaseModel):
+    reason: str = Field(default="", max_length=300)
+
+
+class CompanyUserIn(BaseModel):
+    """Заведение сотрудника. Пароль задаёт тот, кто заводит."""
+
+    email: str = Field(min_length=3, max_length=160)
+    fullName: str = Field(default="", max_length=160)
+    phone: str = Field(default="", max_length=40)
+    role: str = Field(default="employee", pattern=r"^(admin|employee)$")
+    password: str = Field(default="", max_length=200)
+
+
+class CompanyUserPatch(BaseModel):
+    fullName: str | None = Field(default=None, max_length=160)
+    phone: str | None = Field(default=None, max_length=40)
+    role: str | None = Field(default=None, pattern=r"^(admin|employee)$")
+    isActive: bool | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class CompanyIn(BaseModel):
+    """Создание компании из админки отеля."""
+
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,58}$")
+    name: str = Field(min_length=2, max_length=200)
+    bin: str = Field(default="", max_length=12)
+    contractNumber: str = Field(default="", max_length=60)
+    contractDate: date | None = None
+    paymentTerms: str = Field(default="", max_length=200)
+    managerName: str = Field(default="", max_length=160)
+    managerEmail: str = Field(default="", max_length=160)
+    managerPhone: str = Field(default="", max_length=40)
+    discountPercent: int = Field(default=0, ge=0, le=90)
+
+
+class CompanyPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+    bin: str | None = Field(default=None, max_length=12)
+    contractNumber: str | None = Field(default=None, max_length=60)
+    contractDate: date | None = None
+    paymentTerms: str | None = Field(default=None, max_length=200)
+    managerName: str | None = Field(default=None, max_length=160)
+    managerEmail: str | None = Field(default=None, max_length=160)
+    managerPhone: str | None = Field(default=None, max_length=40)
+    discountPercent: int | None = Field(default=None, ge=0, le=90)
+    isActive: bool | None = None
+
+
+class CompanyRateIn(BaseModel):
+    roomSlug: str = Field(min_length=1, max_length=60)
+    price: int = Field(ge=0, le=100_000_000)
+
+
+class CompanyRateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    roomSlug: str = Field(validation_alias="room_slug")
+    price: int
+
+
+class CorpBookingStatusIn(BaseModel):
+    status: str = Field(pattern=r"^(new|confirmed|invoiced|paid|cancelled)$")
+    invoiceNumber: str = Field(default="", max_length=60)
+    reason: str = Field(default="", max_length=300)

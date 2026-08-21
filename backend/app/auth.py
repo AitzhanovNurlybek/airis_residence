@@ -27,10 +27,22 @@ def _b64d(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
+#: Метка контура в токене.
+#:
+#: Появилась не сразу и закрывает настоящую дыру. Корпоративный кабинет
+#: подписывает свои токены тем же SECRET_KEY, а проверка ниже смотрела только
+#: на то, что `sub` непустой. У корпоративного токена `sub` — это id
+#: сотрудника, то есть строка «1»: любой сотрудник любой компании проходил
+#: в админку отеля. Теперь контур указан явно и сверяется.
+TOKEN_TYPE = "admin"
+
+
 def create_token(settings: Settings, username: str) -> tuple[str, int]:
     """Возвращает подписанный токен и момент его истечения (unix-время)."""
     expires_at = int(time.time()) + settings.session_hours * 3600
-    payload = _b64e(json.dumps({"sub": username, "exp": expires_at}).encode())
+    payload = _b64e(
+        json.dumps({"typ": TOKEN_TYPE, "sub": username, "exp": expires_at}).encode()
+    )
     signature = hmac.new(
         settings.secret_key.encode(), payload.encode(), hashlib.sha256
     ).digest()
@@ -54,6 +66,11 @@ def verify_token(settings: Settings, token: str) -> str | None:
     except Exception:
         return None
 
+    # Токены, выпущенные до появления метки, ещё живут в браузерах — их
+    # не отвергаем, иначе администратор вылетит посреди работы. Чужую метку
+    # (корпоративную) отвергаем всегда.
+    if data.get("typ", TOKEN_TYPE) != TOKEN_TYPE:
+        return None
     if int(data.get("exp", 0)) < time.time():
         return None
     return str(data.get("sub", ""))
@@ -82,6 +99,8 @@ def require_admin(
         token = request.cookies.get("airis_admin", "")
 
     username = verify_token(settings, token) if token else None
-    if not username:
+    # Вторая проверка, независимая от метки: учётка в админке ровно одна, и
+    # её имя задано в окружении. Токен с любым другим `sub` — не наш.
+    if not username or not secrets.compare_digest(username, settings.admin_username):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Нужно войти заново")
     return username

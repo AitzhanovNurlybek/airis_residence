@@ -20,6 +20,7 @@ from .config import Settings, get_settings
 from .db import Lead, Payment, Room, SessionLocal, get_session, init_db, utcnow
 from .notify import notify_telegram
 from .payments import PaymentError, get_provider, new_order_id
+from .corp_api import admin as corp_admin_router, corp as corp_router
 from .rooms_api import admin as rooms_admin_router, public as rooms_public_router
 from .site_videos_api import (
     admin as site_videos_admin_router,
@@ -148,6 +149,9 @@ app.include_router(rooms_public_router)
 app.include_router(rooms_admin_router)
 app.include_router(site_videos_public_router)
 app.include_router(site_videos_admin_router)
+# Корпоративный кабинет: /api/corp/* для компаний, /api/admin/corp/* для отеля
+app.include_router(corp_router)
+app.include_router(corp_admin_router)
 
 
 def require_api_key(x_api_key: str = Header(default="")) -> None:

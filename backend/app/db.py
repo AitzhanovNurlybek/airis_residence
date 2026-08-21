@@ -1,9 +1,21 @@
 """Подключение к базе и модели."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, func, inspect
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    inspect,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -192,6 +204,201 @@ class Payment(Base):
     raw_callback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ────────────────────── Корпоративный кабинет (B2B) ──────────────────────
+#
+# Отдельный контур: у компаний своя авторизация, свои цены и свои брони.
+# С публичным сайтом он пересекается только справочником номеров: номер тот
+# же самый, отличается цена и то, кто и как его бронирует.
+
+
+class Company(Base):
+    """
+    Компания-клиент, с которой подписан договор.
+
+    Реквизиты (БИН, номер и дата договора, условия оплаты) лежат полями, а не
+    текстом: их видит сотрудник компании в кабинете, и они же идут в счёт.
+    Менеджер Airis тоже привязан к компании — у каждого корпоративного
+    клиента свой человек со стороны отеля.
+    """
+
+    __tablename__ = "companies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Короткий код: адреса в админке и номера счетов. Меняться не должен.
+    slug: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    bin: Mapped[str] = mapped_column(String(12), default="")
+
+    contract_number: Mapped[str] = mapped_column(String(60), default="")
+    contract_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Свободный текст: «постоплата, 30 дн. (после услуг)». Вариантов у разных
+    # компаний слишком много, чтобы загонять их в справочник.
+    payment_terms: Mapped[str] = mapped_column(String(200), default="")
+
+    manager_name: Mapped[str] = mapped_column(String(160), default="")
+    manager_email: Mapped[str] = mapped_column(String(160), default="")
+    manager_phone: Mapped[str] = mapped_column(String(40), default="")
+
+    # Скидка на весь прайс — обычный случай в договоре: «минус 12 % от стойки».
+    # Точечная цена на конкретный номер задаётся в CompanyRate и важнее.
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CompanyUser(Base):
+    """
+    Сотрудник компании, входящий в кабинет.
+
+    Пароль хранится хешем (corp_auth.hash_password) — в отличие от админки
+    отеля, где одна учётка на весь отель и логин лежит в окружении. Здесь
+    пользователей много, они приходят и уходят, поэтому нужна таблица.
+
+    Роли всего две. `admin` заводит и отключает коллег и видит расходы всей
+    компании; `employee` бронирует и видит только свои брони. Больше
+    градаций заказчик не просил, а лишние роли всегда дороже, чем кажутся.
+    """
+
+    __tablename__ = "company_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+
+    email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    full_name: Mapped[str] = mapped_column(String(160), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+
+    role: Mapped[str] = mapped_column(String(20), default="employee", index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class CompanyRate(Base):
+    """
+    Корпоративная цена на конкретный тип номера.
+
+    Привязка к номеру идёт по slug, а не по id. Slug — внешний код номера: он
+    же в адресах страниц и в документах для интеграторов, и именно его сверяют
+    с системой бронирования. Числовой id живёт только внутри базы.
+    """
+
+    __tablename__ = "company_rates"
+    __table_args__ = (UniqueConstraint("company_id", "room_slug", name="uq_company_room"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    room_slug: Mapped[str] = mapped_column(String(60), index=True)
+    price: Mapped[int] = mapped_column(Integer)  # тенге за ночь
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CorpBooking(Base):
+    """
+    Бронирование, оформленное компанией.
+
+    Пока система бронирования отеля не отдаёт API, это заявка: сотрудник
+    оформляет её сам по корпоративным ценам, менеджер подтверждает и
+    выставляет счёт. Когда API появится, добавится поле с внешним номером
+    брони, а жизненный цикл останется прежним — поэтому статусы описывают
+    состояние сделки, а не то, кто её обрабатывает.
+
+    Статусы: new (отправлена) → confirmed (менеджер подтвердил) →
+    invoiced (счёт выставлен) → paid; cancelled — на любом шаге до paid.
+    """
+
+    __tablename__ = "corp_bookings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Человеческий номер для писем и счетов: его называют менеджеру.
+    number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    # Кто оформил. Сотрудника могут отключить, а бронь останется —
+    # поэтому SET NULL, а не CASCADE.
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Портал заказчика спроектирован под несколько отелей (/hotels/airis).
+    # У нас отель пока один, но поле есть с самого начала: добавить его
+    # позже — значит переписывать все брони задним числом.
+    hotel_slug: Mapped[str] = mapped_column(String(60), default="airis", index=True)
+
+    check_in: Mapped[date] = mapped_column(Date, index=True)
+    check_out: Mapped[date] = mapped_column(Date)
+    nights: Mapped[int] = mapped_column(Integer, default=1)
+
+    adults: Mapped[int] = mapped_column(Integer, default=1)
+    children: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Кто именно едет. Часто это не тот, кто оформляет бронь: секретарь
+    # бронирует для руководителя.
+    guest_name: Mapped[str] = mapped_column(String(200), default="")
+    guest_phone: Mapped[str] = mapped_column(String(40), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+    status: Mapped[str] = mapped_column(String(20), default="new", index=True)
+    total_amount: Mapped[int] = mapped_column(Integer, default=0)  # тенге
+
+    invoice_number: Mapped[str] = mapped_column(String(60), default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancel_reason: Mapped[str] = mapped_column(String(300), default="")
+
+
+class CorpBookingItem(Base):
+    """
+    Строка брони: столько-то номеров такой-то категории по такой-то цене.
+
+    Название номера и цена копируются сюда снимком, а не берутся из Room при
+    показе. Причина проверена на своей шкуре: номер «Luxe» переименовали в
+    «Comfort Plus», и все прошлые документы стали бы противоречить сами себе.
+    Договорённость на момент брони не должна меняться задним числом.
+    """
+
+    __tablename__ = "corp_booking_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("corp_bookings.id", ondelete="CASCADE"), index=True
+    )
+
+    room_slug: Mapped[str] = mapped_column(String(60), index=True)
+    room_name: Mapped[str] = mapped_column(String(160), default="")
+    rooms_count: Mapped[int] = mapped_column(Integer, default=1)
+    price_per_night: Mapped[int] = mapped_column(Integer, default=0)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
 
 
 logger = logging.getLogger(__name__)
