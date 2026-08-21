@@ -348,6 +348,97 @@ async def main() -> None:
         )
         check("ответственный отключил сотрудника", r.status_code == 200, str(r.status_code))
 
+        print("\n── Изоляция компаний ──")
+        # Заводим вторую компанию: главный вопрос безопасности здесь не «пустят
+        # ли чужого», а «увидит ли клиент А данные клиента Б».
+        r = await c.post(
+            "/api/admin/corp/companies",
+            headers=admin_h,
+            json={"slug": "company-b", "name": "ТОО «Компания-пример Б»", "discountPercent": 30},
+        )
+        check("вторая компания создана", r.status_code == 201, str(r.status_code))
+
+        r = await c.post(
+            "/api/admin/corp/companies/company-b/users",
+            headers=admin_h,
+            json={
+                "email": "boss@company-b.example",
+                "fullName": "Борис Второй",
+                "role": "admin",
+                "password": "bee-pass-12345",
+            },
+        )
+        check("сотрудник второй компании заведён", r.status_code == 201, str(r.status_code))
+
+        r = await c.post(
+            "/api/corp/login",
+            json={"email": "boss@company-b.example", "password": "bee-pass-12345"},
+        )
+        check("вход во вторую компанию", r.status_code == 200, str(r.status_code))
+        bee_h = {"Authorization": f"Bearer {r.json()['token']}"}
+
+        r = await c.get("/api/corp/bookings", headers=bee_h)
+        check("чужих броней не видно", r.json() == [], f"вернулось {len(r.json())}")
+
+        # Прямой заход по id чужой брони — то, что попробует любопытный
+        # сотрудник, подставив число в адрес.
+        r = await c.post(
+            f"/api/corp/bookings/{boss_booking_id}/cancel", headers=bee_h, json={}
+        )
+        check("чужую бронь не отменить по id", r.status_code == 404, str(r.status_code))
+
+        r = await c.get("/api/corp/me", headers=bee_h)
+        check(
+            "видит только свою компанию",
+            "Б" in r.json()["company"]["name"],
+            r.json()["company"]["name"],
+        )
+
+        r = await c.get("/api/corp/rooms", headers=bee_h)
+        bee_rooms = {x["slug"]: x for x in r.json()}
+        # У Б скидка 30 %, у А точечная цена 26 500 на standart-single.
+        check(
+            "цены второй компании свои, а не первой",
+            bee_rooms["standart-single"]["corpPrice"] != 26500,
+            str(bee_rooms["standart-single"]["corpPrice"]),
+        )
+
+        r = await c.get("/api/corp/employees", headers=bee_h)
+        emails = [u["email"] for u in r.json()]
+        check(
+            "в списке сотрудников только свои",
+            all("company-b" in e for e in emails),
+            ", ".join(emails),
+        )
+
+        print("\n── Защита от перебора ──")
+        # Одиннадцатая попытка по одной почте должна упереться в предел.
+        codes = []
+        for _ in range(12):
+            rr = await c.post(
+                "/api/corp/login",
+                json={"email": "boss@company-b.example", "password": "не-тот-пароль"},
+            )
+            codes.append(rr.status_code)
+        check("перебор одной учётки останавливается", 429 in codes, f"коды: {sorted(set(codes))}")
+        check(
+            "до предела отвечало 401, а не 429 сразу",
+            codes[0] == 401,
+            str(codes[0]),
+        )
+
+        # Другая почта из того же теста не должна пострадать: предел по учётке,
+        # а не общий на всех.
+        r = await c.post(
+            "/api/corp/login",
+            json={"email": "admin@company-a.example", "password": "corp-pass-12345"},
+        )
+        check(
+            "другая учётка не заблокирована заодно",
+            r.status_code == 200,
+            str(r.status_code),
+        )
+
         r = await c.patch(
             f"/api/admin/corp/companies/company-a", headers=admin_h, json={"isActive": False}
         )

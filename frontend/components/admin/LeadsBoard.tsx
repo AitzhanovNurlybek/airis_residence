@@ -48,6 +48,10 @@ export function LeadsBoard({
   return (
     <div>
       <h1 className="font-display text-3xl text-cream md:text-4xl">Заявки</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+        Обращения с формы на сайте от обычных гостей. Брони компаний сюда не
+        попадают — они в разделе «Компании», внутри карточки компании.
+      </p>
       <p className="mt-2 text-sm text-muted">
         {leads.length === 0
           ? "Заявок пока нет."

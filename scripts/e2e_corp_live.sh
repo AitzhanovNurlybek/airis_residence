@@ -293,6 +293,12 @@ check "$(has "$T/co.html" 'admin@company-a.example')" "сотрудники по
 check "$(has "$T/co.html" 'Заявки компании')" "раздел заявок на месте"
 check "$(has "$T/co.html" 'driver@company-a.example')" "заведённый в кабинете сотрудник виден и отелю"
 
+curl -s -b "$T/ajar" -o "$T/help.html" "$F/admin/spravka"
+check "$(has "$T/help.html" 'Справка')" "справка для менеджера открылась"
+check "$(has "$T/help.html" 'не перепутайте')" "разведены два кабинета"
+curl -s -b "$T/ajar" -o "$T/leads.html" "$F/admin/zayavki"
+check "$(has "$T/leads.html" 'Брони компаний сюда не')" "заявки с сайта отделены от корпоративных"
+
 acode=$(curl -s -o /dev/null -w "%{http_code}" "$F/admin/kompanii")
 check "$([ "$acode" = "307" ] && echo 1 || echo 0)" "без входа админка уводит на форму (получили $acode)"
 

@@ -36,6 +36,7 @@ from .schemas import (
     PaymentInitOut,
 )
 from .seed_rooms import SEED_ROOMS
+from .throttle import client_ip, reset, too_many
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -172,8 +173,6 @@ async def health():
 
 # ────────────────────────── Вход в админку ──────────────────────────
 
-_login_attempts: dict[str, list[float]] = {}
-
 
 @app.post("/api/auth/login", response_model=LoginOut, tags=["admin: вход"])
 async def login(
@@ -185,25 +184,17 @@ async def login(
             "Админка не настроена: задайте ADMIN_PASSWORD и SECRET_KEY в .env",
         )
 
-    # Простой тормоз против перебора: 10 попыток за 5 минут с одного адреса.
-    import time
-
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
-        request.client.host if request.client else "unknown"
-    )
-    now = time.time()
-    recent = [t for t in _login_attempts.get(ip, []) if now - t < 300]
-    if len(recent) >= 10:
+    # Тормоз против перебора: 10 попыток за 5 минут с одного адреса.
+    key = f"admin:{client_ip(request)}"
+    if too_many(key):
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, подождите 5 минут"
         )
-    recent.append(now)
-    _login_attempts[ip] = recent
 
     if not check_credentials(cfg, payload.username, payload.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль")
 
-    _login_attempts.pop(ip, None)
+    reset(key)
     token, expires_at = create_token(cfg, payload.username)
     return LoginOut(token=token, expiresAt=expires_at, username=payload.username)
 

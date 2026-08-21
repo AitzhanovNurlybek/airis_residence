@@ -14,7 +14,7 @@
 import logging
 from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,7 @@ from .db import (
     utcnow,
 )
 from .notify import notify_corp_booking
+from .throttle import PER_OFFICE_IP, client_ip, reset, too_many
 from .schemas import (
     CompanyIn,
     CompanyOut,
@@ -160,6 +161,7 @@ async def _bookings_out(
 @corp.post("/login", response_model=CorpLoginOut)
 async def corp_login(
     data: CorpLoginIn,
+    request: Request,
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
@@ -168,8 +170,25 @@ async def corp_login(
 
     Ответ на неверную почту и на неверный пароль одинаковый: иначе форму
     входа можно использовать как справочник «эта компания у вас обслуживается».
+
+    Перебор тормозится по двум ключам сразу, и пределы у них разные. По почте
+    жёстко: подбирают всегда конкретную учётку. По адресу щедро — сотрудники
+    компании сидят за общим офисным NAT, и общий лимит на всех заперал бы
+    контору после пары опечаток у двух человек.
     """
     email = data.email.strip().lower()
+
+    ip_key = f"corp-ip:{client_ip(request)}"
+    user_key = f"corp-user:{email}"
+    # Порядок важен: обе попытки должны быть отмечены, поэтому сначала считаем,
+    # а потом решаем. `or` с ранним выходом пропустил бы вторую.
+    over_ip = too_many(ip_key, PER_OFFICE_IP)
+    over_user = too_many(user_key)
+    if over_ip or over_user:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, подождите 5 минут"
+        )
+
     result = await session.execute(select(CompanyUser).where(CompanyUser.email == email))
     user = result.scalar_one_or_none()
 
@@ -182,6 +201,9 @@ async def corp_login(
             status.HTTP_403_FORBIDDEN,
             "Доступ компании приостановлен — свяжитесь с менеджером Airis",
         )
+
+    reset(ip_key)
+    reset(user_key)
 
     token, expires_at = create_token(settings, user)
     user.last_login_at = utcnow()
