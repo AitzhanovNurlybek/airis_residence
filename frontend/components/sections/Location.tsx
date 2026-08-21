@@ -94,7 +94,12 @@ export function Location() {
                       className="flex items-baseline justify-between gap-6 py-3.5 text-sm"
                     >
                       <span className="text-cream/85">{place.name}</span>
-                      <span className="shrink-0 text-sand-400 tabular-nums">{place.distance}</span>
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sand-400 tabular-nums">{place.distance}</span>
+                        {place.walk && (
+                          <span className="mt-0.5 block text-xs text-muted">{place.walk}</span>
+                        )}
+                      </span>
                     </li>
                   ))}
                 </ul>

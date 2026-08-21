@@ -4,6 +4,7 @@ import { formatPrice, site } from "@/lib/site";
 
 import { Hero } from "@/components/sections/Hero";
 import { About } from "@/components/sections/About";
+import { EventsNearby } from "@/components/sections/EventsNearby";
 import { Rooms } from "@/components/sections/Rooms";
 import { Amenities } from "@/components/sections/Amenities";
 import { Gallery } from "@/components/sections/Gallery";
@@ -36,6 +37,9 @@ export default async function HomePage() {
     <>
       <JsonLd data={faqJsonLd(faqItems.map((i) => ({ q: i.q, a: i.a })))} />
       <Hero priceFrom={priceFrom} />
+      {/* Сразу под первым экраном: туриста, летящего на концерт или матч,
+          цепляет именно это, а рассказ об отеле он читает уже потом. */}
+      <EventsNearby />
       <About />
       <Rooms rooms={rooms} />
       <Amenities />
