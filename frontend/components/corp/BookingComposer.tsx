@@ -240,23 +240,23 @@ export function BookingComposer({
                     count > 0 ? "ring-wine-500/50" : "ring-transparent"
                   }`}
                 >
+                  {/* Обычный img, а не next/image: оптимизатор на Vercel выключен
+                      (images.unoptimized), исходники ужаты заранее, и next/image
+                      потребовал бы прописанного домена хранилища ни за чем. */}
                   {room.images[0] && (
                     <div className="relative">
-                    /* Обычный img, не next/image: оптимизатор на Vercel выключен
-                       (images.unoptimized), исходники ужаты заранее, а next/image
-                       потребовал бы прописанного домена хранилища. */
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={room.images[0]}
-                      alt=""
-                      loading="lazy"
-                      className="h-40 w-full object-cover"
-                    />
-                    {room.images.length > 1 && (
-                      <span className="absolute top-3 right-3 rounded-md bg-ink-950/70 px-2 py-1 text-[0.65rem] text-white">
-                        {room.images.length} фото
-                      </span>
-                    )}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={room.images[0]}
+                        alt={room.shortName}
+                        loading="lazy"
+                        className="h-40 w-full object-cover"
+                      />
+                      {room.images.length > 1 && (
+                        <span className="absolute top-3 right-3 rounded-md bg-ink-950/70 px-2 py-1 text-[0.65rem] text-white">
+                          {room.images.length} фото
+                        </span>
+                      )}
                     </div>
                   )}
                   <div className="p-5">
