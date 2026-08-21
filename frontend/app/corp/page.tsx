@@ -61,6 +61,7 @@ export default async function CorpCabinetPage() {
         locale={locale}
         companyName={company.name}
         userName={user.fullName || user.email}
+        isAdmin={isBoss}
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">

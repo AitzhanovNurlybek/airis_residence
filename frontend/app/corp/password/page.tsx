@@ -20,6 +20,7 @@ export default async function CorpPasswordPage() {
         locale={locale}
         companyName={me.company.name}
         userName={me.user.fullName || me.user.email}
+        isAdmin={me.user.role === "admin"}
       />
 
       <main className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-12">
