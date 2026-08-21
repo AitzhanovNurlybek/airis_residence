@@ -4,6 +4,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { PageHeader, Prose } from "@/components/ui/Prose";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export const metadata: Metadata = pageMetadata({
   title: "Политика конфиденциальности — Airis Residence",
@@ -23,6 +24,10 @@ export default function PrivacyPage() {
       />
 
       <div className="container-page pt-[calc(var(--header-h)+3rem)] pb-8">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <PageHeader
           eyebrow="Документы"
           title="Политика конфиденциальности"

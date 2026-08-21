@@ -24,7 +24,7 @@ export function FloatingActions() {
   return (
     <>
       {/* Десктоп: мессенджеры сбоку */}
-      <div className="pointer-events-none fixed right-6 bottom-8 z-40 hidden flex-col gap-3 md:flex">
+      <div className="pointer-events-none fixed right-6 bottom-8 z-40 hidden flex-col gap-3 md:flex be-socials">
         <AnimatePresence>
           {visible && (
             <motion.div

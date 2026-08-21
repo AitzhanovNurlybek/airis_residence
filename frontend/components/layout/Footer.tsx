@@ -27,7 +27,7 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
               Отель на {site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка
               регистрации работает круглосуточно.
             </p>
-            <div className="mt-6 flex gap-3">
+            <div className="mt-6 flex gap-3 be-socials">
               <a
                 href={site.contacts.whatsapp}
                 target="_blank"

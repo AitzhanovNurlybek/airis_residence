@@ -7,6 +7,7 @@ import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 import { isBookingLive } from "@/lib/booking";
 import { buttonClass } from "@/components/ui/Button";
+import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 
 export const metadata: Metadata = pageMetadata({
   title: "Как оплатить проживание — отель Airis Residence, Алматы",
@@ -26,6 +27,10 @@ export default function PaymentPage() {
       />
 
       <div className="container-page pt-[calc(var(--header-h)+3rem)] pb-8">
+        <div className="mb-10">
+          <BeSearchForm />
+        </div>
+
         <PageHeader
           eyebrow="Оплата"
           title="Как оплатить проживание"
@@ -114,7 +119,7 @@ export default function PaymentPage() {
         </Prose>
 
         <div className="mt-12 flex flex-wrap gap-3">
-          <Link href="/bronirovanie" className={buttonClass("primary", "lg")}>
+          <Link href="/booking" className={buttonClass("primary", "lg")}>
             Забронировать номер
           </Link>
           <Link href="/kontakty" className={buttonClass("outline", "lg")}>

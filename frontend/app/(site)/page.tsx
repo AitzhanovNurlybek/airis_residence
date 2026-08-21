@@ -21,7 +21,7 @@ import { getPriceFrom, getRooms } from "@/lib/rooms";
 // в админке, и описание в выдаче Google обязано совпадать с сайтом.
 export async function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
-    title: "Airis Residence — отель в центре Алматы | Официальный сайт",
+    title: "Airis Residence, Алматы - Официальный сайт",
     description: `Отель Airis Residence в центре Алматы: ${site.roomsCount} номеров, завтрак включён, стойка регистрации 24/7. ${site.address.street}. Номера от ${formatPrice(await getPriceFrom())} за ночь — бронирование напрямую, без комиссии агрегаторов.`,
     path: "/",
   });
