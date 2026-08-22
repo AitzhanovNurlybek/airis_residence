@@ -45,6 +45,7 @@ export default async function CorpBookingPage() {
             locale={locale}
             hotelName={site.name}
             hotelCity={site.address.city}
+            breakfastPrice={me.company.breakfastPrice ?? 0}
           />
         )}
       </main>

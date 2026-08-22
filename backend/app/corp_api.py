@@ -387,6 +387,17 @@ async def corp_create_booking(
         )
 
     guests = data.adults + data.children
+
+    # Завтрак входит в цену любого номера, поэтому отказ — это вычет, а не
+    # доплата. Сколько снимать, записано в договоре компании; ноль означает
+    # «цена та же», и тогда выбор просто сохраняется для кухни.
+    #
+    # Вычет не может увести сумму в минус: если в договоре завтрак дороже
+    # ночи, виновата настройка, а отрицательный счёт компании — уже наша
+    # ошибка.
+    if data.mealPlan == "none" and company.breakfast_price:
+        total = max(0, total - company.breakfast_price * guests * nights)
+
     if guests > capacity:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -405,6 +416,7 @@ async def corp_create_booking(
         guest_name=data.guestName.strip(),
         guest_phone=data.guestPhone.strip(),
         comment=data.comment.strip(),
+        meal_plan=data.mealPlan,
         status="new",
         total_amount=total,
     )
@@ -590,6 +602,7 @@ async def admin_create_company(
         manager_email=data.managerEmail.strip(),
         manager_phone=data.managerPhone.strip(),
         discount_percent=data.discountPercent,
+        breakfast_price=data.breakfastPrice,
     )
     session.add(company)
     await session.commit()
@@ -612,6 +625,7 @@ async def admin_edit_company(
         "managerEmail": "manager_email",
         "managerPhone": "manager_phone",
         "discountPercent": "discount_percent",
+        "breakfastPrice": "breakfast_price",
         "isActive": "is_active",
     }
     for incoming, column in fields.items():

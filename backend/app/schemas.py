@@ -1,6 +1,7 @@
 """Схемы запросов и ответов."""
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -221,6 +222,7 @@ class CompanyOut(BaseModel):
     managerEmail: str = Field(default="", validation_alias="manager_email")
     managerPhone: str = Field(default="", validation_alias="manager_phone")
     discountPercent: int = Field(default=0, validation_alias="discount_percent")
+    breakfastPrice: int = Field(default=0, validation_alias="breakfast_price")
     # Договор приостановлен или нет. Правку админка принимала и раньше, а
     # увидеть текущее состояние было негде — в списке компаний приостановленная
     # выглядела как обычная.
@@ -291,6 +293,8 @@ class CorpBookingIn(BaseModel):
     guestName: str = Field(default="", max_length=200)
     guestPhone: str = Field(default="", max_length=40)
     comment: str = Field(default="", max_length=2000)
+    # breakfast — как обычно, завтрак включён; none — гость от него отказался.
+    mealPlan: Literal["breakfast", "none"] = "breakfast"
     items: list[CorpBookingItemIn] = Field(min_length=1, max_length=20)
 
     @field_validator("checkOut")
@@ -316,6 +320,7 @@ class CorpBookingOut(BaseModel):
     guestName: str = Field(default="", validation_alias="guest_name")
     guestPhone: str = Field(default="", validation_alias="guest_phone")
     comment: str = ""
+    mealPlan: str = Field(default="breakfast", validation_alias="meal_plan")
     status: str
     totalAmount: int = Field(default=0, validation_alias="total_amount")
     invoiceNumber: str = Field(default="", validation_alias="invoice_number")
@@ -365,6 +370,7 @@ class CompanyIn(BaseModel):
     managerEmail: str = Field(default="", max_length=160)
     managerPhone: str = Field(default="", max_length=40)
     discountPercent: int = Field(default=0, ge=0, le=90)
+    breakfastPrice: int = Field(default=0, ge=0, le=100_000)
 
 
 class CompanyPatch(BaseModel):
@@ -377,6 +383,7 @@ class CompanyPatch(BaseModel):
     managerEmail: str | None = Field(default=None, max_length=160)
     managerPhone: str | None = Field(default=None, max_length=40)
     discountPercent: int | None = Field(default=None, ge=0, le=90)
+    breakfastPrice: int | None = Field(default=None, ge=0, le=100_000)
     isActive: bool | None = None
 
 

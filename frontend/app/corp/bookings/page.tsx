@@ -93,6 +93,11 @@ export default async function CorpBookingsPage() {
                     </td>
                     <td className="px-5 py-4">
                       {booking.items.map((item) => item.roomName).join(", ") || "—"}
+                      {booking.mealPlan === "none" && (
+                        <span className="mt-0.5 block text-xs text-ink-700/50">
+                          {dict.booking.mealNone}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-right">
                       {booking.items.reduce((sum, item) => sum + item.roomsCount, 0)}

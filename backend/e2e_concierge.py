@@ -17,6 +17,7 @@ import asyncio
 import os
 import re
 import sys
+import datetime as dt
 from typing import Any
 
 import httpx
@@ -26,7 +27,20 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.concierge import FALLBACK, answer, build_system_prompt  # noqa: E402
+from app.booking_system import (  # noqa: E402
+    STUB_INVENTORY,
+    BookingSystemUnavailable,
+    ExelyBookingSystem,
+    StubBookingSystem,
+    get_booking_system,
+)
+from app.concierge import (  # noqa: E402
+    AVAILABILITY_TOOL,
+    FALLBACK,
+    _run_availability,
+    answer,
+    build_system_prompt,
+)
 from app.config import Settings  # noqa: E402
 from app.knowledge import (  # noqa: E402
     KnowledgeUnavailable,
@@ -126,11 +140,86 @@ async def main() -> int:
 
     print("\n\u2500\u2500 Правила поведения \u2500\u2500")
     system = build_system_prompt(brief, "2026-08-22")
-    check("модели запрещено угадывать наличие", "шахматка" in system.lower())
+    check(
+        "без системы бронирования запрещено и «свободно», и «занято»",
+        "не говори «свободно»" in system and "не говори «занято»" in system,
+    )
     check("сказано звать человека на жалобу", "жалоба" in system.lower())
     check("сказано отвечать на языке гостя", "казахский" in system.lower())
     check("запрещено выдумывать скидки", "скидки" in system.lower())
     check("дата подставлена", "2026-08-22" in system)
+
+    print("\n\u2500\u2500 Система бронирования \u2500\u2500")
+    check(
+        "по умолчанию не подключена — наличие подтверждает стойка",
+        get_booking_system(Settings()) is None,
+    )
+    check(
+        "exely без ключей не включается",
+        get_booking_system(Settings(booking_system="exely")) is None,
+    )
+    check(
+        "заглушка включается только явно",
+        isinstance(get_booking_system(Settings(booking_system="stub")), StubBookingSystem),
+    )
+    check(
+        "в заглушке столько же номеров, сколько на сайте",
+        sum(STUB_INVENTORY.values()) == facts["hotel"]["roomsCount"],
+        f"{sum(STUB_INVENTORY.values())} против {facts['hotel']['roomsCount']}",
+    )
+    check(
+        "категории заглушки совпадают с номерами сайта",
+        set(STUB_INVENTORY) == {r["slug"] for r in facts["rooms"]},
+    )
+
+    stub = StubBookingSystem({r["slug"]: r["name"] for r in facts["rooms"]})
+    first = await stub.availability(dt.date(2026, 9, 3), dt.date(2026, 9, 6))
+    again = await stub.availability(dt.date(2026, 9, 3), dt.date(2026, 9, 6))
+    check("ответ помечен как тестовый", first.source == "stub")
+    check("ночи посчитаны", first.nights == 3, str(first.nights))
+    check(
+        "повторный запрос даёт тот же ответ",
+        [o.rooms_left for o in first.offers] == [o.rooms_left for o in again.offers],
+    )
+    check(
+        "свободных не больше, чем есть номеров",
+        all((o.rooms_left or 0) <= STUB_INVENTORY[o.room_slug] for o in first.offers),
+    )
+    check(
+        "длинный период не свободнее короткого",
+        min(
+            o.rooms_left or 0
+            for o in (await stub.availability(dt.date(2026, 9, 3), dt.date(2026, 9, 12))).offers
+        )
+        <= min(o.rooms_left or 0 for o in first.offers),
+    )
+    check("заглушка не выдумывает счета", await stub.invoices(company_bin="000000000001") == [])
+
+    told = await _run_availability(stub, {"check_in": "2026-09-03", "check_out": "2026-09-06"})
+    check("в ответе инструмента стоит пометка о тестовых данных", "ТЕСТОВЫЕ ДАННЫЕ" in told)
+    check("названия номеров человеческие, а не коды", "Standart" in told, told[:80])
+    bad_dates = await _run_availability(stub, {"check_in": "завтра", "check_out": "послезавтра"})
+    check("кривые даты не роняют инструмент", "не разобраны" in bad_dates)
+    backwards = await _run_availability(stub, {"check_in": "2026-09-06", "check_out": "2026-09-03"})
+    check("выезд раньше заезда отклонён", "позже" in backwards)
+
+    real = ExelyBookingSystem("https://example.invalid", "key")
+    try:
+        await real.availability(dt.date(2026, 9, 3), dt.date(2026, 9, 6))
+        check("настоящий Exely честно говорит, что не готов", False, "не бросил исключение")
+    except BookingSystemUnavailable as error:
+        check("настоящий Exely честно говорит, что не готов", "интеграторов" in str(error))
+
+    check(
+        "инструмент требует обе даты",
+        set(AVAILABILITY_TOOL["input_schema"]["required"]) == {"check_in", "check_out"},
+    )
+    with_stub = build_system_prompt(brief, "2026-08-23", availability="stub")
+    with_live = build_system_prompt(brief, "2026-08-23", availability="exely")
+    check("в тестовом режиме модель предупреждена", "ТЕСТОВЫЙ РЕЖИМ" in with_stub)
+    check("в боевом режиме предупреждения нет", "ТЕСТОВЫЙ РЕЖИМ" not in with_live)
+    check("без системы бронирования инструмент не упоминается", "check_availability" not in system)
+    check("без системы бронирования остаётся правило про стойку", "подтвердит стойка" in system)
 
     print("\n\u2500\u2500 Поведение при сбоях \u2500\u2500")
     no_key = await answer(settings, message="Сколько стоит номер?", history=None, today="2026-08-22")

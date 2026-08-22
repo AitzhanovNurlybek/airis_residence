@@ -245,6 +245,17 @@ class Company(Base):
     # Точечная цена на конкретный номер задаётся в CompanyRate и важнее.
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Сколько снимать за отказ от завтрака — на гостя за ночь.
+    #
+    # Завтрак у отеля входит в цену любого номера, поэтому «без завтрака» —
+    # это вычет, а не доплата. Величина живёт у компании, а не у отеля:
+    # это условие договора, и у разных компаний оно разное.
+    #
+    # Ноль — обычный случай: цена та же, но выбор всё равно записывается.
+    # Кухне важно знать, сколько человек придёт утром, даже когда деньги
+    # от этого не меняются.
+    breakfast_price: Mapped[int] = mapped_column(Integer, default=0)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -360,6 +371,11 @@ class CorpBooking(Base):
     guest_phone: Mapped[str] = mapped_column(String(40), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
 
+    # breakfast — завтрак включён (обычный случай), none — гость от него
+    # отказался. Хранится у брони, а не считается из суммы: через полгода по
+    # сумме уже не понять, был вычет или просто другая цена.
+    meal_plan: Mapped[str] = mapped_column(String(20), default="breakfast")
+
     status: Mapped[str] = mapped_column(String(20), default="new", index=True)
     total_amount: Mapped[int] = mapped_column(Integer, default=0)  # тенге
 
@@ -408,6 +424,12 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {
         "video": "VARCHAR(500) DEFAULT ''",
         "video_poster": "VARCHAR(500) DEFAULT ''",
+    },
+    "companies": {
+        "breakfast_price": "INTEGER DEFAULT 0",
+    },
+    "corp_bookings": {
+        "meal_plan": "VARCHAR(20) DEFAULT 'breakfast'",
     },
 }
 

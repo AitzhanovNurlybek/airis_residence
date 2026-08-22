@@ -55,6 +55,12 @@ export type AdminCompany = {
   managerPhone: string;
   /** Скидка на весь прайс. Точечная цена в AdminCompanyRate важнее. */
   discountPercent: number;
+  /**
+   * Вычет за отказ от завтрака: на гостя за ночь. Завтрак входит в цену
+   * любого номера, поэтому это вычет, а не доплата. Ноль — цена та же,
+   * но выбор всё равно записывается: кухне нужно число гостей на утро.
+   */
+  breakfastPrice: number;
   isActive: boolean;
 };
 
@@ -95,6 +101,7 @@ export type AdminCorpBooking = {
   guestName: string;
   guestPhone: string;
   comment: string;
+  mealPlan: "breakfast" | "none";
   status: "new" | "confirmed" | "invoiced" | "paid" | "cancelled";
   totalAmount: number;
   invoiceNumber: string;

@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { buttonClass } from "@/components/ui/Button";
 import type { Dictionary } from "@/lib/corp/dictionary";
+import { site } from "@/lib/site";
 
 type Texts = Dictionary["login"] & { loading: string };
 
@@ -100,7 +101,27 @@ export function LoginForm({ t }: { t: Texts }) {
       >
         {t.forgot}
       </button>
-      {hint && <p className="mt-2 text-sm leading-relaxed text-ink-700/80">{t.forgotHint}</p>}
+      {/* Контакты берутся из site.ts, а не вписаны в перевод: телефон отеля
+          лежит в одном месте, и три языковые копии разошлись бы при первой
+          же смене номера. */}
+      {hint && (
+        <p className="mt-2 text-sm leading-relaxed text-ink-700/80">
+          {t.forgotHint}{" "}
+          <a
+            href={`tel:${site.contacts.phonePrimaryRaw}`}
+            className="whitespace-nowrap text-wine-600 underline underline-offset-4"
+          >
+            {site.contacts.phonePrimary}
+          </a>
+          {" · "}
+          <a
+            href={`mailto:${site.contacts.email}`}
+            className="text-wine-600 underline underline-offset-4"
+          >
+            {site.contacts.email}
+          </a>
+        </p>
+      )}
     </form>
   );
 }

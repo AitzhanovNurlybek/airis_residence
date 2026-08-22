@@ -105,6 +105,7 @@ export function CompanyEditor({
         managerEmail: String(form.get("managerEmail") ?? "").trim(),
         managerPhone: String(form.get("managerPhone") ?? "").trim(),
         discountPercent: Number(form.get("discountPercent") ?? 0) || 0,
+        breakfastPrice: Number(form.get("breakfastPrice") ?? 0) || 0,
       });
       setCompany(saved);
       toast.show("Реквизиты сохранены");
@@ -336,6 +337,19 @@ export function CompanyEditor({
               className={inputClass}
             />
           </Field>
+          <Field
+            label="Вычет за отказ от завтрака, ₸"
+            hint="На гостя за ночь. Завтрак входит в цену любого номера, поэтому это вычет, а не доплата. Ноль — цена та же, но выбор всё равно попадёт в заявку: кухне нужно знать число гостей на утро."
+          >
+            <input
+              name="breakfastPrice"
+              type="number"
+              min={0}
+              step={500}
+              defaultValue={company.breakfastPrice}
+              className={inputClass}
+            />
+          </Field>
           <div className="md:col-span-2">
             <AdminButton type="submit" disabled={busy}>
               Сохранить реквизиты
@@ -539,6 +553,11 @@ export function CompanyEditor({
                         {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
                         {booking.guestName ? ` · гость: ${booking.guestName}` : ""}
                         {booking.createdByName ? ` · оформил: ${booking.createdByName}` : ""}
+                        {/* Пишем только отказ. «Завтрак включён» — обычный
+                            случай, и повторять его в каждой строке значит
+                            заставить менеджера вычитывать шум ради
+                            редкого исключения. */}
+                        {booking.mealPlan === "none" ? " · без завтрака" : ""}
                       </div>
                       {booking.comment && (
                         <div className="mt-2 text-sm text-cream/80">{booking.comment}</div>

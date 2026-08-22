@@ -70,12 +70,15 @@ export function BookingComposer({
   locale,
   hotelName,
   hotelCity,
+  breakfastPrice,
 }: {
   rooms: CorpRoom[];
   dict: Dictionary;
   locale: Locale;
   hotelName: string;
   hotelCity: string;
+  /** Вычет за отказ от завтрака: на гостя за ночь, из договора компании. */
+  breakfastPrice: number;
 }) {
   const router = useRouter();
   const t = dict.booking;
@@ -84,6 +87,7 @@ export function BookingComposer({
   const [checkOut, setCheckOut] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
+  const [mealPlan, setMealPlan] = useState<"breakfast" | "none">("breakfast");
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
@@ -109,6 +113,19 @@ export function BookingComposer({
   }, [rooms, picked, nights]);
 
   const guests = adults + children;
+
+  // Вычет считается здесь, а не внутри useMemo с номерами: он зависит от
+  // числа гостей и ночей, а не от выбранных категорий. Держать его отдельно
+  // дешевле, чем пересчитывать всю корзину при каждом нажатии «+».
+  //
+  // Бэкенд считает сумму заново и не доверяет нашей: здесь она только для
+  // показа. Расхождение возможно, если менеджер поменяет договор, пока
+  // сотрудник заполняет форму, — и правым должен быть бэкенд.
+  const mealDeduction =
+    mealPlan === "none" && breakfastPrice > 0 && nights > 0
+      ? Math.min(total, breakfastPrice * guests * nights)
+      : 0;
+  const payable = total - mealDeduction;
 
   function validate(): string {
     if (!checkIn || !checkOut) return t.needDates;
@@ -140,6 +157,7 @@ export function BookingComposer({
         guestName: guestName.trim(),
         guestPhone: guestPhone.trim(),
         comment: comment.trim(),
+        mealPlan,
         items: lines.map((line) => ({ roomSlug: line.room.slug, roomsCount: line.count })),
       }),
     }).catch(() => null);
@@ -224,6 +242,46 @@ export function BookingComposer({
               />
             </div>
           </div>
+
+          <h2 className="mt-7 font-display text-xl">{t.meals}</h2>
+          {/* Радиокнопки, а не выпадающий список: вариантов всего два, и
+              скрывать половину выбора за кликом незачем. */}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {(["breakfast", "none"] as const).map((option) => {
+              const chosen = mealPlan === option;
+              return (
+                <label
+                  key={option}
+                  // Разрыв между состояниями намеренно большой. На малиновом
+                  // фоне полупрозрачная плашка сама по себе выглядит розовой
+                  // и подсвеченной — при мягкой разнице невыбранный вариант
+                  // читался как выбранный.
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl px-4 py-3 transition-colors ${
+                    chosen
+                      ? "bg-white text-ink-950 shadow-sm ring-2 ring-ink-950/20"
+                      : "bg-white/25 text-cream/80 hover:bg-white/40"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="mealPlan"
+                    value={option}
+                    checked={chosen}
+                    onChange={() => setMealPlan(option)}
+                    className="h-4 w-4 accent-wine-500"
+                  />
+                  <span className="text-sm">
+                    {option === "breakfast" ? t.mealBreakfast : t.mealNone}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-cream/70">
+            {breakfastPrice > 0
+              ? `${t.mealNotePaid}: ${formatMoney(breakfastPrice)} ${dict.common.currency}`
+              : t.mealNoteFree}
+          </p>
         </section>
 
         <section>
@@ -381,13 +439,22 @@ export function BookingComposer({
           </p>
         )}
 
+        {mealDeduction > 0 && (
+          <p className="mt-3 flex items-baseline justify-between text-sm">
+            <span className="text-ink-700/70">{t.mealDiscountLine}</span>
+            <span className="tabular-nums text-ink-700">
+              −{formatMoney(mealDeduction)} {dict.common.currency}
+            </span>
+          </p>
+        )}
+
         <p className="mt-4 flex items-baseline justify-between border-t border-ink-600/10 pt-4">
           <span className="text-sm text-ink-700/70">{t.summary}</span>
           {/* Без дат ночей ноль, и сумма вышла бы «0 ₸» — читается как
               «бесплатно». Пока дат нет, честнее прочерк. */}
           <span className="font-display text-2xl text-wine-500 tabular-nums">
             {nights > 0 && lines.length > 0
-              ? `${formatMoney(total)} ${dict.common.currency}`
+              ? `${formatMoney(payable)} ${dict.common.currency}`
               : "—"}
           </span>
         </p>

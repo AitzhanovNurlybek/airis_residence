@@ -213,44 +213,8 @@ async def main() -> None:
               f"{booking['totalAmount']} vs {comfort['corpPrice'] * 3}")
         check("цена в строке зафиксирована снимком",
               booking["items"][0]["pricePerNight"] == comfort["corpPrice"])
-        check("статус — заявка", booking["status"] == "new", booking["status"])
-        check("видно, кто оформил", booking["createdByName"] == "Ержан Сотрудник", booking["createdByName"])
-
-        r = await c.post(
-            "/api/corp/bookings",
-            headers=staff_h,
-            json={
-                "checkIn": "2026-09-10",
-                "checkOut": "2026-09-09",
-                "adults": 1,
-                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
-            },
-        )
-        check("выезд раньше заезда отклонён", r.status_code == 422, str(r.status_code))
-
-        r = await c.post(
-            "/api/corp/bookings",
-            headers=staff_h,
-            json={
-                "checkIn": "2020-01-01",
-                "checkOut": "2020-01-03",
-                "adults": 1,
-                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
-            },
-        )
-        check("прошедшая дата отклонена", r.status_code == 400, str(r.status_code))
-
-        r = await c.post(
-            "/api/corp/bookings",
-            headers=staff_h,
-            json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-05",
-                "adults": 5,
-                "items": [{"roomSlug": "standart-single", "roomsCount": 1}],
-            },
-        )
-        check("перебор гостей отклонён", r.status_code == 400, r.text[:80])
+        check("по умолчанию завтрак включён", booking["mealPlan"] == "breakfast",
+              booking["mealPlan"])
 
         print("\n── Кто что видит ──")
         r = await c.get("/api/corp/bookings", headers=boss_h)
@@ -347,6 +311,150 @@ async def main() -> None:
             f"/api/corp/employees/{no_pass_id}", headers=boss_h, json={"isActive": False}
         )
         check("ответственный отключил сотрудника", r.status_code == 200, str(r.status_code))
+
+        print("\n── Питание ──")
+        # Пока вычет в договоре нулевой, отказ от завтрака не должен трогать
+        # сумму: цена та же, а выбор нужен кухне.
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-06",
+                "adults": 2,
+                "mealPlan": "none",
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        check("бронь без завтрака создана", r.status_code == 201, str(r.status_code))
+        no_meal = r.json()
+        check("отказ записан", no_meal["mealPlan"] == "none", no_meal["mealPlan"])
+        check("без вычета в договоре цена не изменилась",
+              no_meal["totalAmount"] == comfort["corpPrice"] * 2,
+              f"{no_meal['totalAmount']} vs {comfort['corpPrice'] * 2}")
+        await c.post(f"/api/corp/bookings/{no_meal['id']}/cancel", headers=staff_h, json={})
+
+        # Теперь вычет назначен — он должен снимать за каждого гостя за ночь.
+        r = await c.patch(
+            "/api/admin/corp/companies/company-a",
+            headers=admin_h,
+            json={"breakfastPrice": 3000},
+        )
+        check("вычет за завтрак сохранён",
+              r.status_code == 200 and r.json()["breakfastPrice"] == 3000, str(r.status_code))
+
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-06",
+                "adults": 2,
+                "mealPlan": "none",
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        check("бронь с вычетом создана", r.status_code == 201, str(r.status_code))
+        deducted = r.json()
+        want = comfort["corpPrice"] * 2 - 3000 * 2 * 2
+        check("вычет = цена завтрака × гостей × ночей",
+              deducted["totalAmount"] == want,
+              f"{deducted['totalAmount']} vs {want}")
+        await c.post(f"/api/corp/bookings/{deducted['id']}/cancel", headers=staff_h, json={})
+
+        # С завтраком при том же договоре сумма остаётся полной.
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-06",
+                "adults": 2,
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        with_meal = r.json()
+        check("с завтраком вычета нет",
+              with_meal["totalAmount"] == comfort["corpPrice"] * 2,
+              str(with_meal["totalAmount"]))
+        await c.post(f"/api/corp/bookings/{with_meal['id']}/cancel", headers=staff_h, json={})
+
+        # Абсурдный вычет не должен уводить счёт компании в минус.
+        await c.patch(
+            "/api/admin/corp/companies/company-a",
+            headers=admin_h,
+            json={"breakfastPrice": 100000},
+        )
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-06",
+                "adults": 2,
+                "mealPlan": "none",
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        huge = r.json()
+        check("вычет не уводит сумму в минус", huge["totalAmount"] == 0, str(huge["totalAmount"]))
+        await c.post(f"/api/corp/bookings/{huge['id']}/cancel", headers=staff_h, json={})
+        await c.patch(
+            "/api/admin/corp/companies/company-a",
+            headers=admin_h,
+            json={"breakfastPrice": 0},
+        )
+
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-06",
+                "adults": 1,
+                "mealPlan": "полный пансион",
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        check("выдуманный вариант питания отклонён", r.status_code == 422, str(r.status_code))
+        check("статус — заявка", booking["status"] == "new", booking["status"])
+        check("видно, кто оформил", booking["createdByName"] == "Ержан Сотрудник", booking["createdByName"])
+
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-09",
+                "adults": 1,
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        check("выезд раньше заезда отклонён", r.status_code == 422, str(r.status_code))
+
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2020-01-01",
+                "checkOut": "2020-01-03",
+                "adults": 1,
+                "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+            },
+        )
+        check("прошедшая дата отклонена", r.status_code == 400, str(r.status_code))
+
+        r = await c.post(
+            "/api/corp/bookings",
+            headers=staff_h,
+            json={
+                "checkIn": "2026-09-04",
+                "checkOut": "2026-09-05",
+                "adults": 5,
+                "items": [{"roomSlug": "standart-single", "roomsCount": 1}],
+            },
+        )
+        check("перебор гостей отклонён", r.status_code == 400, r.text[:80])
 
         print("\n── Изоляция компаний ──")
         # Заводим вторую компанию: главный вопрос безопасности здесь не «пустят

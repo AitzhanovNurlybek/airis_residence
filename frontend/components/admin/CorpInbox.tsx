@@ -79,6 +79,7 @@ export function CorpInbox({ bookings }: { bookings: AdminCorpBooking[] }) {
                   {booking.number} · {shortDate(booking.checkIn)} — {shortDate(booking.checkOut)} ·{" "}
                   {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
                   {booking.guestName ? ` · ${booking.guestName}` : ""}
+                  {booking.mealPlan === "none" ? " · без завтрака" : ""}
                 </div>
               </div>
 

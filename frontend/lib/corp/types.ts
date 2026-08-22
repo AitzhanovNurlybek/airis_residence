@@ -34,6 +34,8 @@ export type CorpCompany = {
   managerEmail: string;
   managerPhone: string;
   discountPercent: number;
+  /** Вычет за отказ от завтрака: на гостя за ночь. Ноль — цена не меняется. */
+  breakfastPrice: number;
 };
 
 /** Первый экран кабинета одним запросом: карточка компании и счётчики. */
@@ -80,6 +82,8 @@ export type CorpBooking = {
   guestName: string;
   guestPhone: string;
   comment: string;
+  /** breakfast — завтрак включён, none — гость отказался. */
+  mealPlan: "breakfast" | "none";
   status: BookingStatus;
   totalAmount: number;
   invoiceNumber: string;
