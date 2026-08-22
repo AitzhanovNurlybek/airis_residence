@@ -292,6 +292,13 @@ check "$(has "$T/co.html" 'Корпоративный прайс')" "разде�
 check "$(has "$T/co.html" 'admin@company-a.example')" "сотрудники подтянулись"
 check "$(has "$T/co.html" 'Заявки компании')" "раздел заявок на месте"
 check "$(has "$T/co.html" 'driver@company-a.example')" "заведённый в кабинете сотрудник виден и отелю"
+check "$(has "$T/co.html" 'Удалить компанию')" "удаление компании доступно из карточки"
+check "$(has "$T/co.html" 'приостановите доступ')" "рядом сказано про менее разрушительный путь"
+
+# Компанию с историей нельзя снести одним запросом — только с подтверждением.
+dcode=$(curl -s -b "$T/ajar" -X DELETE -o "$T/del.json" -w "%{http_code}"   "$F/api/admin/corp/companies/company-a")
+check "$([ "$dcode" = "409" ] && echo 1 || echo 0)" "компанию с бронями сразу не удалить (получили $dcode)"
+check "$(has "$T/del.json" 'исчезнет')" "в отказе объяснено, что будет потеряно"
 
 curl -s -b "$T/ajar" -o "$T/help.html" "$F/admin/spravka"
 check "$(has "$T/help.html" 'Справка')" "справка для менеджера открылась"

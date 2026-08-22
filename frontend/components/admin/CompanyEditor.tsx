@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AdminButton, Field, inputClass, useToast } from "@/components/admin/ui";
@@ -70,6 +71,7 @@ export function CompanyEditor({
   const [company, setCompany] = useState(initialCompany);
   const [users, setUsers] = useState(initialUsers);
   const [bookings, setBookings] = useState(initialBookings);
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [addingUser, setAddingUser] = useState(false);
   const toast = useToast();
@@ -185,6 +187,41 @@ export function CompanyEditor({
       toast.show("Сохранено");
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeCompany() {
+    // Первое подтверждение — от случайного клика. Название печатать не просим:
+    // компаний немного, а лишний обряд раздражает и его начинают проматывать.
+    if (!window.confirm(`Удалить компанию «${company.name}»? Это необратимо.`)) return;
+
+    setBusy(true);
+    try {
+      await adminSend(`/corp/companies/${company.slug}`, "DELETE");
+      router.push("/admin/kompanii");
+      router.refresh();
+      return;
+    } catch (e) {
+      // 409 значит «у компании есть история». Бэкенд присылает, сколько именно
+      // записей исчезнет — показываем это человеку, а не своё общее слово.
+      if (e instanceof AdminError && e.status === 409) {
+        if (window.confirm(`${e.message}
+
+Всё равно удалить?`)) {
+          try {
+            await adminSend(`/corp/companies/${company.slug}?force=true`, "DELETE");
+            router.push("/admin/kompanii");
+            router.refresh();
+            return;
+          } catch (inner) {
+            fail(inner);
+          }
+        }
+      } else {
+        fail(e);
+      }
     } finally {
       setBusy(false);
     }
@@ -539,6 +576,21 @@ export function CompanyEditor({
           </div>
         )}
       </Section>
+
+      {/* Опасная зона внизу и отдельным блоком: рядом с обычными действиями
+          такая кнопка рано или поздно будет нажата не глядя. */}
+      <section className="mt-8 rounded-3xl border border-wine-400/30 bg-wine-900/15 p-6 md:p-7">
+        <h2 className="font-display text-2xl text-cream">Удалить компанию</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+          Вместе с компанией исчезнут её сотрудники, корпоративный прайс и вся история
+          бронирований с номерами счетов. Восстановить будет нечем. Если компания просто
+          перестала обслуживаться — приостановите доступ: кабинет закроется, а история
+          останется.
+        </p>
+        <AdminButton variant="danger" className="mt-5" disabled={busy} onClick={removeCompany}>
+          Удалить «{company.name}»
+        </AdminButton>
+      </section>
     </div>
   );
 }

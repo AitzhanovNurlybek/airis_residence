@@ -15,7 +15,7 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import require_admin
@@ -609,6 +609,62 @@ async def admin_edit_company(
     await session.commit()
     await session.refresh(company)
     return company
+
+
+@admin.delete("/companies/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_delete_company(
+    slug: str,
+    force: bool = False,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Удаление компании вместе с сотрудниками, прайсом и историей броней.
+
+    Компанию без единой брони удаляем сразу: такие заводят по ошибке, и
+    заставлять человека подтверждать удаление пустышки — только раздражать.
+
+    Компанию с историей — только при `force`. Брони это не просто строки: у
+    них номера счетов, суммы и даты, то есть бухгалтерский след. Отель обязан
+    узнать, сколько записей исчезнет, ДО того как они исчезнут, а не после.
+    Если компания просто перестала обслуживаться, правильный ход — не удалять,
+    а приостановить доступ: кабинет закроется, а история останется.
+
+    Связанное удаляем явными запросами, а не каскадом базы. Каскад объявлен в
+    схеме, но SQLite по умолчанию внешние ключи не проверяет, а Postgres
+    проверяет: локально бы осталось висеть сиротами то, что на боевом удалилось
+    бы. Одинаковое поведение важнее краткости.
+    """
+    company = await _company_by_slug(session, slug)
+
+    bookings_result = await session.execute(
+        select(CorpBooking.id).where(CorpBooking.company_id == company.id)
+    )
+    booking_ids = [row[0] for row in bookings_result.all()]
+
+    if booking_ids and not force:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"У компании {len(booking_ids)} бронирований — вместе с ней исчезнет "
+            f"вся история и номера счетов. Если компания просто больше не "
+            f"обслуживается, приостановите доступ вместо удаления.",
+        )
+
+    if booking_ids:
+        await session.execute(
+            delete(CorpBookingItem).where(CorpBookingItem.booking_id.in_(booking_ids))
+        )
+        await session.execute(delete(CorpBooking).where(CorpBooking.id.in_(booking_ids)))
+
+    await session.execute(delete(CompanyRate).where(CompanyRate.company_id == company.id))
+    await session.execute(delete(CompanyUser).where(CompanyUser.company_id == company.id))
+    await session.delete(company)
+    await session.commit()
+
+    logger.info(
+        "Удалена компания %s: сотрудников и прайс снесли, броней — %s",
+        slug,
+        len(booking_ids),
+    )
 
 
 @admin.get("/companies/{slug}/users", response_model=list[CompanyUserOut])

@@ -413,14 +413,18 @@ async def main() -> None:
 
         print("\n── Защита от перебора ──")
         # Одиннадцатая попытка по одной почте должна упереться в предел.
+        # Долбим отдельный адрес, а не рабочую учётку: счётчик живёт до конца
+        # прогона, и «сожжённая» почта ломала бы проверки ниже. Заодно это
+        # ближе к жизни — злоумышленник подбирает и несуществующие адреса.
         codes = []
         for _ in range(12):
             rr = await c.post(
                 "/api/corp/login",
-                json={"email": "boss@company-b.example", "password": "не-тот-пароль"},
+                json={"email": "bruteforce@nowhere.example", "password": "не-тот-пароль"},
             )
             codes.append(rr.status_code)
         check("перебор одной учётки останавливается", 429 in codes, f"коды: {sorted(set(codes))}")
+        check("несуществующий адрес отвечал так же, как существующий", codes[0] == 401, str(codes[0]))
         check(
             "до предела отвечало 401, а не 429 сразу",
             codes[0] == 401,
@@ -445,6 +449,41 @@ async def main() -> None:
         r = await c.get("/api/corp/me", headers=boss_h)
         check("при остановке договора кабинет закрывается",
               r.status_code == 403, str(r.status_code))
+
+        print("\n── Удаление компании ──")
+        # Компания без броней удаляется сразу: такие заводят по ошибке.
+        r = await c.delete("/api/admin/corp/companies/company-b", headers=admin_h)
+        check("компания без броней удаляется сразу", r.status_code == 204, str(r.status_code))
+
+        r = await c.post(
+            "/api/corp/login",
+            json={"email": "boss@company-b.example", "password": "bee-pass-12345"},
+        )
+        check("её сотрудник больше не входит", r.status_code == 401, str(r.status_code))
+
+        # А вот у компании с историей должны сначала спросить.
+        r = await c.delete("/api/admin/corp/companies/company-a", headers=admin_h)
+        check("компанию с историей просто так не удалить", r.status_code == 409, str(r.status_code))
+        check(
+            "в отказе названо, сколько записей исчезнет",
+            any(ch.isdigit() for ch in r.json().get("detail", "")),
+            r.json().get("detail", "")[:70],
+        )
+
+        r = await c.delete("/api/admin/corp/companies/company-a?force=true", headers=admin_h)
+        check("с подтверждением удаляется", r.status_code == 204, str(r.status_code))
+
+        r = await c.get("/api/admin/corp/companies", headers=admin_h)
+        check("список компаний опустел", r.json() == [], str(len(r.json())))
+
+        r = await c.get("/api/admin/corp/bookings", headers=admin_h)
+        check("брони удалённой компании тоже исчезли", r.json() == [], str(len(r.json())))
+
+        r = await c.post(
+            "/api/corp/login",
+            json={"email": "admin@company-a.example", "password": "corp-pass-12345"},
+        )
+        check("сотрудники удалённой компании не входят", r.status_code == 401, str(r.status_code))
 
     print()
     if problems:
