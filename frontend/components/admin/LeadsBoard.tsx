@@ -13,6 +13,59 @@ const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   minute: "2-digit",
 });
 
+/**
+ * Срочность заявки.
+ *
+ * Появилось после того, как шесть настоящих заявок пролежали неотвеченными: в
+ * общем списке они выглядели ровно как проверочные и как давно закрытые. Когда
+ * всё одинаковое, глазу не за что зацепиться, и заявка с заездом завтра теряется
+ * среди прошлогодних.
+ *
+ * Считаем по дате заезда, а не по дате обращения: гостю важно, когда он
+ * приедет, а не когда написал.
+ */
+type Urgency = "burning" | "soon" | "normal" | "stale" | "done";
+
+const URGENCY_STYLE: Record<Urgency, { card: string; label?: string; tone?: string }> = {
+  burning: {
+    card: "border-wine-400/60 bg-wine-900/20 ring-1 ring-wine-400/30",
+    label: "Горит",
+    tone: "bg-wine-500 text-white",
+  },
+  soon: {
+    card: "border-sand-400/40 bg-ink-900",
+    label: "Скоро заезд",
+    tone: "bg-sand-300/20 text-sand-200",
+  },
+  normal: { card: "border-white/10 bg-ink-900" },
+  stale: { card: "border-white/8 bg-ink-900/40 opacity-70", label: "Дата прошла", tone: "bg-white/10 text-muted" },
+  done: { card: "border-white/8 bg-ink-900/40 opacity-70" },
+};
+
+/** Сколько суток до заезда. null — дат в заявке нет. */
+function daysUntil(checkIn: string | null): number | null {
+  if (!checkIn) return null;
+  const date = new Date(`${checkIn}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
+}
+
+function urgencyOf(lead: AdminLead): Urgency {
+  // Разобранная заявка не срочная, чем бы она ни закончилась.
+  if (lead.status !== "new") return "done";
+  const days = daysUntil(lead.check_in);
+  if (days === null) return "normal";
+  if (days < 0) return "stale";
+  if (days <= 3) return "burning";
+  if (days <= 14) return "soon";
+  return "normal";
+}
+
+/** Порядок в списке: сверху то, где ещё можно успеть. */
+const ORDER: Record<Urgency, number> = { burning: 0, soon: 1, normal: 2, stale: 3, done: 4 };
+
 export function LeadsBoard({
   initialLeads,
   rooms,
@@ -30,8 +83,19 @@ export function LeadsBoard({
     [rooms],
   );
 
-  const visible = filter === "all" ? leads : leads.filter((l) => l.status === filter);
+  const sorted = useMemo(() => {
+    const withUrgency = leads.map((lead) => ({ lead, urgency: urgencyOf(lead) }));
+    return withUrgency.sort((a, b) => {
+      const byUrgency = ORDER[a.urgency] - ORDER[b.urgency];
+      if (byUrgency !== 0) return byUrgency;
+      // Внутри группы — свежие обращения выше.
+      return b.lead.created_at.localeCompare(a.lead.created_at);
+    });
+  }, [leads]);
+
+  const visible = filter === "all" ? sorted : sorted.filter((x) => x.lead.status === filter);
   const newCount = leads.filter((l) => l.status === "new").length;
+  const burningCount = sorted.filter((x) => x.urgency === "burning").length;
 
   const setStatus = async (lead: AdminLead, status: AdminLead["status"]) => {
     setBusy(lead.id);
@@ -40,6 +104,20 @@ export function LeadsBoard({
       setLeads((prev) => prev.map((l) => (l.id === lead.id ? updated : l)));
     } catch (e) {
       toast.show(e instanceof AdminError ? e.message : "Не удалось сохранить", "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async (lead: AdminLead) => {
+    if (!window.confirm(`Удалить заявку «${lead.name}»? Восстановить не получится.`)) return;
+    setBusy(lead.id);
+    try {
+      await adminSend(`/leads/${lead.id}`, "DELETE");
+      setLeads((prev) => prev.filter((l) => l.id !== lead.id));
+      toast.show("Заявка удалена");
+    } catch (e) {
+      toast.show(e instanceof AdminError ? e.message : "Не удалось удалить", "error");
     } finally {
       setBusy(null);
     }
@@ -57,6 +135,14 @@ export function LeadsBoard({
           ? "Заявок пока нет."
           : `Всего ${leads.length}${newCount ? `, из них новых — ${newCount}` : ""}.`}
       </p>
+
+      {burningCount > 0 && (
+        <p className="mt-4 rounded-xl border border-wine-400/40 bg-wine-900/25 px-4 py-3 text-sm text-wine-100">
+          {burningCount === 1
+            ? "Одна заявка с заездом в ближайшие дни ждёт ответа."
+            : `Заявок с заездом в ближайшие дни: ${burningCount}. Они наверху списка.`}
+        </p>
+      )}
 
       {leads.length > 0 && (
         <div className="mt-6 flex flex-wrap gap-2">
@@ -82,17 +168,32 @@ export function LeadsBoard({
       )}
 
       <div className="mt-6 space-y-3">
-        {visible.map((lead) => {
+        {visible.map(({ lead, urgency }) => {
           const status = LEAD_STATUSES.find((s) => s.value === lead.status);
+          const look = URGENCY_STYLE[urgency];
+          const days = daysUntil(lead.check_in);
           return (
-            <article
-              key={lead.id}
-              className="rounded-2xl border border-white/10 bg-ink-900 p-5"
-            >
+            <article key={lead.id} className={`rounded-2xl border p-5 ${look.card}`}>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className="font-display text-lg text-cream">{lead.name}</h2>
+
+                    {look.label && (
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[0.65rem] tracking-wide uppercase ${look.tone}`}
+                      >
+                        {look.label}
+                        {urgency === "burning" && days !== null
+                          ? days === 0
+                            ? " · сегодня"
+                            : days === 1
+                              ? " · завтра"
+                              : ` · через ${days} дн.`
+                          : ""}
+                      </span>
+                    )}
+
                     <span
                       className={`rounded-full border px-2.5 py-0.5 text-[0.65rem] tracking-wide uppercase ${
                         status?.tone ?? "border-white/20 text-muted"
@@ -143,18 +244,30 @@ export function LeadsBoard({
                   )}
                 </div>
 
-                <select
-                  value={lead.status}
-                  disabled={busy === lead.id}
-                  onChange={(e) => setStatus(lead, e.target.value as AdminLead["status"])}
-                  className="shrink-0 rounded-xl border border-white/12 bg-ink-950/60 px-3.5 py-2.5 text-sm text-cream outline-none focus:border-sand-400/60 disabled:opacity-50 [color-scheme:dark]"
-                >
-                  {LEAD_STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <select
+                    value={lead.status}
+                    disabled={busy === lead.id}
+                    onChange={(e) => setStatus(lead, e.target.value as AdminLead["status"])}
+                    className="rounded-xl border border-white/12 bg-ink-950/60 px-3.5 py-2.5 text-sm text-cream outline-none focus:border-sand-400/60 disabled:opacity-50 [color-scheme:dark]"
+                  >
+                    {LEAD_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  {/* Удаление для мусора: проверок формы и спама. Настоящую
+                      заявку правильнее закрывать статусом — он оставляет след. */}
+                  <button
+                    type="button"
+                    disabled={busy === lead.id}
+                    onClick={() => remove(lead)}
+                    className="text-xs text-muted underline underline-offset-2 transition-colors hover:text-wine-200 disabled:opacity-50"
+                  >
+                    удалить
+                  </button>
+                </div>
               </div>
             </article>
           );

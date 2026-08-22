@@ -280,6 +280,28 @@ async def admin_update_lead(
     return lead
 
 
+@app.delete("/api/admin/leads/{lead_id}", status_code=204, tags=["admin: заявки"])
+async def admin_delete_lead(
+    lead_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_admin),
+):
+    """
+    Удаление заявки.
+
+    Нужно для мусора: проверок формы при запуске и спама от ботов. Настоящую
+    заявку удалять не стоит даже отменённую — по ней потом восстанавливают,
+    кто звонил и о чём договорились. Для «не поедет» есть статус «Отменена»,
+    он оставляет след.
+    """
+    lead = await session.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(404, "Заявка не найдена")
+    await session.delete(lead)
+    await session.commit()
+    logger.info("Удалена заявка #%s (%s)", lead_id, lead.name)
+
+
 @app.get("/api/leads", response_model=list[LeadOut], tags=["leads"], deprecated=True)
 async def list_leads_by_key(
     limit: int = 100,
