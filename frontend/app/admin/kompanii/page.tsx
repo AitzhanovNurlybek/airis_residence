@@ -12,14 +12,15 @@ async function read<T>(path: string, fallback: T): Promise<T> {
 }
 
 export default async function AdminCompaniesPage() {
-  if (!(await isAdminSignedIn())) redirect("/admin/login");
-
   // Заявки тянем вместе со списком: менеджер должен увидеть, что его ждёт,
-  // не открывая компании по очереди.
-  const [companies, bookings] = await Promise.all([
+  // не открывая компании по очереди. Проверка сессии идёт тем же заходом —
+  // иначе это лишний перелёт до базы перед каждой страницей.
+  const [signedIn, companies, bookings] = await Promise.all([
+    isAdminSignedIn(),
     read<AdminCompany[]>("/api/admin/corp/companies", []),
     read<AdminCorpBooking[]>("/api/admin/corp/bookings", []),
   ]);
+  if (!signedIn) redirect("/admin/login");
 
   return (
     <>

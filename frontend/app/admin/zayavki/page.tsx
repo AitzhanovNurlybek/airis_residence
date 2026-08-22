@@ -5,12 +5,12 @@ import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
 import type { AdminLead, AdminRoom } from "@/lib/adminTypes";
 
 export default async function AdminLeadsPage() {
-  if (!(await isAdminSignedIn())) redirect("/admin/login");
-
-  const [leadsRes, roomsRes] = await Promise.all([
+  const [signedIn, leadsRes, roomsRes] = await Promise.all([
+    isAdminSignedIn(),
     adminFetch("/api/admin/leads?limit=200"),
     adminFetch("/api/admin/rooms"),
   ]);
+  if (!signedIn) redirect("/admin/login");
 
   const leads: AdminLead[] = leadsRes.ok ? await leadsRes.json() : [];
   const rooms: AdminRoom[] = roomsRes.ok ? await roomsRes.json() : [];

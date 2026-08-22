@@ -17,22 +17,23 @@ async function read<T>(path: string, fallback: T): Promise<T> {
 }
 
 export default async function AdminCompanyPage(props: PageProps<"/admin/kompanii/[slug]">) {
-  if (!(await isAdminSignedIn())) redirect("/admin/login");
-
   const { slug } = await props.params;
 
-  // Компанию читаем из общего списка: отдельного эндпоинта на одну нет, а
-  // компаний у отеля десятки, не тысячи — лишний маршрут ради этого не нужен.
-  const companies = await read<AdminCompany[]>("/api/admin/corp/companies", []);
-  const company = companies.find((item) => item.slug === slug);
-  if (!company) notFound();
-
-  const [rooms, rates, users, bookings] = await Promise.all([
+  // Всё одним заходом. Раньше список компаний читался первым, и только потом
+  // шли остальные запросы — два круга до Сиднея вместо одного. Ни один из них
+  // не зависит от другого: имя компании нужно для показа, а не для запросов.
+  const [signedIn, companies, rooms, rates, users, bookings] = await Promise.all([
+    isAdminSignedIn(),
+    read<AdminCompany[]>("/api/admin/corp/companies", []),
     read<AdminRoom[]>("/api/admin/rooms", []),
     read<AdminCompanyRate[]>(`/api/admin/corp/companies/${slug}/rates`, []),
     read<AdminCompanyUser[]>(`/api/admin/corp/companies/${slug}/users`, []),
     read<AdminCorpBooking[]>(`/api/admin/corp/bookings?company=${slug}`, []),
   ]);
+  if (!signedIn) redirect("/admin/login");
+
+  const company = companies.find((item) => item.slug === slug);
+  if (!company) notFound();
 
   return (
     <CompanyEditor

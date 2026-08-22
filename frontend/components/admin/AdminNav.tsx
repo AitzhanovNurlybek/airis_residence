@@ -33,6 +33,7 @@ export function AdminNav() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  prefetch={false}
                   className={`rounded-full px-4 py-2 text-sm transition-colors ${
                     active ? "bg-white/8 text-cream" : "text-muted hover:text-cream"
                   }`}
@@ -45,6 +46,10 @@ export function AdminNav() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* prefetch выключен по всей админке: каждая её страница
+              динамическая и ходит в базу, а база в Сиднее. Предзагрузка
+              означала бы пять серверных рендеров с запросами через полмира
+              на каждое наведение мыши. */}
           <Link
             href="/"
             target="_blank"

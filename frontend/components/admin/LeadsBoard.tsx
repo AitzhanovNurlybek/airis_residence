@@ -5,13 +5,10 @@ import { useMemo, useState } from "react";
 import { adminSend, AdminError } from "@/lib/adminClient";
 import { LEAD_STATUSES, type AdminLead, type AdminRoom } from "@/lib/adminTypes";
 import { useToast } from "@/components/admin/ui";
-
-const dateFormat = new Intl.DateTimeFormat("ru-RU", {
-  day: "2-digit",
-  month: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+// Время отеля, а не машины: сервер в UTC, менеджер в Алматы, и без явного
+// пояса сервер с браузером рисовали разный текст — React ловил это как
+// ошибку гидратации, а в карточке стояло время со сдвигом на пять часов.
+import { daysUntil, hotelDateTime } from "@/lib/almaty";
 
 /**
  * Срочность заявки.
@@ -41,16 +38,6 @@ const URGENCY_STYLE: Record<Urgency, { card: string; label?: string; tone?: stri
   stale: { card: "border-white/8 bg-ink-900/40 opacity-70", label: "Дата прошла", tone: "bg-white/10 text-muted" },
   done: { card: "border-white/8 bg-ink-900/40 opacity-70" },
 };
-
-/** Сколько суток до заезда. null — дат в заявке нет. */
-function daysUntil(checkIn: string | null): number | null {
-  if (!checkIn) return null;
-  const date = new Date(`${checkIn}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
-}
 
 function urgencyOf(lead: AdminLead): Urgency {
   // Разобранная заявка не срочная, чем бы она ни закончилась.
@@ -202,7 +189,7 @@ export function LeadsBoard({
                       {status?.label ?? lead.status}
                     </span>
                     <span className="text-xs text-muted">
-                      {dateFormat.format(new Date(lead.created_at))}
+                      {hotelDateTime.format(new Date(lead.created_at))}
                     </span>
                   </div>
 
