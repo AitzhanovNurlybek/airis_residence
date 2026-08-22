@@ -67,7 +67,17 @@ export function CorpHeader({
             </span>
           )}
           {/* «Кабинет» и «Выход» переехали в боковое меню — в шапке они
-              дублировали бы его и отнимали место у названия компании. */}
+              дублировали бы его и отнимали место у названия компании.
+              А вот выход на сайт нужен здесь: сотрудник попал в кабинет
+              с сайта отеля и должен уметь вернуться, не жмя «назад». */}
+          <a
+            href="/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden text-sm text-cream/70 transition-colors hover:text-cream sm:block"
+          >
+            Сайт отеля ↗
+          </a>
           <LangSwitch current={locale} />
         </div>
       </div>

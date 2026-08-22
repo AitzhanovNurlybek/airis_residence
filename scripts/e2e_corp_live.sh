@@ -131,6 +131,7 @@ check "$(has "$T/cab.html" 'Компания-пример А')" "карточк�
 check "$(has "$T/cab.html" 'постоплата')" "условия оплаты видны"
 check "$(has "$T/cab.html" 'заявка уходит менеджеру')" "честная плашка про подтверждение"
 check "$(has "$T/cab.html" 'airisresidence-kz@gmail.com')" "менеджер отеля указан"
+check "$(has "$T/cab.html" 'Сайт отеля')" "из кабинета есть выход на сайт"
 
 curl -s -b "$T/jar" -o "$T/bk.html" "$F/corp/bookings"
 check "$(has "$T/bk.html" 'Мои бронирования')" "страница броней открылась"
