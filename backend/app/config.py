@@ -88,6 +88,25 @@ class Settings(BaseSettings):
     payment_failure_url: str = "https://airisresidence.kz/oplata/oshibka"
     payment_webhook_secret: str = ""    # для проверки подписи колбэка
 
+    # ─── ИИ-консьерж (WhatsApp, Instagram, сайт) ───────────────────────
+    # Факты об отеле консьерж не хранит у себя: он берёт их с /api/knowledge
+    # фронтенда, где они собираются из тех же модулей, что рисуют страницы.
+    # Своя копия прайса рано или поздно отстаёт от админки, а консьерж
+    # называет цену гостю от лица отеля — расхождение здесь дороже лишнего
+    # сетевого запроса.
+    site_url: str = "https://airisresidence.kz"
+    # Сколько держать факты в памяти функции. Цены меняют не каждый час,
+    # а ходить за ними на каждое сообщение — лишняя секунда в ответе.
+    knowledge_ttl_seconds: int = 600
+
+    anthropic_api_key: str = ""
+    concierge_model: str = "claude-sonnet-5"
+    # Предел на ответ. Консьерж в мессенджере пишет коротко: длинную простыню
+    # в WhatsApp не читают, а токены она жжёт на каждом сообщении.
+    concierge_max_tokens: int = 700
+    # Сколько прошлых сообщений диалога подкладывать в запрос.
+    concierge_history_depth: int = 12
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
