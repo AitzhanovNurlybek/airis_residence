@@ -323,6 +323,10 @@ class CorpBookingOut(BaseModel):
     cancelReason: str = Field(default="", validation_alias="cancel_reason")
     # Кто оформил — в таблице «Мои бронирования» есть колонка «Сотрудник».
     createdByName: str = ""
+    # Чья это заявка. В кабинете компания и так одна, а вот в общем списке у
+    # отеля без названия заявка бесполезна: непонятно, кому звонить.
+    companySlug: str = ""
+    companyName: str = ""
     items: list[CorpBookingItemOut] = []
 
 

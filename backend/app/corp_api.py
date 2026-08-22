@@ -134,6 +134,14 @@ async def _bookings_out(
     for item in items_result.scalars().all():
         by_booking.setdefault(item.booking_id, []).append(item)
 
+    company_ids = {b.company_id for b in bookings}
+    companies: dict[int, Company] = {}
+    if company_ids:
+        companies_result = await session.execute(
+            select(Company).where(Company.id.in_(company_ids))
+        )
+        companies = {c.id: c for c in companies_result.scalars().all()}
+
     author_ids = {b.created_by_id for b in bookings if b.created_by_id}
     names: dict[int, str] = {}
     if author_ids:
@@ -151,6 +159,10 @@ async def _bookings_out(
             for item in by_booking.get(booking.id, [])
         ]
         model.createdByName = names.get(booking.created_by_id or 0, "")
+        company = companies.get(booking.company_id)
+        if company:
+            model.companySlug = company.slug
+            model.companyName = company.name
         out.append(model)
     return out
 

@@ -101,6 +101,9 @@ export type AdminCorpBooking = {
   createdAt: string;
   cancelReason: string;
   createdByName: string;
+  /** Чья заявка. В общем списке без этого непонятно, кому звонить. */
+  companySlug: string;
+  companyName: string;
   items: AdminCorpBookingItem[];
 };
 
