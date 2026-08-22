@@ -19,9 +19,10 @@ import time
 # ключ → отметки времени попыток
 _attempts: dict[str, list[float]] = {}
 
+#: Окно по умолчанию — пять минут.
 WINDOW_SECONDS = 300
 
-#: Предел для одной учётной записи. Это основная защита: подбирают всегда
+#: Предел для одной учётной записи кабинета. Основная защита: подбирают всегда
 #: конкретный аккаунт.
 PER_ACCOUNT = 10
 
@@ -29,6 +30,16 @@ PER_ACCOUNT = 10
 #: клиенты сидят за общим офисным NAT, и десятка на всю компанию не хватит —
 #: пара опечаток у двух коллег заперла бы всех остальных.
 PER_OFFICE_IP = 50
+
+#: Админка отеля: три попытки, потом час.
+#:
+#: Здесь строго, потому что учётка одна, логин известен и заходит с неё один
+#: человек с одного места. Обратная сторона — запереть можно самого себя: три
+#: опечатки, и час без доступа к ценам и заявкам. Поэтому в отказе сразу
+#: сказано, сколько ждать, а перезапуск приложения (любой деплой) счётчик
+#: обнуляет — это и есть аварийный выход, если ждать нельзя.
+ADMIN_ATTEMPTS = 3
+ADMIN_BLOCK_SECONDS = 3600
 
 
 def client_ip(request) -> str:
@@ -45,16 +56,31 @@ def client_ip(request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def too_many(key: str, limit: int = PER_ACCOUNT) -> bool:
+def too_many(key: str, limit: int = PER_ACCOUNT, window: int = WINDOW_SECONDS) -> bool:
     """Отмечает попытку и говорит, не пора ли остановить."""
+    return seconds_left(key, limit, window) > 0
+
+
+def seconds_left(key: str, limit: int = PER_ACCOUNT, window: int = WINDOW_SECONDS) -> int:
+    """
+    Сколько ещё ждать. Ноль — можно пробовать, попытка засчитана.
+
+    Пока ключ заблокирован, новые попытки НЕ записываются. Иначе тот, кто
+    продолжает жать «войти», продлевал бы себе блокировку бесконечно и не
+    смог бы зайти уже никогда — а это в равной мере наказывает и хозяина,
+    забывшего пароль.
+    """
     now = time.time()
-    recent = [t for t in _attempts.get(key, []) if now - t < WINDOW_SECONDS]
+    recent = [t for t in _attempts.get(key, []) if now - t < window]
+
     if len(recent) >= limit:
         _attempts[key] = recent
-        return True
+        # Блокировка спадёт, когда самая старая из зачтённых попыток устареет.
+        return max(1, int(recent[0] + window - now))
+
     recent.append(now)
     _attempts[key] = recent
-    return False
+    return 0
 
 
 def reset(key: str) -> None:

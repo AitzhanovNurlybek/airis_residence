@@ -485,6 +485,38 @@ async def main() -> None:
         )
         check("сотрудники удалённой компании не входят", r.status_code == 401, str(r.status_code))
 
+        # В самом конце: блокировка админского входа не должна мешать шагам выше.
+        print("\n── Блокировка входа в админку ──")
+        codes = []
+        for _ in range(4):
+            rr = await c.post(
+                "/api/auth/login",
+                json={"username": "admin", "password": "не-тот-пароль"},
+            )
+            codes.append(rr.status_code)
+        check(
+            "три попытки проходят как неверный пароль",
+            codes[:3] == [401, 401, 401],
+            str(codes[:3]),
+        )
+        check("четвёртая упирается в блокировку", codes[3] == 429, str(codes[3]))
+
+        rr = await c.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "не-тот-пароль"},
+        )
+        detail = rr.json().get("detail", "")
+        check("в отказе сказано, сколько ждать", "мин" in detail, detail[:60])
+        check("и подсказан аварийный выход", "Redeploy" in detail, detail[-40:])
+
+        # Даже с верным паролем — блокировка есть блокировка.
+        rr = await c.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "e2e-admin-password"},
+        )
+        check("верный пароль во время блокировки тоже не пускает",
+              rr.status_code == 429, str(rr.status_code))
+
     print()
     if problems:
         print(f"❌ Провалено проверок: {len(problems)}")

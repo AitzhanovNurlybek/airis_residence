@@ -36,7 +36,13 @@ from .schemas import (
     PaymentInitOut,
 )
 from .seed_rooms import SEED_ROOMS
-from .throttle import client_ip, reset, too_many
+from .throttle import (
+    ADMIN_ATTEMPTS,
+    ADMIN_BLOCK_SECONDS,
+    client_ip,
+    reset,
+    seconds_left,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -184,11 +190,16 @@ async def login(
             "Админка не настроена: задайте ADMIN_PASSWORD и SECRET_KEY в .env",
         )
 
-    # Тормоз против перебора: 10 попыток за 5 минут с одного адреса.
+    # Три попытки, потом час. Учётка одна и логин известен, поэтому строго.
     key = f"admin:{client_ip(request)}"
-    if too_many(key):
+    wait = seconds_left(key, ADMIN_ATTEMPTS, ADMIN_BLOCK_SECONDS)
+    if wait:
+        minutes = max(1, round(wait / 60))
         raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, подождите 5 минут"
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"Три неудачных попытки подряд. Вход заблокирован, осталось "
+            f"около {minutes} мин. Если ждать нельзя — перезапустите приложение "
+            f"на Vercel (Redeploy), счётчик обнулится.",
         )
 
     if not check_credentials(cfg, payload.username, payload.password):

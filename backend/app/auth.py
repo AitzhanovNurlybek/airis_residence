@@ -77,9 +77,20 @@ def verify_token(settings: Settings, token: str) -> str | None:
 
 
 def check_credentials(settings: Settings, username: str, password: str) -> bool:
-    """Сравнение в постоянном времени — чтобы нельзя было подобрать по задержке."""
-    user_ok = secrets.compare_digest(username.strip(), settings.admin_username)
-    pass_ok = secrets.compare_digest(password, settings.admin_password)
+    """
+    Сравнение в постоянном времени — чтобы нельзя было подобрать по задержке.
+
+    Сравниваем байты, а не строки. compare_digest на строках с не-ASCII бросает
+    TypeError, и вход отвечал пятисоткой вместо «неверный пароль» — достаточно
+    было набрать пароль с русской раскладки. Ошибка при этом не засчитывалась
+    защитой от перебора: до неё дело не доходило.
+    """
+    user_ok = secrets.compare_digest(
+        username.strip().encode("utf-8"), settings.admin_username.encode("utf-8")
+    )
+    pass_ok = secrets.compare_digest(
+        password.encode("utf-8"), settings.admin_password.encode("utf-8")
+    )
     return user_ok and pass_ok
 
 
