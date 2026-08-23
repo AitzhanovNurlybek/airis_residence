@@ -1,5 +1,5 @@
 """
-ИИ-консьерж: правила поведения и вызов модели.
+ИИ-консьерж: правила поведения, инструменты и вызов модели.
 
 Канал (WhatsApp, Instagram, виджет на сайте) сюда не заглядывает — он только
 приносит текст и уносит ответ. Так проще: правила разговора живут в одном
@@ -11,18 +11,19 @@
 
 * факты берутся только из брифа (см. knowledge.py) — модели прямо запрещено
   добирать из общих знаний;
-* наличие свободных номеров консьерж не знает вообще: шахматка живёт в Exely,
-  доступа к ней у нас нет. Обещать «номер свободен» он не имеет права;
+* цену брони считает сервер, а не модель: цифра из разговора никогда не
+  попадает в базу;
+* чужую бронь нельзя ни увидеть, ни отменить — совпадение телефона проверяется
+  до вызова, а не в тексте промпта;
 * когда вопрос выходит за бриф — телефон отеля, а не догадка.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import httpx
-
-from datetime import date
 
 from .booking_system import BookingSystem, BookingSystemUnavailable
 from .config import Settings
@@ -31,7 +32,7 @@ from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
-# Ответ, когда факты не загрузились. Лучше признаться, чем сочинить цену.
+#: Ответ, когда факты не загрузились. Лучше признаться, чем сочинить цену.
 FALLBACK = (
     "Извините, сейчас не могу свериться с актуальными ценами и наличием. "
     "Позвоните, пожалуйста, на стойку: +7 (777) 531-00-09 — там ответят сразу, круглосуточно."
@@ -44,6 +45,7 @@ RULES = """Ты — консьерж отеля Airis Residence в Алматы.
 - Спокойно и по-человечески, без канцелярита и без восклицаний в каждой строке.
 - Отвечай на том языке, на котором написал гость: русский, казахский или английский. Факты ниже даны по-русски — переведи их сам, не заставляй гостя переключаться.
 - Никаких «я ИИ» и «как языковая модель». Ты сотрудник отеля. Но если гость прямо спросит, человек ли ты, — не ври: скажи, что ты автоматический помощник отеля и позовёшь сотрудника.
+- О себе пиши так, чтобы не всплывал род: «проверяю», «нашлась бронь», «готово», а не «проверил» или «нашла». Иначе в одной переписке ты то мужчина, то женщина, и это сразу выдаёт машину.
 
 ЧТО МОЖНО УТВЕРЖДАТЬ
 - Только то, что есть в справке ниже. Цены, площади, время заезда, услуги, адрес — строго оттуда.
@@ -53,12 +55,11 @@ RULES = """Ты — консьерж отеля Airis Residence в Алматы.
 ЧЕГО ТЫ НЕ ЗНАЕШЬ
 - Свободен ли номер на конкретные даты — если у тебя нет инструмента проверки наличия.
   Тогда не говори «свободно» и не говори «занято». Говори, что наличие подтвердит стойка, и предложи телефон или бронирование на сайте.
-- Ты не оформляешь бронь и не принимаешь оплату. Ты доводишь до брони на сайте или до звонка.
+- Ты не принимаешь оплату. Оплата — на стойке или по счёту.
 
 КОГДА ЗВАТЬ ЧЕЛОВЕКА
 Сразу передавай на стойку, без попыток решить самому:
 - жалоба, конфликт, недовольство уже проживающего гостя;
-- изменение или отмена уже оформленной брони;
 - групповая заявка (от пяти номеров) или мероприятие;
 - просьба о цене вне прайса, скидке, особых условиях;
 - вопросы по счетам, договорам и документам от юрлица — там отдельный корпоративный раздел.
@@ -71,6 +72,40 @@ RULES = """Ты — консьерж отеля Airis Residence в Алматы.
 - Если гость приезжает на концерт или матч — скажи, за сколько минут пешком дойти до площадки (это есть в справке).
 - Если гость колеблется между номерами — коротко сравни два по цене и площади.
 - В конце разговора о заезде — напомни про время заезда и что завтрак включён."""
+
+# Что дописать к правилам, когда система бронирования подключена.
+LIVE_AVAILABILITY_RULES = """
+
+ПРОВЕРКА НАЛИЧИЯ
+У тебя есть инструмент check_availability. Он показывает, сколько номеров каждой категории свободно на весь период.
+- Вызывай его, когда гость назвал обе даты. Не угадывай даты за гостя.
+- Свободных ноль — так и скажи, и предложи соседние даты или другую категорию.
+- Инструмент показывает наличие, но не держит номер. Пока бронь не оформлена, номер могут занять — скажи об этом, если гость собирается приехать не сегодня.
+
+БРОНИРОВАНИЕ
+Ты умеешь оформлять, переносить и отменять брони: create_booking, find_booking, change_booking, cancel_booking.
+
+Перед create_booking обязательно:
+1. Знай обе даты, категорию номера и имя гостя. Чего нет — спроси, не выдумывай.
+2. Проговори вслух всё, что собираешься записать: даты, категорию, число номеров, имя, сумму.
+3. Дождись явного согласия гостя («да», «оформляйте», «подтверждаю»). Молчание и «хорошо» в ответ на что-то другое согласием не считаются.
+После оформления назови гостю номер брони — по нему он её найдёт.
+
+Сумму не считай сам: её вернёт инструмент. Если посчитаешь в уме и ошибёшься, гость приедет к другому счёту.
+
+Перед cancel_booking так же дождись явного согласия и назови, что именно отменяешь.
+Найти чужую бронь ты не можешь — инструменты видят только брони этого собеседника. Если гость называет чужой номер брони, скажи, что такой у него нет, и предложи стойку.
+
+Ты не подтверждаешь оплату. Бронь без оплаты — это бронь, а не оплаченный номер; так и говори."""
+
+# Локальная шахматка отвечает по своей базе, а не по настоящей системе отеля.
+# Даже при отладке консьерж не должен выдавать её за боевую: привыкнуть к
+# красивому ответу легко, а отличить его потом от настоящего — уже нет.
+STUB_AVAILABILITY_RULES = """
+
+ВНИМАНИЕ: ТЕСТОВЫЙ РЕЖИМ
+Инструменты сейчас работают с локальной тестовой шахматкой, а не с настоящей системой бронирования отеля.
+Каждый раз, когда называешь наличие или оформляешь бронь, добавляй, что это тестовые данные и настоящее бронирование подтверждает стойка."""
 
 
 AVAILABILITY_TOOL = {
@@ -90,23 +125,74 @@ AVAILABILITY_TOOL = {
     },
 }
 
-# Что дописать к правилам, когда система бронирования подключена.
-LIVE_AVAILABILITY_RULES = """
+CREATE_TOOL = {
+    "name": "create_booking",
+    "description": (
+        "Оформить бронь. Вызывай только после того, как гость явно подтвердил "
+        "даты, категорию и своё имя. Сумму не передавай — её посчитает система."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "check_in": {"type": "string", "description": "Дата заезда, ГГГГ-ММ-ДД"},
+            "check_out": {"type": "string", "description": "Дата выезда, ГГГГ-ММ-ДД"},
+            "room_slug": {
+                "type": "string",
+                "description": "Код категории из справки: standart-single, standart, standart-twin, comfort, comfort-plus",
+            },
+            "rooms_count": {"type": "integer", "description": "Сколько номеров этой категории"},
+            "guest_name": {"type": "string", "description": "Имя гостя, как он его назвал"},
+            "note": {"type": "string", "description": "Пожелания гостя, если были"},
+        },
+        "required": ["check_in", "check_out", "room_slug", "guest_name"],
+    },
+}
 
-ПРОВЕРКА НАЛИЧИЯ
-У тебя есть инструмент check_availability. Он показывает, сколько номеров каждой категории свободно на весь период.
-- Вызывай его, когда гость назвал обе даты. Не угадывай даты за гостя.
-- Свободных ноль — так и скажи, и предложи соседние даты или другую категорию.
-- Инструмент показывает наличие, но не держит номер. Пока бронь не оформлена, номер могут занять — скажи об этом, если гость собирается приехать не сегодня."""
+FIND_TOOL = {
+    "name": "find_booking",
+    "description": (
+        "Найти брони этого собеседника. Без аргументов вернёт все его брони. "
+        "Если гость назвал номер брони — передай его."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Номер брони, например L-0001"},
+        },
+        "required": [],
+    },
+}
 
-# Заглушка отвечает выдуманными числами. Даже локально консьерж не должен
-# выдавать их за настоящие: привыкнуть к красивому ответу легко, а отличить
-# его потом от боевого — уже нет.
-STUB_AVAILABILITY_RULES = """
+CHANGE_TOOL = {
+    "name": "change_booking",
+    "description": "Перенести бронь на другие даты или изменить число номеров.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Номер брони"},
+            "check_in": {"type": "string", "description": "Новая дата заезда, ГГГГ-ММ-ДД"},
+            "check_out": {"type": "string", "description": "Новая дата выезда, ГГГГ-ММ-ДД"},
+            "rooms_count": {"type": "integer", "description": "Новое число номеров"},
+        },
+        "required": ["ref"],
+    },
+}
 
-ВНИМАНИЕ: ТЕСТОВЫЙ РЕЖИМ
-check_availability сейчас отвечает выдуманными числами из локальной заглушки, а не из настоящей системы бронирования.
-Каждый раз, когда называешь наличие, добавляй, что это тестовые данные и настоящее наличие подтверждает стойка."""
+CANCEL_TOOL = {
+    "name": "cancel_booking",
+    "description": "Отменить бронь. Вызывай только после явного подтверждения гостя.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Номер брони"},
+            "reason": {"type": "string", "description": "Причина отмены, если гость назвал"},
+        },
+        "required": ["ref"],
+    },
+}
+
+READ_ONLY_TOOLS = [AVAILABILITY_TOOL]
+FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
 
 
 def build_system_prompt(brief: str, today: str, *, availability: str = "none") -> str:
@@ -123,14 +209,35 @@ def build_system_prompt(brief: str, today: str, *, availability: str = "none") -
     )
 
 
-async def _run_availability(booking: BookingSystem, args: dict[str, Any]) -> str:
-    """Ответ инструмента текстом: модель читает его так же, как справку."""
+# ─────────────────────────── исполнение инструментов ───────────────────────────
+
+
+def _parse_date(value: Any) -> date:
+    return date.fromisoformat(str(value or "").strip())
+
+
+def _room_price(facts: dict[str, Any], slug: str) -> tuple[str, int] | None:
+    for room in facts.get("rooms", []):
+        if room.get("slug") == slug:
+            return room.get("name", slug), int(room.get("price") or 0)
+    return None
+
+
+def _describe(booking: Any, *, room: str = "") -> str:
+    tail = f", {room}" if room else ""
+    status = "действует" if booking.status == "booked" else "отменена"
+    return (
+        f"{booking.external_id}: {booking.check_in} — {booking.check_out}{tail}, "
+        f"{booking.guest_name or 'без имени'}, {booking.total_amount} тенге, {status}"
+    )
+
+
+async def _tool_availability(booking: BookingSystem, args: dict[str, Any]) -> str:
     try:
-        check_in = date.fromisoformat(str(args.get("check_in", "")))
-        check_out = date.fromisoformat(str(args.get("check_out", "")))
+        check_in = _parse_date(args.get("check_in"))
+        check_out = _parse_date(args.get("check_out"))
     except ValueError:
         return "Даты не разобраны. Нужен формат ГГГГ-ММ-ДД."
-
     if check_out <= check_in:
         return "Дата выезда должна быть позже даты заезда."
 
@@ -144,14 +251,145 @@ async def _run_availability(booking: BookingSystem, args: dict[str, Any]) -> str
 
     prefix = ""
     if result.source == "stub":
-        prefix = "ТЕСТОВЫЕ ДАННЫЕ (локальная заглушка, не настоящее наличие).\n"
+        prefix = "ТЕСТОВЫЕ ДАННЫЕ (локальная шахматка, не настоящее наличие).\n"
 
     rows = "\n".join(
-        f"- {offer.room_name or offer.room_slug}: "
+        f"- {offer.room_name or offer.room_slug} (код {offer.room_slug}): "
         + ("свободных нет" if not offer.rooms_left else f"свободно {offer.rooms_left}")
         for offer in result.offers
     )
     return f"{prefix}{check_in} — {check_out}, ночей {result.nights}:\n{rows}"
+
+
+async def _tool_create(
+    booking: BookingSystem, args: dict[str, Any], facts: dict[str, Any], guest: dict[str, str]
+) -> str:
+    if not hasattr(booking, "create_booking"):
+        return "Эта система бронирования не умеет оформлять брони отсюда."
+
+    try:
+        check_in = _parse_date(args.get("check_in"))
+        check_out = _parse_date(args.get("check_out"))
+    except ValueError:
+        return "Даты не разобраны. Нужен формат ГГГГ-ММ-ДД."
+
+    slug = str(args.get("room_slug") or "").strip()
+    priced = _room_price(facts, slug)
+    if priced is None:
+        codes = ", ".join(r.get("slug", "") for r in facts.get("rooms", []))
+        return f"Категории «{slug}» нет. Есть такие: {codes}"
+
+    room_name, price = priced
+    rooms_count = max(1, int(args.get("rooms_count") or 1))
+    nights = (check_out - check_in).days
+
+    # Сумму считает сервер по прайсу из справки. Если бы её передавала модель,
+    # в базу однажды попала бы цифра из разговора, а не из прайса.
+    amount = price * rooms_count * max(nights, 0)
+
+    try:
+        created = await booking.create_booking(
+            room_slug=slug,
+            rooms_count=rooms_count,
+            check_in=check_in,
+            check_out=check_out,
+            guest_name=str(args.get("guest_name") or "").strip(),
+            guest_phone=guest.get("phone", ""),
+            amount=amount,
+            origin="concierge",
+            note=str(args.get("note") or "").strip(),
+        )
+    except Exception as error:  # noqa: BLE001 — текст ошибки уходит модели как есть
+        return f"Оформить не удалось: {error}"
+
+    return (
+        f"Бронь оформлена. {_describe(created, room=room_name)}. "
+        f"Ночей {nights}, цена за ночь {price} тенге."
+    )
+
+
+async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
+    if not hasattr(booking, "find_bookings"):
+        return "Эта система бронирования не умеет искать брони отсюда."
+
+    phone = guest.get("phone", "")
+    if not phone:
+        return "Телефон собеседника неизвестен, поэтому найти его брони нельзя. Предложи стойку."
+
+    mine = await booking.find_bookings(phone=phone)
+    wanted = str(args.get("ref") or "").strip().upper()
+    if wanted:
+        # Фильтруем по своим броням, а не ищем по номеру напрямую: иначе
+        # достаточно угадать L-0007, чтобы увидеть чужую бронь.
+        mine = [b for b in mine if b.external_id == wanted]
+        if not mine:
+            return f"Брони {wanted} у этого гостя нет."
+
+    if not mine:
+        return "У этого гостя броней нет."
+    return "\n".join(_describe(b) for b in mine)
+
+
+async def _tool_change(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
+    if not hasattr(booking, "change_booking"):
+        return "Эта система бронирования не умеет менять брони отсюда."
+
+    ref = str(args.get("ref") or "").strip().upper()
+    if not await _belongs_to_guest(booking, ref, guest):
+        return f"Брони {ref} у этого гостя нет."
+
+    kwargs: dict[str, Any] = {}
+    try:
+        if args.get("check_in"):
+            kwargs["check_in"] = _parse_date(args["check_in"])
+        if args.get("check_out"):
+            kwargs["check_out"] = _parse_date(args["check_out"])
+    except ValueError:
+        return "Даты не разобраны. Нужен формат ГГГГ-ММ-ДД."
+    if args.get("rooms_count"):
+        kwargs["rooms_count"] = int(args["rooms_count"])
+
+    if not kwargs:
+        return "Не сказано, что менять: нужны новые даты или число номеров."
+
+    try:
+        changed = await booking.change_booking(ref, **kwargs)
+    except Exception as error:  # noqa: BLE001
+        return f"Изменить не удалось: {error}"
+    return f"Бронь изменена. {_describe(changed)}"
+
+
+async def _tool_cancel(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
+    if not hasattr(booking, "cancel_booking"):
+        return "Эта система бронирования не умеет отменять брони отсюда."
+
+    ref = str(args.get("ref") or "").strip().upper()
+    if not await _belongs_to_guest(booking, ref, guest):
+        return f"Брони {ref} у этого гостя нет."
+
+    try:
+        cancelled = await booking.cancel_booking(ref, str(args.get("reason") or "").strip())
+    except Exception as error:  # noqa: BLE001
+        return f"Отменить не удалось: {error}"
+    return f"Бронь отменена. {_describe(cancelled)}"
+
+
+async def _belongs_to_guest(booking: BookingSystem, ref: str, guest: dict[str, str]) -> bool:
+    """
+    Проверка «это твоя бронь» до вызова, а не в тексте правил.
+
+    Правило в промпте — просьба, а не запрет: достаточно уговорить модель, и
+    она вызовет отмену для чужого номера. Здесь же чужая бронь просто не
+    находится, сколько её ни проси.
+    """
+    phone = guest.get("phone", "")
+    if not phone or not ref:
+        return False
+    mine = await booking.find_bookings(phone=phone)
+    return any(b.external_id == ref for b in mine)
+
+
+# ─────────────────────────────── диалог ───────────────────────────────
 
 
 async def answer(
@@ -161,18 +399,22 @@ async def answer(
     history: list[dict[str, Any]] | None = None,
     today: str,
     booking: BookingSystem | None = None,
+    guest: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Ответ консьержа на одно сообщение.
 
-    `history` — прошлые реплики в формате [{"role": "user"|"assistant",
-    "content": ...}]. Хранение диалога — забота канала: у WhatsApp и Instagram
-    свои идентификаторы собеседника, и складывать их в одну таблицу здесь пока
-    незачем.
+    `history` — прошлые реплики в формате [{"role": ..., "content": ...}].
+    Хранение диалога — забота канала: у WhatsApp и Instagram свои
+    идентификаторы собеседника.
 
-    `booking` — система бронирования, если она подключена. Без неё консьерж
-    про наличие мест не рассуждает вовсе: инструмент не объявляется, и правило
+    `booking` — система бронирования, если подключена. Без неё консьерж про
+    наличие мест не рассуждает вовсе: инструменты не объявляются, и правило
     «наличие подтвердит стойка» остаётся единственным.
+
+    `guest` — кто пишет: {"phone": ..., "name": ...}. Телефон берётся из
+    канала, а не из разговора. Именно по нему решается, чьи брони видны:
+    сказанному в переписке «это моя бронь L-0007» верить нельзя.
     """
     if not settings.anthropic_api_key:
         return {"text": FALLBACK, "ok": False, "reason": "нет ключа Anthropic"}
@@ -182,8 +424,13 @@ async def answer(
     except KnowledgeUnavailable as error:
         return {"text": FALLBACK, "ok": False, "reason": f"нет фактов: {error}"}
 
+    guest = guest or {}
     mode = booking.source if booking else "none"
     system = build_system_prompt(render_brief(facts), today, availability=mode)
+
+    tools: list[dict[str, Any]] = []
+    if booking is not None:
+        tools = FULL_TOOLS if hasattr(booking, "create_booking") else READ_ONLY_TOOLS
 
     depth = max(0, settings.concierge_history_depth)
     messages: list[dict[str, Any]] = [
@@ -201,21 +448,21 @@ async def answer(
     spent_in = 0
     spent_out = 0
 
-    # Больше двух кругов инструменту не нужно: он один и отвечает с первого
-    # раза. Предел стоит на случай, если модель зациклится на уточнении дат —
-    # в мессенджере это выглядело бы как молчание, а стоило бы денег.
-    for _ in range(3):
+    # Пять кругов: хватает на «посмотреть наличие → оформить → назвать номер».
+    # Предел нужен на случай, если модель зациклится на уточнении, — в
+    # мессенджере это выглядело бы как молчание, а стоило бы денег.
+    for _ in range(5):
         payload: dict[str, Any] = {
             "model": settings.concierge_model,
             "max_tokens": settings.concierge_max_tokens,
             "system": system,
             "messages": messages,
         }
-        if booking is not None:
-            payload["tools"] = [AVAILABILITY_TOOL]
+        if tools:
+            payload["tools"] = tools
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
@@ -232,14 +479,25 @@ async def answer(
             for block in content:
                 if block.get("type") != "tool_use":
                     continue
-                tool_calls.append({"name": block.get("name"), "input": block.get("input")})
-                output = await _run_availability(booking, block.get("input") or {})
+                name = block.get("name")
+                args = block.get("input") or {}
+                tool_calls.append({"name": name, "input": args})
+
+                if name == "check_availability":
+                    output = await _tool_availability(booking, args)
+                elif name == "create_booking":
+                    output = await _tool_create(booking, args, facts, guest)
+                elif name == "find_booking":
+                    output = await _tool_find(booking, args, guest)
+                elif name == "change_booking":
+                    output = await _tool_change(booking, args, guest)
+                elif name == "cancel_booking":
+                    output = await _tool_cancel(booking, args, guest)
+                else:
+                    output = f"Инструмента {name} нет."
+
                 results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.get("id"),
-                        "content": output,
-                    }
+                    {"type": "tool_result", "tool_use_id": block.get("id"), "content": output}
                 )
             messages.append({"role": "assistant", "content": content})
             messages.append({"role": "user", "content": results})
@@ -257,7 +515,8 @@ async def answer(
             "ok": True,
             "availability": mode,
             "toolCalls": tool_calls,
+            "messages": messages + [{"role": "assistant", "content": text}],
             "usage": {"in": spent_in, "out": spent_out},
         }
 
-    return {"text": FALLBACK, "ok": False, "reason": "модель не сошлась за три круга"}
+    return {"text": FALLBACK, "ok": False, "reason": "модель не сошлась за пять кругов"}

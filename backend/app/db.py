@@ -419,6 +419,101 @@ class CorpBookingItem(Base):
 
 logger = logging.getLogger(__name__)
 
+class LocalStock(Base):
+    """
+    Сколько номеров каждого типа есть у отеля — в локальной шахматке.
+
+    Это не про сайт и не про корпоративный кабинет. Это учебная копия того,
+    чем заведует Exely: сколько физических номеров существует. У нас такой
+    таблицы раньше не было вовсе — сайт знает категории и цены, но не знает,
+    сколько комнат каждой категории стоит в здании.
+    """
+
+    __tablename__ = "local_stock"
+
+    room_slug: Mapped[str] = mapped_column(String(60), primary_key=True)
+    rooms_total: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class LocalBooking(Base):
+    """
+    Бронь в локальной шахматке.
+
+    Намеренно отдельная таблица от CorpBooking. Это разные сущности: здесь —
+    занятость номера, всё равно кем и через какой канал; там — заявка компании
+    с договорной ценой и счётом. Свести их в одну таблицу значит смешать
+    «комната занята» и «компания должна денег», а это разные жизненные циклы.
+
+    Когда подключится настоящий Exely, эта таблица уйдёт целиком: её место
+    займут ответы чужого API. Поэтому здесь нет ничего, чего не может дать
+    внешняя система, — иначе при переходе всплывут потерянные поля.
+    """
+
+    __tablename__ = "local_bookings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: Номер, который называют гостю. Из него же гость его потом находит.
+    ref: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+
+    room_slug: Mapped[str] = mapped_column(String(60), index=True)
+    rooms_count: Mapped[int] = mapped_column(Integer, default=1)
+
+    check_in: Mapped[date] = mapped_column(Date, index=True)
+    check_out: Mapped[date] = mapped_column(Date, index=True)
+
+    guest_name: Mapped[str] = mapped_column(String(200), default="")
+    guest_phone: Mapped[str] = mapped_column(String(40), default="", index=True)
+
+    #: booked — номер занят; cancelled — освобождён.
+    status: Mapped[str] = mapped_column(String(20), default="booked", index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    paid_amount: Mapped[int] = mapped_column(Integer, default=0)
+
+    #: Откуда бронь: concierge (ИИ в переписке), seed (фоновая занятость),
+    #: manual (завели руками при отладке).
+    origin: Mapped[str] = mapped_column(String(20), default="manual", index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class LocalPayment(Base):
+    """
+    Принятая платёжка — чтобы не принять её второй раз.
+
+    В переписке гость пересылает один и тот же чек по три раза: «вы получили?»,
+    «на всякий случай ещё», «вот скрин». Без этой таблицы каждая пересылка
+    добавляла бы оплату заново, и бронь на сто тысяч оказывалась бы оплаченной
+    на триста.
+
+    Один и тот же платёж узнаём двумя способами. Совпал хеш файла — прислали
+    тот же самый документ. Совпали номер документа, сумма и бронь — тот же
+    платёж, но переснятый или пересохранённый: байты другие, деньги те же.
+    """
+
+    __tablename__ = "local_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_ref: Mapped[str] = mapped_column(String(20), index=True)
+
+    #: SHA-256 присланного файла.
+    doc_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    #: Номер документа из самой платёжки.
+    doc_number: Mapped[str] = mapped_column(String(60), default="", index=True)
+
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    payer: Mapped[str] = mapped_column(String(200), default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {

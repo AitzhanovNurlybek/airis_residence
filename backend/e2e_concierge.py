@@ -37,7 +37,7 @@ from app.booking_system import (  # noqa: E402
 from app.concierge import (  # noqa: E402
     AVAILABILITY_TOOL,
     FALLBACK,
-    _run_availability,
+    _tool_availability,
     answer,
     build_system_prompt,
 )
@@ -151,15 +151,15 @@ async def main() -> int:
 
     print("\n\u2500\u2500 Система бронирования \u2500\u2500")
     check(
-        "по умолчанию не подключена — наличие подтверждает стойка",
-        get_booking_system(Settings()) is None,
+        "без настройки не подключена — наличие подтверждает стойка",
+        get_booking_system(Settings(booking_system="")) is None,
     )
     check(
         "exely без ключей не включается",
-        get_booking_system(Settings(booking_system="exely")) is None,
+        get_booking_system(Settings(booking_system="exely", exely_base_url="", exely_api_key="")) is None,
     )
     check(
-        "заглушка включается только явно",
+        "заглушка на хеше включается только явно",
         isinstance(get_booking_system(Settings(booking_system="stub")), StubBookingSystem),
     )
     check(
@@ -195,12 +195,12 @@ async def main() -> int:
     )
     check("заглушка не выдумывает счета", await stub.invoices(company_bin="000000000001") == [])
 
-    told = await _run_availability(stub, {"check_in": "2026-09-03", "check_out": "2026-09-06"})
+    told = await _tool_availability(stub, {"check_in": "2026-09-03", "check_out": "2026-09-06"})
     check("в ответе инструмента стоит пометка о тестовых данных", "ТЕСТОВЫЕ ДАННЫЕ" in told)
     check("названия номеров человеческие, а не коды", "Standart" in told, told[:80])
-    bad_dates = await _run_availability(stub, {"check_in": "завтра", "check_out": "послезавтра"})
+    bad_dates = await _tool_availability(stub, {"check_in": "завтра", "check_out": "послезавтра"})
     check("кривые даты не роняют инструмент", "не разобраны" in bad_dates)
-    backwards = await _run_availability(stub, {"check_in": "2026-09-06", "check_out": "2026-09-03"})
+    backwards = await _tool_availability(stub, {"check_in": "2026-09-06", "check_out": "2026-09-03"})
     check("выезд раньше заезда отклонён", "позже" in backwards)
 
     real = ExelyBookingSystem("https://example.invalid", "key")
@@ -237,10 +237,10 @@ async def main() -> int:
     kept = await load_facts(stale)
     check("просроченные факты переживают обрыв сети", bool(kept.get("rooms")))
 
-    live_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    live_key = os.environ.get("ANTHROPIC_API_KEY", "") or Settings().anthropic_api_key
     print("\n\u2500\u2500 Живой ответ модели \u2500\u2500")
     if not live_key:
-        print("  пропущено: ANTHROPIC_API_KEY не задан")
+        print("  пропущено: ключ Anthropic не найден ни в .env, ни в окружении")
     else:
         reset_cache()
         live = Settings(site_url=BASE, anthropic_api_key=live_key)
