@@ -43,19 +43,38 @@ EXTRACT_PROMPT = """Перед тобой платёжный документ: �
 поля, которых в бумаге нет, оставь пустыми. Лучше пусто, чем догадка — по этим
 данным отель отметит номер оплаченным.
 
+Отдельно посмотри на документ как на изображение и поищи следы ПРАВКИ:
+разные шрифты или кегли внутри одного поля, цифра, съехавшая с базовой линии
+соседних, пятна ретуши и другой фон вокруг суммы или даты, обрезанные края
+символов, повторная съёмка экрана с экрана.
+
+Не считай признаком подделки простоту оформления. Отсутствие печати, подписи,
+логотипа, БИК, банка или суммы прописью — это не подделка: чеки из мобильных
+приложений и выгрузки в PDF часто выглядят именно так. Пиши в red_flags только
+то, что указывает на изменение документа, а не на его бедность.
+
+Дату не оценивай вовсе: сегодняшнее число тебе неизвестно, его проверит
+система отдельно.
+
 Верни строго JSON без пояснений и без markdown-обрамления:
 {
   "is_payment": true|false,        // это вообще платёжный документ?
   "payer": "",                     // кто платит: ФИО или название организации
   "payer_bin": "",                 // БИН/ИИН плательщика, если указан
+  "payee": "",                     // КОМУ платят: получатель
+  "payee_bin": "",                 // БИН получателя
+  "payee_account": "",             // счёт/ИИК получателя
   "amount": 0,                     // сумма в тенге, только число, без пробелов
+  "amount_in_words": "",           // сумма прописью, если написана
   "currency": "KZT",
   "paid_at": "",                   // дата платежа ГГГГ-ММ-ДД
   "purpose": "",                   // назначение платежа целиком, как написано
   "reference": "",                 // номер брони или счёта из назначения (L-0001, K-0001, №...)
   "bank": "",                      // банк, если виден
   "doc_number": "",                // номер документа/квитанции
-  "status_words": ""               // слова о статусе: «исполнено», «в обработке», «отклонено»
+  "status_words": "",              // слова о статусе: «исполнено», «в обработке», «отклонено»
+  "red_flags": [],                 // список подозрительных признаков, каждый одной строкой
+  "looks_edited": false            // есть ли следы правки изображения
 }"""
 
 
@@ -66,7 +85,11 @@ class PaymentDoc:
     is_payment: bool = False
     payer: str = ""
     payer_bin: str = ""
+    payee: str = ""
+    payee_bin: str = ""
+    payee_account: str = ""
     amount: int = 0
+    amount_in_words: str = ""
     currency: str = "KZT"
     paid_at: str = ""
     purpose: str = ""
@@ -74,6 +97,8 @@ class PaymentDoc:
     bank: str = ""
     doc_number: str = ""
     status_words: str = ""
+    red_flags: list[str] = field(default_factory=list)
+    looks_edited: bool = False
     #: SHA-256 присланного файла — по нему узнаём повторную пересылку.
     doc_hash: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -129,7 +154,10 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
                         "type": block_type,
                         "source": {"type": "base64", "media_type": media, "data": encoded},
                     },
-                    {"type": "text", "text": EXTRACT_PROMPT},
+                    {
+                        "type": "text",
+                        "text": f"Сегодня {date.today().isoformat()}.\n\n{EXTRACT_PROMPT}",
+                    },
                 ],
             }
         ],
@@ -155,7 +183,11 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
         is_payment=bool(parsed.get("is_payment")),
         payer=str(parsed.get("payer") or "").strip(),
         payer_bin=str(parsed.get("payer_bin") or "").strip(),
+        payee=str(parsed.get("payee") or "").strip(),
+        payee_bin=str(parsed.get("payee_bin") or "").strip(),
+        payee_account=str(parsed.get("payee_account") or "").strip(),
         amount=_to_int(parsed.get("amount")),
+        amount_in_words=str(parsed.get("amount_in_words") or "").strip(),
         currency=str(parsed.get("currency") or "KZT").strip().upper(),
         paid_at=str(parsed.get("paid_at") or "").strip(),
         purpose=str(parsed.get("purpose") or "").strip(),
@@ -163,6 +195,8 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
         bank=str(parsed.get("bank") or "").strip(),
         doc_number=str(parsed.get("doc_number") or "").strip(),
         status_words=str(parsed.get("status_words") or "").strip(),
+        red_flags=[str(f).strip() for f in (parsed.get("red_flags") or []) if str(f).strip()],
+        looks_edited=bool(parsed.get("looks_edited")),
         raw=parsed,
     )
 
@@ -195,11 +229,65 @@ def _to_int(value: Any) -> int:
     return int(digits) if digits else 0
 
 
+def _digits(value: str) -> str:
+    return "".join(c for c in value if c.isdigit())
+
+
+def check_recipient(doc: PaymentDoc, facts: dict[str, Any] | None) -> tuple[str, str]:
+    """
+    Деньги вообще нам?
+
+    Самая полезная проверка из всех и единственная по-настоящему надёжная.
+    Подделать вид документа несложно, а вот платёж в пользу другой компании
+    отелю не поможет никак: сколько бы правдоподобно он ни выглядел, на счёт
+    ничего не придёт.
+
+    Сверяем по БИН и по счёту — по двум, потому что в чеках из приложений
+    счёт часто скрыт звёздочками, а в скриншотах переводов нет и БИН.
+    Возвращаем ('ok'|'mismatch'|'unknown', пояснение).
+    """
+    legal = ((facts or {}).get("hotel") or {}).get("legal") or {}
+    our_bin = _digits(str(legal.get("bin") or ""))
+    our_iik = str(legal.get("iik") or "").upper().replace(" ", "")
+    our_name = str((facts or {}).get("hotel", {}).get("legalName") or "")
+
+    doc_bin = _digits(doc.payee_bin)
+    doc_acc = doc.payee_account.upper().replace(" ", "")
+
+    if our_bin and doc_bin:
+        if doc_bin == our_bin:
+            return "ok", f"БИН получателя совпал с {our_name}"
+        return "mismatch", f"Платёж в пользу БИН {doc.payee_bin}, а у отеля {legal.get('bin')}"
+
+    if our_iik and doc_acc and doc_acc.replace("*", "").isalnum():
+        # Звёздочки в середине счёта — обычное дело: сравниваем хвост.
+        tail = doc_acc.replace("*", "")[-6:]
+        if tail and tail in our_iik:
+            return "ok", "Счёт получателя сходится с реквизитами отеля"
+        if len(tail) >= 4:
+            return "mismatch", f"Счёт получателя {doc.payee_account} не похож на счёт отеля"
+
+    if doc.payee and our_name:
+        # Последняя зацепка — имя. Ненадёжна: в чеках оно бывает сокращено
+        # до «INCOME HOUSE» или искажено транслитерацией, поэтому сравниваем
+        # по опорному слову, а несовпадение считаем «не знаю», не «чужой».
+        key = "INCOME HOUSE"
+        if key.casefold() in doc.payee.casefold():
+            return "ok", "Название получателя совпадает"
+        return "unknown", f"Получатель указан как «{doc.payee}» — сверьте вручную"
+
+    return "unknown", "В документе не разобрать, кому ушли деньги"
+
+
 REJECTING_WORDS = ("отклон", "не исполн", "отмен", "ошибк", "reject", "fail")
 
 
 async def match_and_apply(
-    booking: BookingSystem, doc: PaymentDoc, *, auto_apply: bool = True
+    booking: BookingSystem,
+    doc: PaymentDoc,
+    *,
+    facts: dict[str, Any] | None = None,
+    auto_apply: bool = True,
 ) -> MatchResult:
     """
     Свести платёжку с бронью и, если всё сошлось, отметить оплату.
@@ -214,6 +302,37 @@ async def match_and_apply(
 
     if doc.currency not in ("KZT", "", "ТЕНГЕ"):
         return MatchResult("review", f"Валюта {doc.currency}, а не тенге", doc)
+
+    # Деньги ушли не нам — дальше можно не смотреть. Это единственная по-
+    # настоящему надёжная проверка: подделать вид документа несложно, а вот
+    # платёж чужой компании отелю не поможет ничем.
+    recipient, why = check_recipient(doc, facts)
+    if recipient == "mismatch":
+        return MatchResult("rejected", f"Платёж не отелю. {why}", doc)
+
+    # Дальше — проверки, которые считает код, а не модель.
+    #
+    # Впечатления модели (`red_flags`) сюда не входят намеренно. Первая версия
+    # блокировала оплату по любому её замечанию, и она браковала всё подряд:
+    # «нет печати», «нет БИК», «похоже на простой текст». Чеки из мобильных
+    # приложений выглядят именно так, и порог оказался невыполнимым.
+    #
+    # Заявление о правке (`looks_edited`) — другое дело: это утверждение об
+    # изменении документа, и по такому оплату не отмечают.
+    if doc.looks_edited:
+        signs = "; ".join(doc.red_flags) or "изображение выглядит отредактированным"
+        return MatchResult("review", f"Следы правки: {signs}", doc)
+
+    # Сумма прописью против цифр: расхождение — классический след правки
+    # цифры в отсканированном поручении. Считает код: сравнение чисел моделью
+    # не поручают.
+    words_mismatch = _words_disagree(doc)
+    if words_mismatch:
+        return MatchResult("review", words_mismatch, doc)
+
+    stale = _date_problem(doc)
+    if stale:
+        return MatchResult("review", stale, doc)
 
     if any(word in doc.status_words.lower() for word in REJECTING_WORDS):
         return MatchResult("review", f"В документе статус «{doc.status_words}»", doc)
@@ -283,6 +402,81 @@ async def match_and_apply(
     return MatchResult("applied", "Оплата отмечена", doc, ref, doc.amount)
 
 
+NUMERALS = {
+    "ноль": 0, "один": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4,
+    "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+    "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13, "четырнадцать": 14,
+    "пятнадцать": 15, "шестнадцать": 16, "семнадцать": 17, "восемнадцать": 18,
+    "девятнадцать": 19, "двадцать": 20, "тридцать": 30, "сорок": 40,
+    "пятьдесят": 50, "шестьдесят": 60, "семьдесят": 70, "восемьдесят": 80,
+    "девяносто": 90, "сто": 100, "двести": 200, "триста": 300, "четыреста": 400,
+    "пятьсот": 500, "шестьсот": 600, "семьсот": 700, "восемьсот": 800,
+    "девятьсот": 900,
+}
+
+
+def _words_to_number(text: str) -> int | None:
+    """
+    Грубый разбор суммы прописью.
+
+    Полноценный парсер русских числительных здесь не нужен и вреден: он даёт
+    ложную уверенность на редких формах. Задача скромнее — поймать случай,
+    когда в цифрах сто тысяч, а прописью пятьдесят. Не разобрали — молчим.
+    """
+    low = text.casefold().replace("-", " ")
+    words = [w.strip(".,") for w in low.split()]
+    if not words:
+        return None
+
+    total = 0
+    chunk = 0
+    seen = False
+    for word in words:
+        if word in NUMERALS:
+            chunk += NUMERALS[word]
+            seen = True
+        elif word.startswith("тысяч"):
+            total += (chunk or 1) * 1000
+            chunk = 0
+            seen = True
+        elif word.startswith("миллион"):
+            total += (chunk or 1) * 1_000_000
+            chunk = 0
+            seen = True
+        elif word.startswith(("тенге", "тг", "kzt")):
+            break
+    return (total + chunk) if seen else None
+
+
+def _words_disagree(doc: PaymentDoc) -> str:
+    if not doc.amount_in_words or not doc.amount:
+        return ""
+    spelled = _words_to_number(doc.amount_in_words)
+    if spelled is None or spelled == 0:
+        return ""
+    if spelled != doc.amount:
+        return (
+            f"Сумма цифрами {doc.amount}, а прописью «{doc.amount_in_words}» "
+            f"читается как {spelled}"
+        )
+    return ""
+
+
+def _date_problem(doc: PaymentDoc) -> str:
+    if not doc.paid_at:
+        return ""
+    try:
+        when = date.fromisoformat(doc.paid_at)
+    except ValueError:
+        return ""
+    today = date.today()
+    if when > today:
+        return f"Дата платежа {doc.paid_at} — в будущем"
+    if (today - when).days > 180:
+        return f"Платёж от {doc.paid_at} — старше полугода, вряд ли по этой брони"
+    return ""
+
+
 def _find_ref(doc: PaymentDoc) -> str:
     """Номер брони из назначения платежа."""
     import re
@@ -309,6 +503,10 @@ def describe(result: MatchResult) -> str:
         parts.append(
             f"Плательщик: {doc.payer or '—'}"
             + (f" (БИН {doc.payer_bin})" if doc.payer_bin else "")
+        )
+        parts.append(
+            f"Получатель: {doc.payee or '—'}"
+            + (f" (БИН {doc.payee_bin})" if doc.payee_bin else "")
         )
         parts.append(f"Сумма: {doc.amount} {doc.currency}, дата {doc.paid_at or '—'}")
         if doc.purpose:

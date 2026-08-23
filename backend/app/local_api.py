@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,8 @@ from .booking_system import get_booking_system
 from .concierge import answer
 from .config import Settings, get_settings
 from .db import LocalBooking, LocalPayment, LocalStock, Room, get_session
+from .knowledge import KnowledgeUnavailable, load_facts
+from .payment_docs import MAX_DOC_MB, check_recipient, match_and_apply, read_document
 
 router = APIRouter(
     prefix="/api/admin/local",
@@ -254,4 +256,78 @@ async def chat(
         "toolCalls": reply.get("toolCalls", []),
         "history": reply.get("messages", []),
         "usage": reply.get("usage", {}),
+    }
+
+
+@router.post("/payment")
+async def payment(
+    files: list[UploadFile] = File(...),
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Разобрать присланный чек и, если всё сходится, отметить оплату.
+
+    Загрузка идёт тем же полем `files`, что и фотографии номеров, — чтобы
+    работал общий клиентский хелпер и не заводить второй способ отправки
+    файлов ради одной страницы.
+
+    Факты об отеле нужны для главной проверки: сверки получателя платежа с
+    реквизитами. Если справка не загрузилась, разбор всё равно идёт, но
+    отметить оплату сам он уже не может — проверить, нам ли деньги, нечем.
+    """
+    booking = await _system(settings, session)
+    if not files:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Файл не приложен")
+
+    upload = files[0]
+    data = await upload.read()
+    if len(data) > MAX_DOC_MB * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Файл больше {MAX_DOC_MB} МБ — вряд ли это квитанция",
+        )
+
+    try:
+        facts = await load_facts(settings)
+    except KnowledgeUnavailable:
+        facts = None
+
+    try:
+        doc = await read_document(settings, data, upload.filename or "document.pdf")
+    except ValueError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    except Exception as error:  # noqa: BLE001
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Не удалось прочитать: {error}") from error
+
+    # Без справки об отеле сверить получателя не с чем, а без этого отмечать
+    # оплату нельзя: деньги могли уйти кому угодно.
+    result = await match_and_apply(booking, doc, facts=facts, auto_apply=facts is not None)
+    recipient, why = check_recipient(doc, facts)
+
+    return {
+        "verdict": result.verdict,
+        "reason": result.reason,
+        "bookingRef": result.booking_ref,
+        "appliedAmount": result.applied_amount,
+        "recipient": {"status": recipient, "note": why},
+        "doc": {
+            "isPayment": doc.is_payment,
+            "payer": doc.payer,
+            "payerBin": doc.payer_bin,
+            "payee": doc.payee,
+            "payeeBin": doc.payee_bin,
+            "payeeAccount": doc.payee_account,
+            "amount": doc.amount,
+            "amountInWords": doc.amount_in_words,
+            "currency": doc.currency,
+            "paidAt": doc.paid_at,
+            "purpose": doc.purpose,
+            "reference": doc.reference,
+            "bank": doc.bank,
+            "docNumber": doc.doc_number,
+            "statusWords": doc.status_words,
+            "redFlags": doc.red_flags,
+            "looksEdited": doc.looks_edited,
+        },
     }

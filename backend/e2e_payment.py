@@ -28,7 +28,15 @@ from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 from app.booking_system import get_booking_system  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db import init_db  # noqa: E402
-from app.payment_docs import describe, match_and_apply, read_document  # noqa: E402
+from app.knowledge import load_facts, reset_cache  # noqa: E402
+from app.payment_docs import (  # noqa: E402
+    check_recipient,
+    describe,
+    match_and_apply,
+    read_document,
+)
+
+BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:3000").rstrip("/")
 
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pay_tmp")
 
@@ -70,13 +78,26 @@ def make_pdf(name: str, lines: list[tuple[str, int]]) -> str:
 
 
 async def main() -> int:
-    settings = Settings(booking_system="local")
+    settings = Settings(booking_system="local", site_url=BASE)
     if not settings.anthropic_api_key:
         print("Ключ Anthropic не задан в .env — прогон невозможен")
         return 1
 
     await init_db()
     booking = get_booking_system(settings)
+
+    # Реквизиты отеля берём оттуда же, откуда их берёт консьерж, — иначе
+    # проверка получателя сверялась бы с копией, которая однажды отстанет.
+    reset_cache()
+    try:
+        facts = await load_facts(settings)
+    except Exception as error:  # noqa: BLE001
+        print(f"Не удалось получить справку об отеле с {settings.site_url}: {error}")
+        print("Поднимите фронтенд на 3000 — без реквизитов проверка получателя невозможна.")
+        return 1
+    OUR_BIN = facts["hotel"]["legal"]["bin"]
+    OUR_IIK = facts["hotel"]["legal"]["iik"]
+    print(f"Реквизиты отеля: БИН {OUR_BIN}")
 
     check_in = date.today() + timedelta(days=30)
     check_out = check_in + timedelta(days=2)
@@ -106,7 +127,8 @@ async def main() -> int:
             ("Банк: АО «Kaspi Bank»", 34),
             ("", 20),
             ("Получатель: ТОО «INCOME HOUSE»", 34),
-            ("ИИК: KZ8596503F0013625797KZT", 30),
+            (f"БИН получателя: {OUR_BIN}", 32),
+            (f"ИИК: {OUR_IIK}", 28),
             ("", 20),
             ("Сумма: 100 000,00 тенге", 42),
             ("", 20),
@@ -124,7 +146,7 @@ async def main() -> int:
     check("плательщик прочитан", "Астана" in doc.payer, doc.payer)
     check("БИН прочитан", "180340012345" in doc.payer_bin, doc.payer_bin)
 
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("оплата отмечена", result.verdict == "applied", result.reason)
     check("нашлась нужная бронь", result.booking_ref == ref, result.booking_ref)
@@ -153,7 +175,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "bez-nomera.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("без номера брони отдал менеджеру", result.verdict == "review", result.verdict)
     check("причина названа понятно", "номер" in result.reason.lower(), result.reason)
@@ -167,6 +189,7 @@ async def main() -> int:
             (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
             ("", 20),
             ("Плательщик: ИП Ким В.", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
             ("Сумма: 100 000,00 тенге", 42),
             (f"Назначение: бронь {ref}", 32),
             ("", 20),
@@ -176,7 +199,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "otkloneno.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("отклонённый платёж не засчитан", result.verdict == "review", result.verdict)
 
@@ -198,6 +221,7 @@ async def main() -> int:
             ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 900", 46),
             (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
             ("Плательщик: ТОО «Меркурий»", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
             ("Сумма: 250 000,00 тенге", 42),
             (f"Назначение: оплата брони {second.external_id}", 32),
             ("Статус: ИСПОЛНЕНО", 34),
@@ -205,7 +229,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "pereplata.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("переплату не проглотил молча", result.verdict == "review", result.verdict)
     after = await booking.invoices(external_id=second.external_id)
@@ -220,6 +244,7 @@ async def main() -> int:
             ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 001", 46),
             (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
             ("Плательщик: Иванов И.", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
             ("Сумма: 50 000,00 тенге", 42),
             ("Назначение: оплата брони L-9999", 32),
             ("Статус: ИСПОЛНЕНО", 34),
@@ -227,7 +252,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "chuzhaya.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("несуществующую бронь не выдумал", result.verdict == "review", result.verdict)
 
@@ -246,7 +271,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "menu.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("меню не приняло за платёжку", result.verdict == "rejected", result.verdict)
 
@@ -254,7 +279,7 @@ async def main() -> int:
     print("\n── Ту же платёжку прислали дважды ──")
     with open(os.path.join(TMP, "poruchenie.pdf"), "rb") as f:
         doc = await read_document(settings, f.read(), "poruchenie.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     invoices = await booking.invoices(external_id=ref)
     check("повтор распознан", result.verdict == "duplicate", result.verdict)
@@ -270,6 +295,7 @@ async def main() -> int:
             ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 417", 46),
             (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
             ("Плательщик: ТОО «Астана Строй Инвест»", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
             ("Сумма: 100 000,00 тенге", 42),
             (f"Назначение платежа: оплата за проживание, бронь {ref}", 30),
             ("Статус: ИСПОЛНЕНО", 34),
@@ -277,7 +303,7 @@ async def main() -> int:
     )
     with open(path, "rb") as f:
         doc = await read_document(settings, f.read(), "poruchenie-copy.pdf")
-    result = await match_and_apply(booking, doc)
+    result = await match_and_apply(booking, doc, facts=facts)
     print(f"   вердикт: {result.verdict} — {result.reason}")
     check("переснятый чек тоже не удвоил оплату",
           result.verdict in ("duplicate", "review"), result.verdict)
@@ -285,6 +311,111 @@ async def main() -> int:
     check("сумма оплаты осталась прежней",
           bool(invoices) and invoices[0].paid_amount == 100000,
           str(invoices[0].paid_amount) if invoices else "нет счёта")
+
+    # ── 8. Платёж ушёл чужой компании ──
+    print("\n── Деньги ушли не отелю ──")
+    path = make_pdf(
+        "chuzhoy-poluchatel.pdf",
+        [
+            ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 777", 46),
+            (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
+            ("Плательщик: ТОО «Астана Строй Инвест»", 34),
+            ("Получатель: ТОО «ОТЕЛЬ СОСЕДНИЙ»", 34),
+            ("БИН получателя: 111111111111", 32),
+            ("Сумма: 90 000,00 тенге", 42),
+            (f"Назначение: оплата брони {second.external_id}", 32),
+            ("Статус: ИСПОЛНЕНО", 34),
+        ],
+    )
+    with open(path, "rb") as f:
+        doc = await read_document(settings, f.read(), "chuzhoy-poluchatel.pdf")
+    status_, why = check_recipient(doc, facts)
+    print(f"   получатель: {status_} — {why}")
+    check("чужой получатель распознан", status_ == "mismatch", status_)
+    result = await match_and_apply(booking, doc, facts=facts)
+    print(f"   вердикт: {result.verdict} — {result.reason}")
+    check("платёж чужой компании отклонён", result.verdict == "rejected", result.verdict)
+    inv = await booking.invoices(external_id=second.external_id)
+    check("деньги по чужой платёжке не засчитаны",
+          not inv or inv[0].paid_amount == 0, str(inv[0].paid_amount) if inv else "нет счёта")
+
+    # ── 9. Сумма прописью не сходится с цифрами ──
+    print("\n── Сумма прописью против цифр ──")
+    path = make_pdf(
+        "propisyu.pdf",
+        [
+            ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 321", 46),
+            (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
+            ("Плательщик: ТОО «Астана Строй Инвест»", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
+            ("Сумма: 90 000,00 тенге", 42),
+            ("Сумма прописью: сорок пять тысяч тенге 00 тиын", 30),
+            (f"Назначение: оплата брони {second.external_id}", 32),
+            ("Статус: ИСПОЛНЕНО", 34),
+        ],
+    )
+    with open(path, "rb") as f:
+        doc = await read_document(settings, f.read(), "propisyu.pdf")
+    print(f"   цифрами {doc.amount}, прописью «{doc.amount_in_words}»")
+    result = await match_and_apply(booking, doc, facts=facts)
+    print(f"   вердикт: {result.verdict} — {result.reason}")
+    check("расхождение прописи и цифр поймано", result.verdict == "review", result.verdict)
+    inv = await booking.invoices(external_id=second.external_id)
+    check("по спорной сумме деньги не засчитаны",
+          not inv or inv[0].paid_amount == 0, str(inv[0].paid_amount) if inv else "нет счёта")
+
+    # ── 10. Дата платежа в будущем ──
+    print("\n── Дата платежа в будущем ──")
+    future = (date.today() + timedelta(days=40)).strftime("%d.%m.%Y")
+    path = make_pdf(
+        "budushee.pdf",
+        [
+            ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 555", 46),
+            (f"Дата: {future}", 34),
+            ("Плательщик: ТОО «Астана Строй Инвест»", 34),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
+            ("Сумма: 90 000,00 тенге", 42),
+            (f"Назначение: оплата брони {second.external_id}", 32),
+            ("Статус: ИСПОЛНЕНО", 34),
+        ],
+    )
+    with open(path, "rb") as f:
+        doc = await read_document(settings, f.read(), "budushee.pdf")
+    result = await match_and_apply(booking, doc, facts=facts)
+    print(f"   вердикт: {result.verdict} — {result.reason}")
+    check("дата из будущего поймана", result.verdict == "review", result.verdict)
+
+    # ── 11. Настоящий чек проходит все три проверки ──
+    print("\n── Правильный чек на вторую бронь ──")
+    path = make_pdf(
+        "chistyy.pdf",
+        [
+            ("ПЛАТЁЖНОЕ ПОРУЧЕНИЕ № 640", 46),
+            (f"Дата: {date.today().strftime('%d.%m.%Y')}", 34),
+            ("Плательщик: ТОО «Меркурий»", 34),
+            ("БИН: 190240055555", 32),
+            (f"Получатель: ТОО «INCOME HOUSE», БИН {OUR_BIN}", 30),
+            (f"ИИК: {OUR_IIK}", 28),
+            ("Сумма: 90 000,00 тенге", 42),
+            ("Сумма прописью: девяносто тысяч тенге 00 тиын", 30),
+            (f"Назначение: оплата за проживание, бронь {second.external_id}", 30),
+            ("Статус: ИСПОЛНЕНО", 34),
+        ],
+    )
+    with open(path, "rb") as f:
+        doc = await read_document(settings, f.read(), "chistyy.pdf")
+    status_, why = check_recipient(doc, facts)
+    print(f"   получатель: {status_} — {why}")
+    check("свой получатель распознан", status_ == "ok", why)
+    check("правки не заявлено", not doc.looks_edited, "; ".join(doc.red_flags))
+    if doc.red_flags:
+        print("   замечания модели (не блокируют): " + "; ".join(doc.red_flags)[:200])
+    result = await match_and_apply(booking, doc, facts=facts)
+    print(f"   вердикт: {result.verdict} — {result.reason}")
+    check("чистый чек засчитан", result.verdict == "applied", result.reason)
+    inv = await booking.invoices(external_id=second.external_id)
+    check("оплата видна в счёте", bool(inv) and inv[0].paid_amount == 90000,
+          str(inv[0].paid_amount) if inv else "нет счёта")
 
     print("\n── Шахматка ──")
     for row in await booking.snapshot():

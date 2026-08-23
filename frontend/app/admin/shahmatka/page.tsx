@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { ConciergeChat } from "@/components/admin/ConciergeChat";
+import { PaymentCheck } from "@/components/admin/PaymentCheck";
 import { Shahmatka } from "@/components/admin/Shahmatka";
 import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
 
@@ -59,6 +60,16 @@ export default async function ShahmatkaPage() {
 
       <div className="mt-8">
         <Shahmatka initial={board} />
+      </div>
+
+      <h2 className="mt-14 font-display text-3xl text-cream">Проверка чека</h2>
+      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
+        Загрузите платёжку — систему прочитает документ, сверит получателя с реквизитами отеля,
+        поищет следы правки и сведёт с бронью. Номер брони в назначении платежа обязателен:
+        без него сопоставить не с чем.
+      </p>
+      <div className="mt-6">
+        <PaymentCheck />
       </div>
 
       <h2 className="mt-14 font-display text-3xl text-cream">Переписка с консьержем</h2>
