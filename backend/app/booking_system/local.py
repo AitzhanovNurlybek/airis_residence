@@ -72,17 +72,33 @@ class LocalBookingSystem:
     # ─────────────────────────── чтение ────────────────────────────
 
     async def _stock(self, session: AsyncSession) -> dict[str, int]:
-        rows = (await session.execute(select(LocalStock))).scalars().all()
-        if rows:
-            return {row.room_slug: row.rooms_total for row in rows}
+        """
+        Сколько номеров каждой категории есть в отеле.
 
-        # Первый запуск: разложить номера по категориям. Делается здесь, а не
-        # отдельной командой, чтобы шахматка не оказалась пустой в момент,
-        # когда её впервые спросят, — пустая читается как «мест нет вообще».
-        for slug, total in DEFAULT_STOCK.items():
-            session.add(LocalStock(room_slug=slug, rooms_total=total))
-        await session.commit()
-        return dict(DEFAULT_STOCK)
+        Категории берутся от номеров сайта (`self._names`), а не из жёсткого
+        списка. Иначе шахматка отставала бы от отеля: когда номер «Luxe»
+        переименовали в «Comfort Plus», здесь осталась бы категория, которой
+        на сайте уже нет, а новой не появилось бы вовсе.
+
+        DEFAULT_STOCK остаётся подсказкой для количества — сколько комнат
+        каждого типа. Настоящее число знает Exely; до него это цифра, которую
+        владелец правит руками.
+        """
+        rows = (await session.execute(select(LocalStock))).scalars().all()
+        known = {row.room_slug: row.rooms_total for row in rows}
+
+        wanted = set(self._names) or set(DEFAULT_STOCK)
+        missing = wanted - set(known)
+        for slug in sorted(missing):
+            session.add(LocalStock(room_slug=slug, rooms_total=DEFAULT_STOCK.get(slug, 1)))
+            known[slug] = DEFAULT_STOCK.get(slug, 1)
+        if missing:
+            await session.commit()
+
+        # Категории, которых у отеля больше нет, из ответа убираем, но строки
+        # не удаляем: на них могут висеть прошлые брони, и терять историю
+        # из-за переименования нельзя.
+        return {slug: total for slug, total in known.items() if slug in wanted}
 
     async def _busy(
         self, session: AsyncSession, check_in: date, check_out: date, *, skip_ref: str = ""
@@ -111,6 +127,18 @@ class LocalBookingSystem:
             for slug, count in per_night.items():
                 worst[slug] = max(worst.get(slug, 0), count)
         return worst
+
+    async def ensure_stock(self) -> dict[str, int]:
+        """
+        Разложить номера по категориям, если это первый заход.
+
+        Отдельный метод, потому что через availability получалось не всегда:
+        на нулевом периоде тот выходит раньше, чем доберётся до раскладки, и
+        страница шахматки открывалась с пустым списком категорий — читалось
+        как «в отеле нет номеров».
+        """
+        async with self._sessions() as session:
+            return await self._stock(session)
 
     async def availability(self, check_in: date, check_out: date) -> Availability:
         nights = (check_out - check_in).days

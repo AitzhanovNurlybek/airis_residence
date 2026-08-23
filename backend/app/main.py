@@ -21,6 +21,7 @@ from .db import Lead, Payment, Room, SessionLocal, get_session, init_db, utcnow
 from .notify import notify_telegram
 from .payments import PaymentError, get_provider, new_order_id
 from .corp_api import admin as corp_admin_router, corp as corp_router
+from .local_api import router as local_router
 from .rooms_api import admin as rooms_admin_router, public as rooms_public_router
 from .site_videos_api import (
     admin as site_videos_admin_router,
@@ -159,6 +160,10 @@ app.include_router(site_videos_admin_router)
 # Корпоративный кабинет: /api/corp/* для компаний, /api/admin/corp/* для отеля
 app.include_router(corp_router)
 app.include_router(corp_admin_router)
+
+# Отладочная оснастка: локальная шахматка и окно переписки с консьержем.
+# Уйдёт вместе с шахматкой, когда подключим настоящий Exely.
+app.include_router(local_router)
 
 
 def require_api_key(x_api_key: str = Header(default="")) -> None:

@@ -11,6 +11,7 @@ const links = [
   { href: "/admin/video", label: "Видео" },
   { href: "/admin/zayavki", label: "Заявки" },
   { href: "/admin/kompanii", label: "Компании" },
+  { href: "/admin/shahmatka", label: "Шахматка" },
   { href: "/admin/spravka", label: "Справка" },
 ];
 
