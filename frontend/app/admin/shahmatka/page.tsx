@@ -35,6 +35,28 @@ export default async function ShahmatkaPage() {
         здесь — и консьерж внизу страницы сразу начнёт говорить, что номер занят.
       </p>
 
+      <div className="mt-6 rounded-2xl border border-white/10 bg-ink-900/50 p-6">
+        <h2 className="font-display text-xl text-cream">Как проверить за минуту</h2>
+        <ol className="mt-4 grid gap-2.5 text-sm text-muted">
+          <li>
+            <span className="text-sand-300">1.</span> В календаре найдите день и категорию —
+            там написано, сколько номеров свободно.
+          </li>
+          <li>
+            <span className="text-sand-300">2.</span> Ниже в форме поставьте бронь на этот день.
+            Клетка в календаре уменьшится на единицу.
+          </li>
+          <li>
+            <span className="text-sand-300">3.</span> Спуститесь к переписке и спросите:
+            «Есть свободные номера на такие-то даты?» Консьерж ответит по этой же базе.
+          </li>
+          <li>
+            <span className="text-sand-300">4.</span> Займите категорию целиком — и он скажет,
+            что свободных нет, и предложит другую.
+          </li>
+        </ol>
+      </div>
+
       <div className="mt-8">
         <Shahmatka initial={board} />
       </div>
