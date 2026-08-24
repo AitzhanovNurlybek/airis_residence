@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { PriceCheck } from "@/components/admin/PriceCheck";
 import { RoomsBoard } from "@/components/admin/RoomsBoard";
 import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
 import type { AdminRoom } from "@/lib/adminTypes";
@@ -37,6 +38,7 @@ export default async function AdminRoomsPage() {
           </p>
         </div>
       )}
+      <PriceCheck />
       <RoomsBoard initialRooms={rooms} />
     </>
   );

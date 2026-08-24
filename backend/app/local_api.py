@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
@@ -377,4 +377,58 @@ async def exely_availability(
             }
             for o in result.offers
         ],
+    }
+
+
+@router.get("/prices")
+async def price_check(
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Сколько стоит номер на сайте и почём он на самом деле продаётся.
+
+    Цена живёт в двух местах: у нас в админке и в тарифах Exely. Синхронизации
+    между ними нет никакой, и разойтись они могут молча — что и произошло:
+    сайт показывает на несколько тысяч дороже того, по чему гость бронирует.
+    Дороже, а не дешевле, поэтому никто не жалуется — просто часть гостей
+    уходит, не открыв форму.
+
+    Смотрим на неделю вперёд, а не на завтра: на ближайшие даты половина
+    категорий распродана, и сравнивать было бы не с чем.
+    """
+    ours = {room.slug: room for room in (await session.execute(select(Room))).scalars().all()}
+    exely = ExelyBookingSystem(room_names=await _room_names(session))
+
+    check_in = hotel_today() + timedelta(days=7)
+    try:
+        live = await exely.availability(check_in, check_in + timedelta(days=1))
+        offers = {o.room_slug: o for o in live.offers}
+        reachable = True
+    except BookingSystemUnavailable:
+        offers, reachable = {}, False
+
+    rows = []
+    for slug, room in sorted(ours.items(), key=lambda kv: kv[1].sort_order):
+        if not room.is_published:
+            continue
+        offer = offers.get(slug)
+        selling = offer.price_per_night if offer and offer.price_per_night else None
+        rows.append(
+            {
+                "roomSlug": slug,
+                "roomName": room.short_name or room.name,
+                "sitePrice": room.price,
+                "sellingFrom": selling,
+                "rateName": offer.rates[0].name if offer and offer.rates else "",
+                "difference": (room.price - selling) if selling else None,
+                "onSale": bool(offer and offer.rooms_left),
+            }
+        )
+
+    return {
+        "checkedOn": check_in.isoformat(),
+        "reachable": reachable,
+        "rooms": rows,
+        "mismatched": sum(1 for r in rows if r["difference"]),
     }
