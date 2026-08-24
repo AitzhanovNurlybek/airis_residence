@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Any
 
@@ -28,6 +29,8 @@ import httpx
 from .booking_system import BookingSystem, BookingSystemUnavailable
 from .config import Settings
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
+
+logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -200,6 +203,27 @@ CANCEL_TOOL = {
     },
 }
 
+#: В каких границах цена из системы бронирования считается настоящей.
+#:
+#: Отель правит тарифы у себя, и ошибка там мгновенно становится тем, что
+#: консьерж говорит гостю. Опечатка в один ноль — 4 000 вместо 40 000 — это
+#: обещание, которое отель обязан сдержать: гость покажет переписку.
+#:
+#: Границы широкие нарочно. Скидка вдвое бывает, скидка в десять раз — нет.
+#: Наценка втрое на праздники бывает, в десять раз — нет.
+SANE_LOW = 0.4
+SANE_HIGH = 3.0
+
+
+def _sane_price(price: int | None, rack: int | None) -> bool:
+    """Похоже ли на настоящую цену, а не на опечатку в кабинете отеля."""
+    if not price or price <= 0:
+        return False
+    if not rack:
+        return True  # сравнивать не с чем — верим системе
+    return SANE_LOW * rack <= price <= SANE_HIGH * rack
+
+
 READ_ONLY_TOOLS = [AVAILABILITY_TOOL]
 FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
 
@@ -251,7 +275,9 @@ def _describe(booking: Any, *, room: str = "") -> str:
     )
 
 
-async def _tool_availability(booking: BookingSystem, args: dict[str, Any]) -> str:
+async def _tool_availability(
+    booking: BookingSystem, args: dict[str, Any], facts: dict[str, Any] | None = None
+) -> str:
     try:
         check_in = _parse_date(args.get("check_in"))
         check_out = _parse_date(args.get("check_out"))
@@ -279,10 +305,22 @@ async def _tool_availability(booking: BookingSystem, args: dict[str, Any]) -> st
             lines.append(head + "свободных нет")
             continue
         lines.append(head + f"свободно {offer.rooms_left}")
+        rack = None
+        if facts:
+            priced = _room_price(facts, offer.room_slug)
+            rack = priced[1] if priced else None
         # Тарифы, если система их отдаёт. Цена на сайте — прайс, а продаётся
         # номер по тарифу, и он бывает заметно дешевле. Гость, услышавший от
         # консьержа прайс, открывает форму и видит другое число.
         for rate in offer.rates:
+            if not _sane_price(rate.price, rack):
+                # Цена вне разумных границ — в кабинете отеля явно ошиблись.
+                # Гостю такое не показываем: он на неё сошлётся.
+                logger.warning(
+                    "Подозрительная цена %s на %s при прайсе %s — пропускаю",
+                    rate.price, offer.room_slug, rack,
+                )
+                continue
             about = (
                 " с завтраком" if rate.breakfast
                 else (" без завтрака" if rate.breakfast is False else "")
@@ -324,7 +362,7 @@ async def _tool_create(
     # Сумму считает сервер, а не модель: иначе в базу однажды попадёт цифра из
     # разговора. Считаем по продажному тарифу, если система его отдала, —
     # прайс из справки выше того, по чему гость реально бронирует.
-    sold_at = await _live_price(booking, slug, check_in, check_out)
+    sold_at = await _live_price(booking, slug, check_in, check_out, rack=price)
     if sold_at:
         price = sold_at
     amount = price * rooms_count * max(nights, 0)
@@ -351,7 +389,8 @@ async def _tool_create(
 
 
 async def _live_price(
-    booking: BookingSystem, slug: str, check_in: date, check_out: date
+    booking: BookingSystem, slug: str, check_in: date, check_out: date,
+    rack: int | None = None,
 ) -> int | None:
     """Самая низкая продажная цена на категорию. None — система молчит."""
     try:
@@ -359,7 +398,15 @@ async def _live_price(
     except Exception:  # noqa: BLE001 — цена из справки остаётся запасным вариантом
         return None
     offer = next((o for o in result.offers if o.room_slug == slug), None)
-    return offer.price_per_night if offer and offer.price_per_night else None
+    if not offer or not offer.price_per_night:
+        return None
+    if not _sane_price(offer.price_per_night, rack):
+        logger.warning(
+            "Не беру цену %s на %s при прайсе %s — считаю по прайсу",
+            offer.price_per_night, slug, rack,
+        )
+        return None
+    return offer.price_per_night
 
 
 async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
@@ -538,7 +585,7 @@ async def answer(
                 tool_calls.append({"name": name, "input": args})
 
                 if name == "check_availability":
-                    output = await _tool_availability(booking, args)
+                    output = await _tool_availability(booking, args, facts)
                 elif name == "create_booking":
                     output = await _tool_create(booking, args, facts, guest)
                 elif name == "find_booking":

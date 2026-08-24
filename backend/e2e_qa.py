@@ -35,6 +35,7 @@ from app.booking_system import (  # noqa: E402
 from app.booking_system.exely import ROOM_TYPES  # noqa: E402
 from app.concierge import (  # noqa: E402
     FULL_TOOLS,
+    _sane_price,
     READ_ONLY_TOOLS,
     build_system_prompt,
     _tool_availability,
@@ -309,6 +310,18 @@ def qa_tools() -> None:
     create = next(t for t in FULL_TOOLS if t["name"] == "create_booking")
     check("оформление спрашивает число гостей", "guests" in create["input_schema"]["properties"])
     check("сумму модель не передаёт", "amount" not in create["input_schema"]["properties"])
+
+    # Отель правит тарифы у себя, и опечатка там мгновенно становится тем, что
+    # консьерж скажет гостю. Границы широкие: скидка вдвое бывает, в десять — нет.
+    for price, rack, ok, why in (
+        (40500, 45000, True, "обычная акция"),
+        (22500, 45000, True, "скидка вдвое"),
+        (4000, 40000, False, "потерян ноль"),
+        (150000, 45000, False, "лишний ноль"),
+        (0, 45000, False, "ноль"),
+        (40500, None, True, "прайса нет — верим системе"),
+    ):
+        check(f"цена {price} при прайсе {rack}: {why}", _sane_price(price, rack) is ok)
 
     brief = "СПРАВКА"
     none_mode = build_system_prompt(brief, "2026-08-24", availability="none")
