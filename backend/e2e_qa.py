@@ -41,7 +41,9 @@ from app.concierge import (  # noqa: E402
     _tool_cancel,
     _tool_find,
 )
+from app.channels.whatsapp import Incoming, _parse, _phone, for_whatsapp  # noqa: E402
 from app.config import Settings  # noqa: E402
+from app.dialogs import load_history, save_turn, seen_before  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.knowledge import render_brief  # noqa: E402
 from app.payment_docs import (  # noqa: E402
@@ -517,6 +519,111 @@ async def _wipe(guest_name: str) -> None:
 # ─────────────────────── справка и цены на сайте ───────────────────────
 
 
+async def qa_channels() -> None:
+    head("Канал WhatsApp")
+
+    check("телефон из chatId", _phone("77015550011@c.us") == "+77015550011")
+    check("групповой чат распознан", Incoming("1", "123@g.us", "", "", "т").is_group)
+    check("личный чат не групповой", not Incoming("1", "123@c.us", "", "", "т").is_group)
+
+    text_in = _parse({
+        "typeWebhook": "incomingMessageReceived",
+        "idMessage": "ABC123",
+        "senderData": {"chatId": "77015550011@c.us", "senderName": "Айгуль"},
+        "messageData": {"typeMessage": "textMessage",
+                        "textMessageData": {"textMessage": "  Есть номера?  "}},
+    })
+    check("текстовое разобрано", text_in is not None and text_in.text == "Есть номера?")
+    check("имя отправителя взято", text_in.sender_name == "Айгуль")
+    check("телефон подставлен", text_in.phone == "+77015550011")
+
+    quoted = _parse({
+        "typeWebhook": "incomingMessageReceived",
+        "idMessage": "D1",
+        "senderData": {"chatId": "77015550011@c.us"},
+        "messageData": {"typeMessage": "extendedTextMessage",
+                        "extendedTextMessageData": {"text": "а на выходные?"}},
+    })
+    check("ответ на сообщение разобран", quoted is not None and quoted.text == "а на выходные?")
+
+    doc_in = _parse({
+        "typeWebhook": "incomingMessageReceived",
+        "idMessage": "F1",
+        "senderData": {"chatId": "77015550011@c.us"},
+        "messageData": {"typeMessage": "documentMessage",
+                        "fileMessageData": {"downloadUrl": "https://x/f.pdf",
+                                            "fileName": "чек.pdf", "caption": "оплатил"}},
+    })
+    check("файл разобран", doc_in is not None and doc_in.has_file)
+    check("имя файла взято", doc_in.file_name == "чек.pdf")
+    check("подпись к файлу не потеряна", doc_in.text == "оплатил")
+
+    check("исходящее игнорируется", _parse({"typeWebhook": "outgoingMessageStatus"}) is None)
+    check("служебное игнорируется", _parse({"typeWebhook": "outgoingAPIMessageReceived"}) is None)
+    check("пустое тело не роняет", _parse({}) is None)
+
+    tidy = for_whatsapp("## Цены" + chr(10) + chr(10) + "**Comfort** — 40 500" + chr(10) + "- завтрак")
+    check("заголовки убраны", "#" not in tidy, tidy)
+    check("жирный по-вотсаповски", "*Comfort*" in tidy, tidy)
+    check("список точками", "•" in tidy, tidy)
+
+    head("История переписки")
+
+    from sqlalchemy import delete as sql_delete
+
+    from app.db import ChannelReceipt, DialogMessage
+
+    CHAT = "qa-77000000000@c.us"
+
+    async def wipe() -> None:
+        async with SessionLocal() as session:
+            await session.execute(sql_delete(DialogMessage).where(DialogMessage.chat_id == CHAT))
+            await session.execute(
+                sql_delete(ChannelReceipt).where(ChannelReceipt.message_id.like("qa-%"))
+            )
+            await session.commit()
+
+    await wipe()
+
+    check("у нового собеседника истории нет", await load_history(SessionLocal, "whatsapp", CHAT) == [])
+
+    turn = [
+        {"role": "user", "content": "Сколько стоит?"},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1",
+                                           "name": "check_availability", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                      "content": "свободно 3"}]},
+        {"role": "assistant", "content": "Comfort — 40 500 тенге."},
+    ]
+    await save_turn(SessionLocal, "whatsapp", CHAT, turn, already=0)
+    saved = await load_history(SessionLocal, "whatsapp", CHAT)
+    check("реплики сохранились", len(saved) == 4, str(len(saved)))
+    check("порядок не перепутан", saved[0]["content"] == "Сколько стоит?")
+    check("вызов инструмента пережил запись",
+          isinstance(saved[1]["content"], list) and saved[1]["content"][0]["type"] == "tool_use")
+    check("последним идёт ответ", saved[-1]["content"] == "Comfort — 40 500 тенге.")
+
+    await save_turn(SessionLocal, "whatsapp", CHAT,
+                    turn + [{"role": "user", "content": "а завтрак?"}], already=4)
+    check("дописан только хвост",
+          len(await load_history(SessionLocal, "whatsapp", CHAT)) == 5)
+
+    short = await load_history(SessionLocal, "whatsapp", CHAT, depth=2)
+    check("глубина ограничивает выдачу", len(short) <= 2, str(len(short)))
+    check("история всегда начинается с гостя",
+          not short or short[0]["role"] == "user", short[0]["role"] if short else "")
+
+    check("чужая переписка не подмешивается",
+          await load_history(SessionLocal, "whatsapp", "qa-другой@c.us") == [])
+
+    check("новое сообщение не повтор", not await seen_before(SessionLocal, "whatsapp", "qa-m1"))
+    check("то же сообщение — повтор", await seen_before(SessionLocal, "whatsapp", "qa-m1"))
+    check("другое сообщение не повтор", not await seen_before(SessionLocal, "whatsapp", "qa-m2"))
+    check("пустой идентификатор не считается", not await seen_before(SessionLocal, "whatsapp", ""))
+
+    await wipe()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -574,6 +681,7 @@ async def main() -> int:
     qa_payments()
     await qa_hybrid()
     await qa_access()
+    await qa_channels()
     await qa_knowledge()
 
     total = passed + len(failed)

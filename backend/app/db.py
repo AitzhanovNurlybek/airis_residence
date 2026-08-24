@@ -526,6 +526,56 @@ class LocalPayment(Base):
     )
 
 
+class DialogMessage(Base):
+    """
+    Одна реплика переписки с гостем.
+
+    Нужна, потому что разговор в мессенджере не заканчивается: гость спросил
+    цену, ушёл на полдня, вернулся с «а на выходные?». Без истории он каждый
+    раз начинает с нуля, и консьерж переспрашивает то, что уже знает.
+
+    Содержимое хранится строкой JSON, а не текстом. Реплика — не всегда фраза:
+    когда консьерж лезет в систему бронирования, в истории оказываются блоки
+    вызова инструмента и его ответа. Потерять их нельзя — без них модель не
+    поймёт, откуда взялись числа в собственном прошлом ответе.
+    """
+
+    __tablename__ = "dialog_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    #: whatsapp | instagram | admin — откуда пришло.
+    channel: Mapped[str] = mapped_column(String(20), index=True)
+    #: Идентификатор собеседника внутри канала. У WhatsApp это chatId.
+    chat_id: Mapped[str] = mapped_column(String(80), index=True)
+
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class ChannelReceipt(Base):
+    """
+    Отметка «это сообщение мы уже обработали».
+
+    Green API подтверждение приёма может не пройти, и тогда то же сообщение
+    придёт снова. Без этой таблицы гость получил бы два одинаковых ответа, а
+    в худшем случае — две одинаковые брони.
+    """
+
+    __tablename__ = "channel_receipts"
+
+    #: Идентификатор сообщения в канале. У Green API это idMessage.
+    message_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {
