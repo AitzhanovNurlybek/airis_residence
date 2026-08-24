@@ -37,6 +37,7 @@ from .db import (
     get_session,
     utcnow,
 )
+from .almaty import today as hotel_today
 from .notify import notify_corp_booking
 from .throttle import PER_OFFICE_IP, client_ip, reset, too_many
 from .schemas import (
@@ -354,7 +355,7 @@ async def corp_create_booking(
     `new` и в кабинете честно подписана как заявка: обещать гостю
     подтверждённый номер, не умея его подтвердить, нельзя.
     """
-    if date.today() > data.checkIn:
+    if hotel_today() > data.checkIn:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Дата заезда уже прошла")
 
     company = await session.get(Company, user.company_id)

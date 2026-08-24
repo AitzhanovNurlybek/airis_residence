@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db import LocalBooking, LocalPayment, LocalStock, utcnow
 from .base import Availability, ExternalBooking, ExternalInvoice, RoomOffer
+from ..almaty import today as hotel_today
 
 #: Разбивка 34 номеров отеля по категориям для локальной шахматки.
 #:
@@ -236,7 +237,7 @@ class LocalBookingSystem:
         # правило — просьба, а его достаточно уговорить. Гость, назвавший
         # прошлогоднюю дату, получил бы бронь, которую никто не заметит до
         # разбора шахматки.
-        if check_in < date.today():
+        if check_in < hotel_today():
             raise ValueError(f"Дата заезда {check_in} уже прошла")
 
         async with self._sessions() as session:

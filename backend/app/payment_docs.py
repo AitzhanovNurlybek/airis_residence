@@ -33,6 +33,7 @@ import httpx
 from .booking_system import BookingSystem
 from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION
 from .config import Settings
+from .almaty import today as hotel_today
 
 #: Больше — почти наверняка не платёжка, а что-то присланное по ошибке.
 MAX_DOC_MB = 8
@@ -156,7 +157,7 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
                     },
                     {
                         "type": "text",
-                        "text": f"Сегодня {date.today().isoformat()}.\n\n{EXTRACT_PROMPT}",
+                        "text": f"Сегодня {hotel_today().isoformat()}.\n\n{EXTRACT_PROMPT}",
                     },
                 ],
             }
@@ -448,11 +449,23 @@ def _words_to_number(text: str) -> int | None:
     return (total + chunk) if seen else None
 
 
+SCALE_WORDS = ("тысяч", "миллион", "млн", "тыс")
+
+
 def _words_disagree(doc: PaymentDoc) -> str:
     if not doc.amount_in_words or not doc.amount:
         return ""
     spelled = _words_to_number(doc.amount_in_words)
     if spelled is None or spelled == 0:
+        return ""
+
+    # Разговорные формы («девяносто тыщ») разбираются наполовину: числительное
+    # узнаётся, а множитель — нет, и выходит 90 против 90 000. Обвинять
+    # документ в подделке из-за просторечия нельзя, поэтому без узнанного
+    # множителя молчим: пусть лучше проверка не сработает, чем сработает зря.
+    low = doc.amount_in_words.casefold()
+    scale_seen = any(word in low for word in SCALE_WORDS)
+    if doc.amount >= 1000 and not scale_seen:
         return ""
     if spelled != doc.amount:
         return (
@@ -469,7 +482,7 @@ def _date_problem(doc: PaymentDoc) -> str:
         when = date.fromisoformat(doc.paid_at)
     except ValueError:
         return ""
-    today = date.today()
+    today = hotel_today()
     if when > today:
         return f"Дата платежа {doc.paid_at} — в будущем"
     if (today - when).days > 180:
@@ -517,4 +530,4 @@ def describe(result: MatchResult) -> str:
 
 
 def today_iso() -> str:
-    return date.today().isoformat()
+    return hotel_today().isoformat()

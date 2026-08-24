@@ -4,8 +4,12 @@
 По умолчанию — никакой. Это не лень, а осознанная позиция: пока настоящего
 API нет, честнее отвечать «наличие подтвердит стойка», чем показывать гостю
 цифры из заглушки. Заглушка включается только явной настройкой
-`BOOKING_SYSTEM=local` (шахматка в нашей базе, с записью) или `stub`
-(только чтение, без базы) — и то и другое для отладки, не для боевого сайта.
+`BOOKING_SYSTEM`:
+  пусто    — не подключена, наличие подтверждает стойка;
+  `hybrid` — рабочая схема: наличие из Exely, брони заявками менеджеру;
+  `exely`  — только чтение наличия, без записи;
+  `local`  — учебная шахматка в нашей базе, для отладки записи;
+  `stub`   — старая заглушка на хеше, без базы.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from .base import (
     RoomOffer,
 )
 from .exely import ExelyBookingSystem
+from .hybrid import HybridBookingSystem
 from .local import (
     DEFAULT_STOCK,
     BookingNotFound,
@@ -37,6 +42,7 @@ __all__ = [
     "LocalBookingSystem",
     "NotEnoughRooms",
     "ExelyBookingSystem",
+    "HybridBookingSystem",
     "ExternalBooking",
     "ExternalInvoice",
     "RoomOffer",
@@ -65,12 +71,20 @@ def get_booking_system(
         return StubBookingSystem(room_names)
 
     if mode == "exely":
-        # Ключи не нужны: наличие читается с того же открытого адреса, куда
-        # ходит виджет брони на наших страницах. Запись через него не делается
-        # — для неё понадобится договорной доступ, и тогда сюда вернутся ключи.
+        # Только чтение: наличие с открытого адреса виджета. Записывать через
+        # него не будем — для этого нужен договорной доступ.
         return ExelyBookingSystem(
-            hotel_code=settings.exely_hotel_code or None or "509506",
+            hotel_code=settings.exely_hotel_code or "509506",
             room_names=room_names,
+        )
+
+    if mode == "hybrid":
+        # Рабочая схема на сегодня: наличие настоящее, бронь уходит заявкой
+        # менеджеру. Именно её ставят на боевой сайт, пока нет записи в Exely.
+        from ..db import SessionLocal
+
+        return HybridBookingSystem(
+            SessionLocal, room_names, settings.exely_hotel_code or "509506"
         )
 
     return None

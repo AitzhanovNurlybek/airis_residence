@@ -29,6 +29,7 @@ from .config import Settings, get_settings
 from .db import LocalBooking, LocalPayment, LocalStock, Room, get_session
 from .knowledge import KnowledgeUnavailable, load_facts
 from .payment_docs import MAX_DOC_MB, check_recipient, match_and_apply, read_document
+from .almaty import today as hotel_today
 
 router = APIRouter(
     prefix="/api/admin/local",
@@ -245,7 +246,7 @@ async def chat(
         settings,
         message=data.message,
         history=data.history,
-        today=date.today().isoformat(),
+        today=hotel_today().isoformat(),
         booking=booking,
         guest={"phone": data.phone},
     )
