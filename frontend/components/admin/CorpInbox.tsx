@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { CORP_STATUSES, type AdminCorpBooking } from "@/lib/adminTypes";
+import { daysUntil } from "@/lib/almaty";
+import { CORP_FLOW, type AdminCorpBooking } from "@/lib/adminTypes";
 
 /**
  * Заявки компаний, ждущие менеджера — над списком компаний.
@@ -15,14 +16,6 @@ import { CORP_STATUSES, type AdminCorpBooking } from "@/lib/adminTypes";
  */
 
 const money = new Intl.NumberFormat("ru-RU");
-
-function daysUntil(checkIn: string): number | null {
-  const date = new Date(`${checkIn}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
-}
 
 function shortDate(value: string): string {
   const date = new Date(value);
@@ -53,45 +46,58 @@ export function CorpInbox({ bookings }: { bookings: AdminCorpBooking[] }) {
 
       <div className="mt-5 grid gap-2.5">
         {pending.map((booking) => {
-          const status = CORP_STATUSES.find((s) => s.value === booking.status);
+          const flow = CORP_FLOW[booking.status];
           const days = daysUntil(booking.checkIn);
-          const burning = days !== null && days <= 3 && booking.status !== "paid";
+          const burning = days !== null && days >= 0 && days <= 3;
           return (
             <Link
               key={booking.id}
               href={`/admin/kompanii/${booking.companySlug}`}
-              className={`flex flex-wrap items-center justify-between gap-x-5 gap-y-2 rounded-2xl border px-5 py-4 transition-colors ${
+              className={`flex overflow-hidden rounded-2xl border transition-colors ${
                 burning
                   ? "border-wine-400/50 bg-wine-900/20 hover:border-wine-400/80"
                   : "border-white/10 bg-ink-950/40 hover:border-sand-400/40"
               }`}
             >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="text-cream">{booking.companyName || "—"}</span>
-                  {burning && (
-                    <span className="rounded-full bg-wine-500 px-2.5 py-0.5 text-[0.65rem] tracking-wide text-white uppercase">
-                      {days === 0 ? "заезд сегодня" : days === 1 ? "заезд завтра" : `заезд через ${days} дн.`}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 text-xs text-muted">
-                  {booking.number} · {shortDate(booking.checkIn)} — {shortDate(booking.checkOut)} ·{" "}
-                  {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
-                  {booking.guestName ? ` · ${booking.guestName}` : ""}
-                  {booking.mealPlan === "none" ? " · без завтрака" : ""}
-                </div>
-              </div>
+              {/* Та же цветная полоса, что и в карточке компании: один
+                  и тот же статус выглядит одинаково в обоих местах. */}
+              <div className={`w-1.5 shrink-0 ${flow.stripe}`} aria-hidden />
 
-              <div className="flex shrink-0 items-center gap-4">
-                <span className="text-sm text-sand-200 tabular-nums">
-                  {money.format(booking.totalAmount)} ₸
-                </span>
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs whitespace-nowrap ${status?.tone ?? "border-white/15 text-muted"}`}
-                >
-                  {status?.label ?? booking.status}
-                </span>
+              <div className="flex flex-1 flex-wrap items-center justify-between gap-x-5 gap-y-2 px-5 py-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="text-cream">{booking.companyName || "—"}</span>
+                    {burning && (
+                      <span className="rounded-full bg-wine-500 px-2.5 py-0.5 text-[0.65rem] tracking-wide text-white uppercase">
+                        {days === 0
+                          ? "заезд сегодня"
+                          : days === 1
+                            ? "заезд завтра"
+                            : `заезд через ${days} дн.`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs text-muted">
+                    {booking.number} · {shortDate(booking.checkIn)} — {shortDate(booking.checkOut)} ·{" "}
+                    {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
+                    {booking.guestName ? ` · ${booking.guestName}` : ""}
+                    {booking.mealPlan === "none" ? " · без завтрака" : ""}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-4">
+                  <span className="text-sm text-sand-200 tabular-nums">
+                    {money.format(booking.totalAmount)} ₸
+                  </span>
+                  {/* Не статус, а что с ним делать: список существует ради
+                      «что сделать сегодня», и глагол читается быстрее
+                      существительного. */}
+                  <span
+                    className={`rounded-full border px-3 py-1 text-xs whitespace-nowrap ${flow.pill}`}
+                  >
+                    {flow.next?.action ?? flow.label}
+                  </span>
+                </div>
               </div>
             </Link>
           );

@@ -6,8 +6,9 @@ import { useState } from "react";
 
 import { AdminButton, Field, inputClass, useToast } from "@/components/admin/ui";
 import { AdminError, adminSend } from "@/lib/adminClient";
+import { daysUntil } from "@/lib/almaty";
 import {
-  CORP_STATUSES,
+  CORP_FLOW,
   type AdminCompany,
   type AdminCompanyRate,
   type AdminCompanyUser,
@@ -535,66 +536,112 @@ export function CompanyEditor({
         ) : (
           <div className="mt-5 grid gap-3">
             {bookings.map((booking) => {
-              const tone =
-                CORP_STATUSES.find((s) => s.value === booking.status)?.tone ?? "border-white/15";
-              const label = CORP_STATUSES.find((s) => s.value === booking.status)?.label ?? booking.status;
+              const flow = CORP_FLOW[booking.status];
+              const days = daysUntil(booking.checkIn);
+              // Срочность показываем только там, где ещё можно что-то успеть.
+              // На оплаченной и отменённой «заезд завтра» — просто шум.
+              const urgent =
+                (booking.status === "new" || booking.status === "confirmed") &&
+                days !== null &&
+                days >= 0 &&
+                days <= 3;
+
               return (
                 <article
                   key={booking.id}
-                  className="rounded-2xl border border-white/10 bg-ink-950/40 p-5"
+                  className="flex overflow-hidden rounded-2xl border border-white/10 bg-ink-950/40"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-cream">
-                        {booking.number} · {shortDate(booking.checkIn)} — {shortDate(booking.checkOut)}
-                        <span className="ml-2 text-xs text-muted">{booking.nights} ноч.</span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted">
-                        {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
-                        {booking.guestName ? ` · гость: ${booking.guestName}` : ""}
-                        {booking.createdByName ? ` · оформил: ${booking.createdByName}` : ""}
-                        {/* Пишем только отказ. «Завтрак включён» — обычный
-                            случай, и повторять его в каждой строке значит
-                            заставить менеджера вычитывать шум ради
-                            редкого исключения. */}
-                        {booking.mealPlan === "none" ? " · без завтрака" : ""}
-                      </div>
-                      {booking.comment && (
-                        <div className="mt-2 text-sm text-cream/80">{booking.comment}</div>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <div className="font-display text-xl text-sand-200">
-                        {money.format(booking.totalAmount)} ₸
-                      </div>
-                      <span className={`mt-2 inline-block rounded-full border px-3 py-1 text-xs ${tone}`}>
-                        {label}
-                      </span>
-                      {booking.invoiceNumber && (
-                        <div className="mt-1 text-xs text-muted">счёт {booking.invoiceNumber}</div>
-                      )}
-                    </div>
-                  </div>
+                  {/* Цветная полоса слева: список читается взглядом сверху
+                      вниз, не вчитываясь в каждую плашку. */}
+                  <div className={`w-1.5 shrink-0 ${flow.stripe}`} aria-hidden />
 
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/admin/kompanii/${company.slug}/schet/${booking.id}`}
-                      target="_blank"
-                      className="rounded-full border border-sand-400/40 px-3 py-1.5 text-xs text-sand-300 transition-colors hover:border-sand-400 hover:text-sand-200"
-                    >
-                      Счёт на печать ↗
-                    </Link>
-                    {CORP_STATUSES.filter((s) => s.value !== booking.status).map((s) => (
-                      <button
-                        key={s.value}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setBookingStatus(booking, s.value)}
-                        className="rounded-full border border-white/12 px-3 py-1.5 text-xs text-muted transition-colors hover:border-sand-400/50 hover:text-cream disabled:opacity-50"
+                  <div className="min-w-0 flex-1 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${flow.pill}`}
+                          >
+                            {flow.label}
+                          </span>
+                          {urgent && (
+                            <span className="rounded-full bg-wine-500/20 px-2.5 py-0.5 text-xs whitespace-nowrap text-wine-200">
+                              {days === 0
+                                ? "заезд сегодня"
+                                : days === 1
+                                  ? "заезд завтра"
+                                  : `заезд через ${days} дн.`}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-2 text-cream">
+                          {booking.number} · {shortDate(booking.checkIn)} —{" "}
+                          {shortDate(booking.checkOut)}
+                          <span className="ml-2 text-xs text-muted">{booking.nights} ноч.</span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          {booking.items.map((i) => `${i.roomName} × ${i.roomsCount}`).join(", ")}
+                          {booking.guestName ? ` · гость: ${booking.guestName}` : ""}
+                          {booking.createdByName ? ` · оформил: ${booking.createdByName}` : ""}
+                          {/* Пишем только отказ. «Завтрак включён» — обычный
+                              случай, и повторять его в каждой строке значит
+                              заставить менеджера вычитывать шум ради
+                              редкого исключения. */}
+                          {booking.mealPlan === "none" ? " · без завтрака" : ""}
+                        </div>
+                        {booking.comment && (
+                          <div className="mt-2 text-sm text-cream/80">{booking.comment}</div>
+                        )}
+                      </div>
+
+                      <div className="text-right">
+                        <div className="font-display text-xl text-sand-200">
+                          {money.format(booking.totalAmount)} ₸
+                        </div>
+                        {booking.invoiceNumber && (
+                          <div className="mt-1 text-xs text-muted">счёт {booking.invoiceNumber}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="mt-3 text-xs text-muted">{flow.meaning}</p>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      {/* Следующий шаг — один и заметный. Остальные переходы
+                          убраны: раньше пять одинаковых серых кнопок в ряд
+                          требовали знать процесс наизусть. */}
+                      {flow.next && (
+                        <AdminButton
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setBookingStatus(booking, flow.next!.to)}
+                        >
+                          {flow.next.action}
+                        </AdminButton>
+                      )}
+                      <Link
+                        href={`/admin/kompanii/${company.slug}/schet/${booking.id}`}
+                        target="_blank"
+                        className="rounded-full border border-sand-400/40 px-3 py-1.5 text-xs text-sand-300 transition-colors hover:border-sand-400 hover:text-sand-200"
                       >
-                        {s.label}
-                      </button>
-                    ))}
+                        Счёт на печать ↗
+                      </Link>
+
+                      {/* Отмена уводится вправо и оформлена тихо: рядом с
+                          «Подтвердить» одинаковой кнопкой её рано или поздно
+                          нажмут не глядя. */}
+                      {booking.status !== "cancelled" && booking.status !== "paid" && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setBookingStatus(booking, "cancelled")}
+                          className="ml-auto text-xs text-muted underline underline-offset-4 transition-colors hover:text-wine-300 disabled:opacity-50"
+                        >
+                          Отменить заявку
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </article>
               );

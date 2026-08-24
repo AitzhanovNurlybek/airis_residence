@@ -58,6 +58,9 @@ const ru = {
   cabinet: {
     title: "Кабинет компании",
     changePassword: "Сменить пароль",
+    // Реквизиты договора сложены: справка, а не ежедневное действие.
+    showDetails: "Реквизиты договора",
+    hideDetails: "Свернуть",
     bin: "БИН",
     contract: "Договор",
     payment: "Оплата",
@@ -235,6 +238,17 @@ const ru = {
     cancelled: "Отменено",
   },
 
+  // Что статус значит для компании и чьего действия ждут. Название статуса
+  // отвечает «где заявка», но не «что теперь делать мне» — а спрашивают
+  // менеджера отеля именно об этом.
+  statusHint: {
+    new: "Менеджер проверяет свободные номера. Ответим в течение дня.",
+    confirmed: "Номера есть. Готовим счёт на оплату.",
+    invoiced: "Счёт выставлен — ждём оплату от вашей бухгалтерии.",
+    paid: "Всё готово. Ждём вас в отеле.",
+    cancelled: "Заявка отменена.",
+  },
+
   // Честная подпись про то, как всё работает сейчас. Пока система
   // бронирования отеля не отдаёт наличие номеров, подтверждает менеджер —
   // и гость должен об этом знать до оформления, а не после.
@@ -290,6 +304,8 @@ const kk: Dictionary = {
   cabinet: {
     title: "Компания кабинеті",
     changePassword: "Құпиясөзді ауыстыру",
+    showDetails: "Шарт деректемелері",
+    hideDetails: "Жию",
     bin: "БСН",
     contract: "Шарт",
     payment: "Төлем",
@@ -467,6 +483,14 @@ const kk: Dictionary = {
     cancelled: "Болдырылмады",
   },
 
+  statusHint: {
+    new: "Менеджер бос нөмірлерді тексеруде. Күн ішінде жауап береміз.",
+    confirmed: "Нөмірлер бар. Төлемге шот дайындап жатырмыз.",
+    invoiced: "Шот ұсынылды — бухгалтерияңыздан төлемді күтудеміз.",
+    paid: "Бәрі дайын. Қонақүйде күтеміз.",
+    cancelled: "Өтінім болдырылмады.",
+  },
+
   notice:
     "Онлайн растау қосылу үстінде. Әзірге өтінім брондау бөлімінің менеджеріне жіберіледі — ол нөмірді растап, шот ұсынады.",
 
@@ -510,6 +534,8 @@ const en: Dictionary = {
   cabinet: {
     title: "Company account",
     changePassword: "Change password",
+    showDetails: "Contract details",
+    hideDetails: "Hide",
     bin: "BIN",
     contract: "Contract",
     payment: "Payment",
@@ -685,6 +711,14 @@ const en: Dictionary = {
     invoiced: "Awaiting payment",
     paid: "Paid",
     cancelled: "Cancelled",
+  },
+
+  statusHint: {
+    new: "The manager is checking availability. We will reply within the day.",
+    confirmed: "Rooms are available. We are preparing the invoice.",
+    invoiced: "Invoice issued — waiting for payment from your accounting.",
+    paid: "All set. We look forward to seeing you.",
+    cancelled: "This request was cancelled.",
   },
 
   notice:

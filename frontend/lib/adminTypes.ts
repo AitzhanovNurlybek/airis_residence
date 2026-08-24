@@ -135,3 +135,65 @@ export const CORP_STATUSES: {
   { value: "paid", label: "Оплачена", tone: "border-emerald-400/50 text-emerald-200" },
   { value: "cancelled", label: "Отменена", tone: "border-white/15 text-muted" },
 ];
+
+export type CorpStatus = AdminCorpBooking["status"];
+
+/**
+ * Что менеджеру делать с заявкой прямо сейчас.
+ *
+ * Раньше все пять статусов показывались одинаковыми серыми кнопками в ряд, и
+ * выбрать следующий шаг можно было только зная процесс наизусть. Теперь
+ * следующее действие — одно, названо глаголом и выделено; остальное убрано
+ * с глаз.
+ *
+ * `next` — шаг вперёд по процессу. У оплаченной и отменённой его нет:
+ * дальше идти некуда, и кнопка там была бы приглашением сломать данные.
+ */
+export const CORP_FLOW: Record<
+  CorpStatus,
+  {
+    /** Подпись статуса и что это значит для менеджера. */
+    label: string;
+    meaning: string;
+    /** Цвет левой полосы карточки — по нему список читается, не вчитываясь. */
+    stripe: string;
+    /** Плашка статуса. */
+    pill: string;
+    /** Следующий шаг: во что переводим и как называется кнопка. */
+    next?: { to: CorpStatus; action: string };
+  }
+> = {
+  new: {
+    label: "Новая заявка",
+    meaning: "Компания ждёт ответа. Проверьте, свободны ли номера.",
+    stripe: "bg-sand-400",
+    pill: "bg-sand-400/15 text-sand-200 border-sand-400/40",
+    next: { to: "confirmed", action: "Подтвердить наличие" },
+  },
+  confirmed: {
+    label: "Подтверждена",
+    meaning: "Номера есть. Осталось выставить счёт.",
+    stripe: "bg-sky-400",
+    pill: "bg-sky-400/12 text-sky-200 border-sky-400/40",
+    next: { to: "invoiced", action: "Выставить счёт" },
+  },
+  invoiced: {
+    label: "Счёт выставлен",
+    meaning: "Ждём оплату от компании.",
+    stripe: "bg-wine-400",
+    pill: "bg-wine-500/15 text-wine-200 border-wine-400/40",
+    next: { to: "paid", action: "Отметить оплату" },
+  },
+  paid: {
+    label: "Оплачена",
+    meaning: "Готово. Занесите бронь в шахматку Exely.",
+    stripe: "bg-emerald-400",
+    pill: "bg-emerald-500/12 text-emerald-200 border-emerald-400/40",
+  },
+  cancelled: {
+    label: "Отменена",
+    meaning: "Заявка закрыта.",
+    stripe: "bg-white/20",
+    pill: "bg-white/5 text-muted border-white/15",
+  },
+};

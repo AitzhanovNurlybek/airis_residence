@@ -37,6 +37,34 @@ function Tile({ href, title, hint }: { href: string; title: string; hint: string
   );
 }
 
+/**
+ * Главное действие кабинета — крупной кнопкой, а не плиткой в ряду.
+ *
+ * Раньше «Забронировать» выглядело так же, как «Отчёты» и «Сотрудники», и
+ * найти его можно было только прочитав все пять подписей. Сюда приходят
+ * бронировать; остальное — раз в месяц.
+ */
+function PrimaryAction({ href, title, hint }: { href: string; title: string; hint: string }) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      className="group flex items-center justify-between gap-6 rounded-3xl bg-wine-500 px-7 py-6 text-white shadow-sm transition-colors hover:bg-wine-600"
+    >
+      <div>
+        <div className="font-display text-2xl font-semibold">{title}</div>
+        <div className="mt-1 text-sm text-white/75">{hint}</div>
+      </div>
+      <span
+        aria-hidden
+        className="text-3xl leading-none transition-transform group-hover:translate-x-1"
+      >
+        →
+      </span>
+    </Link>
+  );
+}
+
 export default async function CorpCabinetPage() {
   const locale = await getCorpLocale();
   const dict = getDictionary(locale);
@@ -80,19 +108,15 @@ export default async function CorpCabinetPage() {
           {dict.notice}
         </p>
 
-        <section className="mt-8 rounded-3xl bg-white p-6 shadow-sm md:p-8">
-          <h2 className="font-display text-2xl font-semibold">{company.name}</h2>
-          <dl className="mt-6 grid gap-x-10 gap-y-5 md:grid-cols-2">
-            <Field label={dict.cabinet.bin} value={company.bin} />
-            <Field
-              label={dict.cabinet.manager}
-              value={[company.managerName, company.managerEmail].filter(Boolean).join(" · ")}
-            />
-            <Field label={dict.cabinet.contract} value={contract} />
-            <Field label={dict.cabinet.phone} value={company.managerPhone} />
-            <Field label={dict.cabinet.payment} value={company.paymentTerms} />
-            <Field label={dict.cabinet.email} value={user.email} />
-          </dl>
+        {/* Порядок на странице — порядок по важности. Сюда приходят
+            бронировать, а реквизиты договора смотрят раз в квартал; раньше
+            они занимали весь первый экран, и кнопка брони уходила вниз. */}
+        <section className="mt-8 md:max-w-2xl">
+          <PrimaryAction
+            href="/corp/booking"
+            title={dict.cabinet.tiles.book}
+            hint={dict.cabinet.tiles.bookHint}
+          />
         </section>
 
         <section className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-2xl">
@@ -102,13 +126,8 @@ export default async function CorpCabinetPage() {
         </section>
 
         {/* Плитка появляется вместе со своей страницей: ссылка в никуда хуже
-            её отсутствия. Финансы и отчёты — следующий заход. */}
+            её отсутствия. */}
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Tile
-            href="/corp/booking"
-            title={dict.cabinet.tiles.book}
-            hint={dict.cabinet.tiles.bookHint}
-          />
           <Tile
             href="/corp/bookings"
             title={dict.cabinet.tiles.bookings}
@@ -136,6 +155,31 @@ export default async function CorpCabinetPage() {
             </>
           )}
         </section>
+
+        {/* Реквизиты — справка, а не рабочий инструмент: сложены, чтобы не
+            занимать экран, но остаются на виду одним кликом. */}
+        <details className="group mt-8 rounded-3xl bg-white p-6 shadow-sm md:p-8">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 marker:hidden">
+            <h2 className="font-display text-2xl font-semibold">{company.name}</h2>
+            <span className="text-sm whitespace-nowrap text-wine-600 group-open:hidden">
+              {dict.cabinet.showDetails}
+            </span>
+            <span className="hidden text-sm whitespace-nowrap text-wine-600 group-open:inline">
+              {dict.cabinet.hideDetails}
+            </span>
+          </summary>
+          <dl className="mt-6 grid gap-x-10 gap-y-5 md:grid-cols-2">
+            <Field label={dict.cabinet.bin} value={company.bin} />
+            <Field
+              label={dict.cabinet.manager}
+              value={[company.managerName, company.managerEmail].filter(Boolean).join(" · ")}
+            />
+            <Field label={dict.cabinet.contract} value={contract} />
+            <Field label={dict.cabinet.phone} value={company.managerPhone} />
+            <Field label={dict.cabinet.payment} value={company.paymentTerms} />
+            <Field label={dict.cabinet.email} value={user.email} />
+          </dl>
+        </details>
       </main>
     </>
   );

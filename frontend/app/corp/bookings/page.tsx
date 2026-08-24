@@ -17,10 +17,25 @@ import { isActiveBooking, type BookingStatus } from "@/lib/corp/types";
 /** Цвет плашки статуса. Оплачено — зелёное, отменено — приглушённое. */
 const STATUS_STYLE: Record<BookingStatus, string> = {
   new: "bg-sand-200 text-ink-800",
-  confirmed: "bg-sand-300/60 text-ink-900",
+  confirmed: "bg-sky-100 text-sky-800",
   invoiced: "bg-wine-50 text-wine-600",
   paid: "bg-emerald-100 text-emerald-800",
   cancelled: "bg-ink-600/10 text-ink-700/60",
+};
+
+/**
+ * Цветная полоса слева от строки.
+ *
+ * Плашка со статусом стоит в шестой колонке, и в списке из десяти броней её
+ * приходится выискивать. Полоса читается краем глаза: видно, где ждут денег,
+ * а где уже всё сделано.
+ */
+const STATUS_STRIPE: Record<BookingStatus, string> = {
+  new: "bg-sand-400",
+  confirmed: "bg-sky-400",
+  invoiced: "bg-wine-500",
+  paid: "bg-emerald-500",
+  cancelled: "bg-ink-600/25",
 };
 
 export default async function CorpBookingsPage() {
@@ -84,7 +99,16 @@ export default async function CorpBookingsPage() {
               <tbody>
                 {(bookings ?? []).map((booking) => (
                   <tr key={booking.id} className="border-b border-ink-600/8 last:border-0">
-                    <td className="px-5 py-4 whitespace-nowrap">{booking.number}</td>
+                    <td className="relative py-4 pr-5 pl-5 whitespace-nowrap">
+                      {/* Полоса не отдельной колонкой, а вплотную к краю
+                          строки: колонка съела бы место у названий номеров,
+                          а таблица и так широкая. */}
+                      <span
+                        aria-hidden
+                        className={`absolute top-0 bottom-0 left-0 w-1 ${STATUS_STRIPE[booking.status]}`}
+                      />
+                      {booking.number}
+                    </td>
                     <td className="px-5 py-4 whitespace-nowrap">
                       {formatDate(booking.checkIn, locale)} — {formatDate(booking.checkOut, locale)}
                       <span className="mt-0.5 block text-xs text-ink-700/50">
@@ -110,6 +134,12 @@ export default async function CorpBookingsPage() {
                         className={`inline-block rounded-full px-3 py-1 text-xs whitespace-nowrap ${STATUS_STYLE[booking.status]}`}
                       >
                         {dict.status[booking.status]}
+                      </span>
+                      {/* Название статуса говорит, где заявка, но не что
+                          теперь делать. Именно об этом компании и звонят
+                          менеджеру — отвечаем заранее. */}
+                      <span className="mt-1.5 block max-w-[16rem] text-xs leading-snug text-ink-700/55">
+                        {dict.statusHint[booking.status]}
                       </span>
                       {booking.invoiceNumber && (
                         <span className="mt-1 block text-xs text-ink-700/50">
