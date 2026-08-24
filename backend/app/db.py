@@ -98,7 +98,19 @@ class Room(Base):
 
     name: Mapped[str] = mapped_column(String(160))
     short_name: Mapped[str] = mapped_column(String(80))
-    price: Mapped[int] = mapped_column(Integer)          # тенге за ночь
+    price: Mapped[int] = mapped_column(Integer)          # тенге за ночь, одного гостя
+
+    # Система бронирования отеля считает цену от числа гостей, а не от номера:
+    # в Comfort + один гость стоит 50 000, а двое — 52 500. Раньше у нас была
+    # одна цена на номер, и на двоих сайт недобирал 2 500 за ночь.
+    #
+    # Ноль означает «столько же, сколько за одного» — так у большинства
+    # категорий, и заполнять поле ради равенства не нужно.
+    price_double: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Доплата за дополнительное место. Ноль — доп. места нет.
+    # Ребёнок до 6 лет занимает его бесплатно, это записано в правилах отеля.
+    extra_bed_price: Mapped[int] = mapped_column(Integer, default=0)
     area: Mapped[str] = mapped_column(String(40))
     capacity: Mapped[int] = mapped_column(Integer, default=2)
     beds: Mapped[str] = mapped_column(String(120), default="")
@@ -519,6 +531,8 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {
         "video": "VARCHAR(500) DEFAULT ''",
         "video_poster": "VARCHAR(500) DEFAULT ''",
+        "price_double": "INTEGER DEFAULT 0",
+        "extra_bed_price": "INTEGER DEFAULT 0",
     },
     "companies": {
         "breakfast_price": "INTEGER DEFAULT 0",

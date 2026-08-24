@@ -254,7 +254,13 @@ async def main() -> int:
         if reply["ok"]:
             text: str = reply["text"]
             print(f"    ответ: {text[:300]}")
-            check("названа верная цена", "25 000" in text or "25000" in text)
+            cheapest = min(r["price"] for r in facts["rooms"])
+            spaced = f"{cheapest:,}".replace(",", " ")
+            check(
+                "названа верная цена",
+                spaced in text or f"{cheapest:,}".replace(",", " ") in text or str(cheapest) in text,
+                f"ждали {cheapest}",
+            )
             check("названо верное время заезда", "14:00" in text)
             check("ответ короткий", len(text) < 900, f"{len(text)} символов")
 

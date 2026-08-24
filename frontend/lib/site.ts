@@ -89,6 +89,10 @@ export type Room = {
   name: string;
   shortName: string;
   price: number;
+  /** Цена за двоих. Ноль или отсутствие — столько же, сколько за одного. */
+  priceDouble?: number;
+  /** Доплата за дополнительное место. Ноль — места нет. */
+  extraBedPrice?: number;
   area: string;
   capacity: number;
   beds: string;

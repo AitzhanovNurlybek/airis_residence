@@ -86,7 +86,8 @@ LIVE_AVAILABILITY_RULES = """
 Ты умеешь оформлять, переносить и отменять брони: create_booking, find_booking, change_booking, cancel_booking.
 
 Перед create_booking обязательно:
-1. Знай обе даты, категорию номера и имя гостя. Чего нет — спроси, не выдумывай.
+1. Знай обе даты, категорию номера, число гостей в номере и имя гостя. Чего нет — спроси, не выдумывай.
+   Число гостей влияет на цену не во всех категориях, но спрашивать надо всегда: угадав, ты назовёшь неверную сумму.
 2. Проговори вслух всё, что собираешься записать: даты, категорию, число номеров, имя, сумму.
 3. Дождись явного согласия гостя («да», «оформляйте», «подтверждаю»). Молчание и «хорошо» в ответ на что-то другое согласием не считаются.
 После оформления назови гостю номер брони — по нему он её найдёт.
@@ -141,6 +142,10 @@ CREATE_TOOL = {
                 "description": "Код категории из справки: standart-single, standart, standart-twin, comfort, comfort-plus",
             },
             "rooms_count": {"type": "integer", "description": "Сколько номеров этой категории"},
+            "guests": {
+                "type": "integer",
+                "description": "Сколько гостей будет жить в одном номере (1 или 2). Влияет на цену.",
+            },
             "guest_name": {"type": "string", "description": "Имя гостя, как он его назвал"},
             "note": {"type": "string", "description": "Пожелания гостя, если были"},
         },
@@ -216,10 +221,20 @@ def _parse_date(value: Any) -> date:
     return date.fromisoformat(str(value or "").strip())
 
 
-def _room_price(facts: dict[str, Any], slug: str) -> tuple[str, int] | None:
+def _room_price(facts: dict[str, Any], slug: str, guests: int = 1) -> tuple[str, int] | None:
+    """
+    Название и цена за ночь для нужного числа гостей.
+
+    Система бронирования отеля считает от числа гостей, а не от номера: в
+    Comfort Plus один гость стоит 50 000, а двое — 52 500. Одна цена на номер
+    недобирала бы 2 500 за каждую ночь двухместного заезда.
+    """
     for room in facts.get("rooms", []):
-        if room.get("slug") == slug:
-            return room.get("name", slug), int(room.get("price") or 0)
+        if room.get("slug") != slug:
+            continue
+        single = int(room.get("price") or 0)
+        double = int(room.get("priceDouble") or single)
+        return room.get("name", slug), (double if guests >= 2 else single)
     return None
 
 
@@ -274,7 +289,8 @@ async def _tool_create(
         return "Даты не разобраны. Нужен формат ГГГГ-ММ-ДД."
 
     slug = str(args.get("room_slug") or "").strip()
-    priced = _room_price(facts, slug)
+    guests = max(1, int(args.get("guests") or 1))
+    priced = _room_price(facts, slug, guests)
     if priced is None:
         codes = ", ".join(r.get("slug", "") for r in facts.get("rooms", []))
         return f"Категории «{slug}» нет. Есть такие: {codes}"
@@ -304,7 +320,7 @@ async def _tool_create(
 
     return (
         f"Бронь оформлена. {_describe(created, room=room_name)}. "
-        f"Ночей {nights}, цена за ночь {price} тенге."
+        f"Ночей {nights}, гостей в номере {guests}, цена за ночь {price} тенге."
     )
 
 

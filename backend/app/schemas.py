@@ -13,6 +13,10 @@ class RoomOut(BaseModel):
     name: str
     shortName: str = Field(validation_alias="short_name")
     price: int
+    #: Цена за двоих. Ноль — столько же, сколько за одного.
+    priceDouble: int = Field(default=0, validation_alias="price_double")
+    #: Доплата за дополнительное место. Ноль — места нет.
+    extraBedPrice: int = Field(default=0, validation_alias="extra_bed_price")
     area: str
     capacity: int
     beds: str
@@ -34,6 +38,8 @@ class RoomIn(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     shortName: str = Field(min_length=1, max_length=80)
     price: int = Field(ge=0, le=100_000_000)
+    priceDouble: int = Field(default=0, ge=0, le=100_000_000)
+    extraBedPrice: int = Field(default=0, ge=0, le=100_000_000)
     area: str = Field(default="", max_length=40)
     capacity: int = Field(default=2, ge=1, le=10)
     beds: str = Field(default="", max_length=120)
@@ -48,6 +54,8 @@ class RoomPatch(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     shortName: str | None = Field(default=None, min_length=1, max_length=80)
     price: int | None = Field(default=None, ge=0, le=100_000_000)
+    priceDouble: int | None = Field(default=None, ge=0, le=100_000_000)
+    extraBedPrice: int | None = Field(default=None, ge=0, le=100_000_000)
     area: str | None = Field(default=None, max_length=40)
     capacity: int | None = Field(default=None, ge=1, le=10)
     beds: str | None = Field(default=None, max_length=120)

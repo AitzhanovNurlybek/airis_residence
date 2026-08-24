@@ -51,6 +51,10 @@ export async function GET() {
       slug: room.slug,
       name: room.name,
       price: room.price,
+      // Система бронирования отеля считает от числа гостей: в Comfort Plus
+      // один гость стоит 50 000, а двое — 52 500. Ноль означает «столько же».
+      priceDouble: room.priceDouble || room.price,
+      extraBedPrice: room.extraBedPrice || 0,
       area: room.area,
       capacity: room.capacity,
       beds: room.beds,

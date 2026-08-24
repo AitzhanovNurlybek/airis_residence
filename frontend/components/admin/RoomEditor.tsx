@@ -106,7 +106,7 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
         <section>
           <h2 className="font-display text-xl text-cream">Цена и параметры</h2>
           <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Цена за ночь, ₸" hint={formatPrice(room.price)}>
+            <Field label="Цена за ночь, ₸" hint={`${formatPrice(room.price)} за одного гостя`}>
               <input
                 type="number"
                 min={0}
@@ -114,6 +114,40 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
                 className={`${inputClass} tabular-nums`}
                 value={room.price}
                 onChange={(e) => set("price", Number(e.target.value))}
+              />
+            </Field>
+            <Field
+              label="Цена за двоих, ₸"
+              hint={
+                room.priceDouble && room.priceDouble !== room.price
+                  ? formatPrice(room.priceDouble)
+                  : "Пусто или 0 — столько же, сколько за одного"
+              }
+            >
+              <input
+                type="number"
+                min={0}
+                step={500}
+                className={`${inputClass} tabular-nums`}
+                value={room.priceDouble || 0}
+                onChange={(e) => set("priceDouble", Number(e.target.value))}
+              />
+            </Field>
+            <Field
+              label="Доп. место, ₸"
+              hint={
+                room.extraBedPrice
+                  ? formatPrice(room.extraBedPrice)
+                  : "0 — дополнительного места нет"
+              }
+            >
+              <input
+                type="number"
+                min={0}
+                step={500}
+                className={`${inputClass} tabular-nums`}
+                value={room.extraBedPrice || 0}
+                onChange={(e) => set("extraBedPrice", Number(e.target.value))}
               />
             </Field>
             <Field label="Площадь" hint="Например: 18–20 м²">

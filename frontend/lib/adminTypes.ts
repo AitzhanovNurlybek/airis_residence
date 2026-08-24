@@ -3,6 +3,10 @@ export type AdminRoom = {
   name: string;
   shortName: string;
   price: number;
+  /** Цена за двоих. Ноль — столько же, сколько за одного. */
+  priceDouble: number;
+  /** Доплата за дополнительное место. Ноль — места нет. */
+  extraBedPrice: number;
   area: string;
   capacity: number;
   beds: string;

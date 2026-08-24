@@ -110,10 +110,23 @@ def render_brief(facts: dict[str, Any]) -> str:
     add("")
     add("НОМЕРА (цена за ночь, завтрак включён):")
     for room in facts.get("rooms", []):
+        single = int(room.get("price") or 0)
+        double = int(room.get("priceDouble") or single)
+        # Цену за двоих пишем, только когда она отличается. Повторять
+        # одинаковое число дважды для каждой категории — это лишние токены в
+        # каждом сообщении и лишний повод модели запутаться.
+        money = _price(single)
+        if double and double != single:
+            money = f"{_price(single)} за одного, {_price(double)} за двоих"
+
+        extra = ""
+        if room.get("extraBedPrice"):
+            extra = f" Дополнительное место — {_price(room['extraBedPrice'])}."
+
         add(
-            f"- {room.get('name')} — {_price(room.get('price'))}. "
+            f"- {room.get('name')} — {money}. "
             f"{room.get('area')}, до {room.get('capacity')} {_guests(room.get('capacity'))}, {room.get('beds')}. "
-            f"{room.get('summary')}"
+            f"{room.get('summary')}{extra}"
         )
 
     add("")
