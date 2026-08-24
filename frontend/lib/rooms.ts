@@ -44,28 +44,49 @@ function isUsable(data: unknown): data is ApiRoom[] {
  * номера нужны и подвалу, и самой странице, а запрос уходит один.
  */
 export const getRooms = cache(async (): Promise<Room[]> => {
-  if (!BACKEND_URL) return fallbackRooms;
-
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/rooms`, {
-      next: { revalidate: 3600, tags: [CONTENT_TAG] },
-    });
-    if (!res.ok) {
-      console.error("Не удалось получить номера:", res.status);
-      return fallbackRooms;
-    }
-
-    const data = await res.json();
-    if (!isUsable(data)) {
-      console.error("API вернул пустой или неожиданный список номеров");
-      return fallbackRooms;
-    }
-    return withBeRoomType(data);
-  } catch (e) {
-    console.error("Бэкенд недоступен, показываем запасной список номеров:", e);
-    return fallbackRooms;
-  }
+  return (await getRoomsWithSource()).rooms;
 });
+
+/**
+ * То же самое, но видно происхождение данных.
+ *
+ * Нужно, потому что запасной список — обоюдоострая штука. Гостю он спасает
+ * страницу: сайт не падает из-за упавшей базы. А вот там, где цена уходит
+ * человеку обещанием — в ответ ИИ-консьержа, — он опаснее пустоты. Цены в
+ * коде отстают на каждое изменение в админке, и однажды консьерж уже назвал
+ * гостю цену трёхмесячной давности, ничем не выдав подмены.
+ *
+ * Поэтому источник теперь виден вызывающему, и тот сам решает: показать
+ * страницу с запасными данными или отказаться отвечать.
+ */
+export const getRoomsWithSource = cache(
+  async (): Promise<{ rooms: Room[]; source: "backend" | "fallback" }> => {
+    if (!BACKEND_URL) {
+      console.error("BACKEND_URL не задан — показываем запасной список номеров");
+      return { rooms: fallbackRooms, source: "fallback" };
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/rooms`, {
+        next: { revalidate: 3600, tags: [CONTENT_TAG] },
+      });
+      if (!res.ok) {
+        console.error("Не удалось получить номера:", res.status);
+        return { rooms: fallbackRooms, source: "fallback" };
+      }
+
+      const data = await res.json();
+      if (!isUsable(data)) {
+        console.error("API вернул пустой или неожиданный список номеров");
+        return { rooms: fallbackRooms, source: "fallback" };
+      }
+      return { rooms: withBeRoomType(data), source: "backend" };
+    } catch (e) {
+      console.error("Бэкенд недоступен, показываем запасной список номеров:", e);
+      return { rooms: fallbackRooms, source: "fallback" };
+    }
+  },
+);
 
 /**
  * ID типов номеров в Exely хранятся в site.ts и в базу не попадают: движок

@@ -154,10 +154,13 @@ async def main() -> int:
         "без настройки не подключена — наличие подтверждает стойка",
         get_booking_system(Settings(booking_system="")) is None,
     )
-    check(
-        "exely без ключей не включается",
-        get_booking_system(Settings(booking_system="exely", exely_base_url="", exely_api_key="")) is None,
-    )
+    # Раньше здесь проверялось, что без ключей Exely не поднимается вовсе.
+    # Это устарело: наличие читается с открытого адреса виджета, и ключи для
+    # чтения не нужны. А вот запись по-прежнему закрыта — это и проверяем.
+    live = get_booking_system(Settings(booking_system="exely"))
+    check("exely поднимается без ключей — для чтения", live is not None)
+    check("но писать в exely нельзя", not hasattr(live, "create_booking"))
+    check("источник помечен как настоящий", getattr(live, "source", "") == "exely")
     check(
         "заглушка на хеше включается только явно",
         isinstance(get_booking_system(Settings(booking_system="stub")), StubBookingSystem),
@@ -203,12 +206,37 @@ async def main() -> int:
     backwards = await _tool_availability(stub, {"check_in": "2026-09-06", "check_out": "2026-09-03"})
     check("выезд раньше заезда отклонён", "позже" in backwards)
 
-    real = ExelyBookingSystem("https://example.invalid", "key")
+    # Живой запрос в Exely. Он ходит наружу, поэтому сбой сети тут не должен
+    # выглядеть как провал теста — отличаем «не дозвонились» от «ответил не то».
+    real = ExelyBookingSystem()
+    soon = dt.date.today() + dt.timedelta(days=3)
     try:
-        await real.availability(dt.date(2026, 9, 3), dt.date(2026, 9, 6))
-        check("настоящий Exely честно говорит, что не готов", False, "не бросил исключение")
+        live_avail = await real.availability(soon, soon + dt.timedelta(days=2))
     except BookingSystemUnavailable as error:
-        check("настоящий Exely честно говорит, что не готов", "интеграторов" in str(error))
+        print(f"  ⚠ Exely недоступен, проверки наличия пропущены: {error}")
+        live_avail = None
+
+    if live_avail is not None:
+        check("Exely вернул наличие", bool(live_avail.offers), "пустой ответ")
+        check("ответ помечен источником exely", live_avail.source == "exely")
+        check(
+            "категории сайта нашлись в ответе",
+            {r["slug"] for r in facts["rooms"]} <= {o.room_slug for o in live_avail.offers},
+        )
+        check(
+            "остатки — неотрицательные числа",
+            all(isinstance(o.rooms_left, int) and o.rooms_left >= 0 for o in live_avail.offers),
+        )
+        print(
+            "    остатки: "
+            + ", ".join(f"{o.room_name} {o.rooms_left}" for o in live_avail.offers)
+        )
+
+    try:
+        await real.get_booking("L-0001")
+        check("запись в Exely закрыта", False, "не бросил исключение")
+    except BookingSystemUnavailable as error:
+        check("запись в Exely закрыта", "договорной доступ" in str(error), str(error)[:80])
 
     check(
         "инструмент требует обе даты",

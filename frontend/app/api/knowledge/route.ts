@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { faqItems } from "@/lib/faq";
-import { getRooms } from "@/lib/rooms";
+import { getRoomsWithSource } from "@/lib/rooms";
 import { amenities, eventVenues, nearby, site } from "@/lib/site";
 
 /**
@@ -25,7 +25,17 @@ import { amenities, eventVenues, nearby, site } from "@/lib/site";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const rooms = await getRooms();
+  const { rooms, source } = await getRoomsWithSource();
+
+  // Запасной список цен зашит в код и отстаёт от админки. Гостю на странице
+  // он спасает вёрстку, а консьержу нельзя отдавать его вовсе: тот назовёт
+  // цену в переписке, и это будет обещание отеля. Лучше отказаться отвечать.
+  if (source !== "backend") {
+    return NextResponse.json(
+      { error: "Номера недоступны: база не ответила, а запасные цены отдавать нельзя" },
+      { status: 503, headers: { "X-Robots-Tag": "noindex, nofollow" } },
+    );
+  }
 
   const payload = {
     // Дата сборки, а не ручная версия: по ней видно, насколько свежие

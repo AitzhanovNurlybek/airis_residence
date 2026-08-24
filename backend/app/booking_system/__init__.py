@@ -65,10 +65,12 @@ def get_booking_system(
         return StubBookingSystem(room_names)
 
     if mode == "exely":
-        if not (settings.exely_base_url and settings.exely_api_key):
-            return None
+        # Ключи не нужны: наличие читается с того же открытого адреса, куда
+        # ходит виджет брони на наших страницах. Запись через него не делается
+        # — для неё понадобится договорной доступ, и тогда сюда вернутся ключи.
         return ExelyBookingSystem(
-            settings.exely_base_url, settings.exely_api_key, settings.exely_hotel_code
+            hotel_code=settings.exely_hotel_code or None or "509506",
+            room_names=room_names,
         )
 
     return None

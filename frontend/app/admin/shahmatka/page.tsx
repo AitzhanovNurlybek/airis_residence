@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { ConciergeChat } from "@/components/admin/ConciergeChat";
+import { ExelyAvailability } from "@/components/admin/ExelyAvailability";
 import { PaymentCheck } from "@/components/admin/PaymentCheck";
 import { Shahmatka } from "@/components/admin/Shahmatka";
 import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
@@ -32,9 +33,14 @@ export default async function ShahmatkaPage() {
       <h1 className="font-display text-3xl text-cream md:text-4xl">Шахматка</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
         Это учебная копия системы бронирования: та самая база, с которой разговаривает
-        ИИ-консьерж. Настоящая шахматка живёт в Exely, доступа к ней пока нет. Поставьте бронь
-        здесь — и консьерж внизу страницы сразу начнёт говорить, что номер занят.
+        ИИ-консьерж. Настоящие остатки Exely показаны отдельным блоком ниже — их видно, но
+        записать туда бронь пока нельзя. Поставьте бронь в учебной шахматке — и консьерж
+        внизу страницы сразу начнёт говорить, что номер занят.
       </p>
+
+      <div className="mt-6">
+        <ExelyAvailability />
+      </div>
 
       <div className="mt-6 rounded-2xl border border-white/10 bg-ink-900/50 p-6">
         <h2 className="font-display text-xl text-cream">Как проверить за минуту</h2>

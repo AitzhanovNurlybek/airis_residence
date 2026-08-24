@@ -23,7 +23,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import require_admin
-from .booking_system import get_booking_system
+from .booking_system import BookingSystemUnavailable, ExelyBookingSystem, get_booking_system
 from .concierge import answer
 from .config import Settings, get_settings
 from .db import LocalBooking, LocalPayment, LocalStock, Room, get_session
@@ -330,4 +330,38 @@ async def payment(
             "redFlags": doc.red_flags,
             "looksEdited": doc.looks_edited,
         },
+    }
+
+
+@router.get("/exely")
+async def exely_availability(
+    check_in: date,
+    check_out: date,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Настоящее наличие из Exely — то же, что видит гость в форме брони.
+
+    Отдельно от учебной шахматки нарочно: рядом на странице их видно вместе, и
+    сразу понятно, где выдуманные числа, а где настоящие. Запись сюда не
+    ходит — Exely мы только читаем.
+    """
+    exely = ExelyBookingSystem(room_names=await _room_names(session))
+    try:
+        result = await exely.availability(check_in, check_out)
+    except BookingSystemUnavailable as error:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from error
+
+    return {
+        "checkIn": result.check_in.isoformat(),
+        "checkOut": result.check_out.isoformat(),
+        "nights": result.nights,
+        "offers": [
+            {
+                "roomSlug": o.room_slug,
+                "roomName": o.room_name,
+                "roomsLeft": o.rooms_left,
+            }
+            for o in result.offers
+        ],
     }
