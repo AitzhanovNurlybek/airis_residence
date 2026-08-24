@@ -576,7 +576,14 @@ export function CompanyEditor({
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/admin/kompanii/${company.slug}/schet/${booking.id}`}
+                      target="_blank"
+                      className="rounded-full border border-sand-400/40 px-3 py-1.5 text-xs text-sand-300 transition-colors hover:border-sand-400 hover:text-sand-200"
+                    >
+                      Счёт на печать ↗
+                    </Link>
                     {CORP_STATUSES.filter((s) => s.value !== booking.status).map((s) => (
                       <button
                         key={s.value}
