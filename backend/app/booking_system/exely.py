@@ -249,9 +249,34 @@ def _rate(plan: dict[str, Any], room_type: dict[str, Any]) -> RatePlan | None:
     discount = first.get("discount") or {}
     was = discount.get("basic_after_tax")
     return RatePlan(
+        cancellation=_cancellation(plan),
         code=code,
         name=name,
         price=int(round(float(price))),
         breakfast=breakfast,
         was=int(round(float(was))) if was and float(was) != float(price) else None,
     )
+
+
+def _cancellation(plan: dict[str, Any]) -> str:
+    """
+    Условия отмены словами отеля.
+
+    Берём их у Exely, а не пишем сами. Условия у каждого тарифа свои, отель
+    меняет их в своём кабинете, и наша копия отстанет молча. А сказанное
+    гостю про отмену — это то, на что он будет ссылаться при споре.
+
+    Из группы берём формулировку со сроком, если она есть: «при отмене после
+    такого-то числа» гостю полезнее, чем общее «бесплатная отмена невозможна».
+    """
+    group = plan.get("cancel_penalty_group") or {}
+    penalties = [
+        str(p.get("description") or "").strip()
+        for p in (group.get("cancel_penalties") or [])
+    ]
+    dated = next((p for p in penalties if p and "после" in p.casefold()), "")
+    if dated:
+        return dated
+    if penalties and penalties[0]:
+        return penalties[0]
+    return str(group.get("description") or "").strip()

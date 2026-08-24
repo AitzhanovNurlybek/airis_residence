@@ -67,6 +67,10 @@ async def seed_rooms_if_empty() -> None:
                     name=item["name"],
                     short_name=item["short_name"],
                     price=item["price"],
+                    # Необязательные: есть только у категорий, где цена
+                    # зависит от числа гостей.
+                    price_double=item.get("price_double", 0),
+                    extra_bed_price=item.get("extra_bed_price", 0),
                     area=item["area"],
                     capacity=item["capacity"],
                     beds=item["beds"],

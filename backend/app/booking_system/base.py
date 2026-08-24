@@ -44,6 +44,9 @@ class RatePlan:
     breakfast: bool | None = None
     #: Цена без скидки, если тариф акционный.
     was: int | None = None
+    #: Условия отмены словами отеля, как их показывает форма брони.
+    #: Пусто — тариф их не сообщил, и придумывать нельзя.
+    cancellation: str = ""
 
 
 @dataclass(frozen=True)
