@@ -432,3 +432,57 @@ async def price_check(
         "rooms": rows,
         "mismatched": sum(1 for r in rows if r["difference"]),
     }
+
+@router.post("/prices/sync")
+async def sync_prices(
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Подтянуть цены сайта из Exely одним нажатием.
+
+    Раньше цену меняли в двух не связанных местах, и она расходилась молча.
+    Здесь — механический перенос: то же число, что показывает панель
+    сравнения, записывается в цену номера на сайте.
+
+    Не автоматический процесс по расписанию, а кнопка. Тарифы Exely сейчас
+    перенастраивают, и постоянный автосинк затащил бы на сайт сегодняшний
+    беспорядок из чужого кабинета. Пока это осознанное действие: нажимают,
+    когда сами видят, что цены в Exely устоялись.
+
+    Категории, для которых система не назвала надёжную цену на выбранную
+    дату, не трогаем — лучше оставить прежнее число, чем затереть его пустым
+    результатом одного запроса.
+    """
+    rooms = {room.slug: room for room in (await session.execute(select(Room))).scalars().all()}
+    exely = ExelyBookingSystem(room_names=await _room_names(session))
+
+    check_in = hotel_today() + timedelta(days=7)
+    try:
+        live = await exely.availability(check_in, check_in + timedelta(days=1))
+    except BookingSystemUnavailable as error:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Exely не ответил: {error}") from error
+
+    offers = {o.room_slug: o for o in live.offers}
+    changed = []
+    for slug, room in rooms.items():
+        if not room.is_published:
+            continue
+        offer = offers.get(slug)
+        selling = offer.price_per_night if offer and offer.price_per_night else None
+        if not selling or selling == room.price:
+            continue
+        changed.append(
+            {
+                "roomSlug": slug,
+                "roomName": room.short_name or room.name,
+                "before": room.price,
+                "after": selling,
+            }
+        )
+        room.price = selling
+
+    if changed:
+        await session.commit()
+
+    return {"checkedOn": check_in.isoformat(), "changed": changed}

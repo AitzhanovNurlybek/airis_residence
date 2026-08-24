@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { adminGet } from "@/lib/adminClient";
+import { AdminButton } from "@/components/admin/ui";
+import { adminGet, adminSend } from "@/lib/adminClient";
 
 /**
  * Цена на сайте против цены, по которой номер продаётся.
@@ -30,16 +31,21 @@ type Check = { checkedOn: string; reachable: boolean; rooms: Row[]; mismatched: 
 
 const money = new Intl.NumberFormat("ru-RU");
 
+type Synced = { roomName: string; before: number; after: number };
+
 export function PriceCheck() {
   const [data, setData] = useState<Check | null>(null);
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [syncError, setSyncError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [synced, setSynced] = useState<Synced[] | null>(null);
 
   const load = useCallback(async () => {
     try {
       setData(await adminGet<Check>("/local/prices"));
-      setError("");
+      setLoadError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось свериться");
+      setLoadError(e instanceof Error ? e.message : "Не удалось свериться");
     }
   }, []);
 
@@ -47,7 +53,26 @@ export function PriceCheck() {
     void load();
   }, [load]);
 
-  if (error) return null;
+  async function sync() {
+    setBusy(true);
+    setSyncError("");
+    setSynced(null);
+    try {
+      const result = await adminSend<{ checkedOn: string; changed: Synced[] }>(
+        "/local/prices/sync",
+        "POST",
+        {},
+      );
+      setSynced(result.changed);
+      await load();
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Не удалось подтянуть цены");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loadError) return null;
   if (!data) return null;
 
   if (!data.reachable) {
@@ -64,19 +89,37 @@ export function PriceCheck() {
     return (
       <div className="mb-6 rounded-2xl border border-emerald-400/30 bg-emerald-500/8 px-5 py-3.5 text-sm text-emerald-100/90">
         Цены на сайте совпадают с тем, по чему номера продаются в системе бронирования.
+        {synced && synced.length > 0 && (
+          <span className="ml-2 text-emerald-100/70">
+            Только что подтянул: {synced.map((s) => s.roomName).join(", ")}.
+          </span>
+        )}
       </div>
     );
   }
 
   return (
     <div className="mb-6 rounded-2xl border border-sand-400/40 bg-sand-400/8 p-5">
-      <p className="font-display text-lg text-sand-100">
-        Цены на сайте расходятся с системой бронирования
-      </p>
-      <p className="mt-1.5 text-sm leading-relaxed text-sand-100/80">
-        Гость видит на странице одно число, а в форме брони — другое. Проверено на{" "}
-        {data.checkedOn}.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="font-display text-lg text-sand-100">
+            Цены на сайте расходятся с системой бронирования
+          </p>
+          <p className="mt-1.5 text-sm leading-relaxed text-sand-100/80">
+            Гость видит на странице одно число, а в форме брони — другое. Проверено на{" "}
+            {data.checkedOn}.
+          </p>
+        </div>
+        <AdminButton type="button" variant="secondary" disabled={busy} onClick={() => void sync()}>
+          {busy ? "Подтягиваю…" : "Подтянуть цены из Exely"}
+        </AdminButton>
+      </div>
+
+      {syncError && (
+        <p role="alert" className="mt-3 rounded-xl bg-wine-600/15 px-4 py-2.5 text-sm text-wine-200">
+          {syncError}
+        </p>
+      )}
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">
@@ -113,7 +156,10 @@ export function PriceCheck() {
       <p className="mt-4 text-xs leading-relaxed text-sand-100/65">
         Цену меняют в двух местах, и они не связаны: здесь — то, что видно на страницах
         сайта, в Exely — то, по чему гость реально бронирует. Настоящая цена в Exely; здешнюю
-        стоит подтянуть к ней, иначе часть гостей уходит, не открыв форму.
+        стоит подтянуть к ней, иначе часть гостей уходит, не открыв форму. Кнопка выше
+        переносит число один в один — нажимайте, когда сами видите, что тарифы в Exely
+        устоялись, а не сразу: пока их там перенастраивают, подтянется сегодняшний
+        беспорядок.
       </p>
     </div>
   );
