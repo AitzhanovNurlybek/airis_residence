@@ -28,16 +28,30 @@ from ..db import LocalBooking, LocalPayment, LocalStock, utcnow
 from .base import Availability, ExternalBooking, ExternalInvoice, RoomOffer
 from ..almaty import today as hotel_today
 
-#: Разбивка 34 номеров отеля по категориям для локальной шахматки.
+#: Разбивка номерного фонда по категориям — для учебной шахматки.
 #:
-#: Цифры подобраны так, чтобы в сумме дать число с сайта. Настоящую разбивку
-#: знает только Exely; когда она придёт, эта таблица уйдёт.
+#: Числа сняты с настоящей шахматки Exely 2026-08-24, по номерам комнат:
+#:   Standart Single — 106, 207
+#:   Standart        — 102, 203, 205, 206, 208–212, 303, 305–312
+#:   Standart Twin   — 103, 202, 302
+#:   Comfort         — 201, 204, 213, 301 (список был обрезан экраном)
+#: Всего в отеле 34 номера; на Comfort+, Apart и возможный остаток Comfort
+#: приходится семь, разложены оценочно.
+#:
+#: До этого здесь стояли выдуманные цифры, и ошибались они заметно: у Standart
+#: было 12 вместо 18, у Single — 6 вместо 2. Учебная шахматка врала не только
+#: занятостью, но и самим размером отеля.
+#:
+#: Настоящий источник — Exely. Эта таблица уходит целиком, когда подключим её
+#: API: там номерной фонд отдаётся вместе с наличием.
 DEFAULT_STOCK: dict[str, int] = {
-    "standart-single": 6,
-    "standart": 12,
-    "standart-twin": 8,
-    "comfort": 5,
-    "comfort-plus": 3,
+    "standart-single": 2,
+    "standart": 18,
+    "standart-twin": 3,
+    "comfort": 4,
+    # Ниже — оценка: этих строк на снимке шахматки не было видно.
+    "comfort-plus": 4,
+    "apart": 3,
 }
 
 
@@ -88,7 +102,10 @@ class LocalBookingSystem:
         rows = (await session.execute(select(LocalStock))).scalars().all()
         known = {row.room_slug: row.rooms_total for row in rows}
 
-        wanted = set(self._names) or set(DEFAULT_STOCK)
+        # Что считаем категориями отеля: номера сайта плюс всё, что уже
+        # заведено в фонде песочницы. Второе нужно ради Apart — Exely его
+        # продаёт, страницы на сайте нет, а проверять поведение на нём надо.
+        wanted = (set(self._names) | set(known)) or set(DEFAULT_STOCK)
         missing = wanted - set(known)
         for slug in sorted(missing):
             session.add(LocalStock(room_slug=slug, rooms_total=DEFAULT_STOCK.get(slug, 1)))

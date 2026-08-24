@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import require_admin
 from .booking_system import BookingSystemUnavailable, ExelyBookingSystem, get_booking_system
+from .booking_system.exely import NAMES as EXELY_NAMES
 from .concierge import answer
 from .config import Settings, get_settings
 from .db import LocalBooking, LocalPayment, LocalStock, Room, get_session
@@ -39,8 +40,19 @@ router = APIRouter(
 
 
 async def _room_names(session: AsyncSession) -> dict[str, str]:
+    """
+    Названия категорий для показа.
+
+    Основа — номера сайта. Но отель продаёт в Exely и то, чего на сайте нет
+    (Apart), и такая категория показывалась голым кодом. Подставляем название
+    из Exely: код в интерфейсе выглядит поломкой, а это не поломка, а
+    незаведённая на сайте категория.
+    """
     rows = (await session.execute(select(Room))).scalars().all()
-    return {room.slug: (room.short_name or room.name) for room in rows}
+    names = {room.slug: (room.short_name or room.name) for room in rows}
+    for slug, title in EXELY_NAMES.items():
+        names.setdefault(slug, title)
+    return names
 
 
 async def _system(settings: Settings, session: AsyncSession):

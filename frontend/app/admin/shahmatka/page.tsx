@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import { ConciergeChat } from "@/components/admin/ConciergeChat";
@@ -8,18 +9,66 @@ import { Shahmatka } from "@/components/admin/Shahmatka";
 import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
 
 export const metadata: Metadata = {
-  title: "Шахматка",
+  title: "Консьерж",
   robots: { index: false, follow: false },
 };
 
 /**
- * Шахматка и переписка на одной странице.
+ * Страница про ИИ-консьержа: что он знает и что умеет.
  *
- * Вместе, а не по отдельности, потому что смысл именно в паре: ставите бронь
- * сверху, тут же спрашиваете консьержа снизу и видите, узнал он о ней или нет.
- * Через две вкладки это проверять неудобно.
+ * Раньше называлась «Шахматка», и это сбивало с толку. Настоящая шахматка
+ * живёт в Exely, а здесь про другое — правильно ли ведёт себя консьерж.
+ * Учебная шахматка тут лишь одна часть из четырёх, и она вообще не про работу
+ * отеля.
+ *
+ * Части намеренно разного вида: настоящие данные в сплошной рамке, песочница —
+ * в пунктирной и с пометкой. Смотреть их приходится рядом, и путать «свободно
+ * на самом деле» с «свободно понарошку» нельзя.
  */
-export default async function ShahmatkaPage() {
+
+function Step({
+  number,
+  title,
+  subtitle,
+  sandbox = false,
+  children,
+}: {
+  number: number;
+  title: string;
+  subtitle: string;
+  sandbox?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mt-12">
+      <div className="flex items-start gap-4">
+        <span
+          className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ${
+            sandbox
+              ? "border border-dashed border-sand-400/50 text-sand-300"
+              : "bg-sand-400/15 text-sand-200"
+          }`}
+        >
+          {number}
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-2xl text-cream md:text-3xl">
+            {title}
+            {sandbox && (
+              <span className="ml-3 align-middle text-xs tracking-wide text-sand-300 uppercase">
+                понарошку
+              </span>
+            )}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{subtitle}</p>
+        </div>
+      </div>
+      <div className="mt-6 md:pl-12">{children}</div>
+    </section>
+  );
+}
+
+export default async function ConciergePage() {
   const [signedIn, board] = await Promise.all([
     isAdminSignedIn(),
     adminFetch("/api/admin/local/board")
@@ -30,61 +79,47 @@ export default async function ShahmatkaPage() {
 
   return (
     <div>
-      <h1 className="font-display text-3xl text-cream md:text-4xl">Шахматка</h1>
+      <h1 className="font-display text-3xl text-cream md:text-4xl">Консьерж</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        Это учебная копия системы бронирования: та самая база, с которой разговаривает
-        ИИ-консьерж. Настоящие остатки Exely показаны отдельным блоком ниже — их видно, но
-        записать туда бронь пока нельзя. Поставьте бронь в учебной шахматке — и консьерж
-        внизу страницы сразу начнёт говорить, что номер занят.
+        Здесь проверяют, правильно ли отвечает автоматический помощник, который будет
+        переписываться с гостями в WhatsApp и Instagram. Заселением и настоящими бронями эта
+        страница не управляет — для этого есть Exely.
       </p>
 
-      <div className="mt-6">
+      <Step
+        number={1}
+        title="Что свободно на самом деле"
+        subtitle="Настоящие остатки из Exely — те же, что видит гость в форме брони на сайте. Отсюда консьерж и узнаёт, есть ли места. Изменить их здесь нельзя, только посмотреть."
+      >
         <ExelyAvailability />
-      </div>
+      </Step>
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-ink-900/50 p-6">
-        <h2 className="font-display text-xl text-cream">Как проверить за минуту</h2>
-        <ol className="mt-4 grid gap-2.5 text-sm text-muted">
-          <li>
-            <span className="text-sand-300">1.</span> В календаре найдите день и категорию —
-            там написано, сколько номеров свободно.
-          </li>
-          <li>
-            <span className="text-sand-300">2.</span> Ниже в форме поставьте бронь на этот день.
-            Клетка в календаре уменьшится на единицу.
-          </li>
-          <li>
-            <span className="text-sand-300">3.</span> Спуститесь к переписке и спросите:
-            «Есть свободные номера на такие-то даты?» Консьерж ответит по этой же базе.
-          </li>
-          <li>
-            <span className="text-sand-300">4.</span> Займите категорию целиком — и он скажет,
-            что свободных нет, и предложит другую.
-          </li>
-        </ol>
-      </div>
-
-      <div className="mt-8">
-        <Shahmatka initial={board} />
-      </div>
-
-      <h2 className="mt-14 font-display text-3xl text-cream">Проверка чека</h2>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        Загрузите платёжку — систему прочитает документ, сверит получателя с реквизитами отеля,
-        поищет следы правки и сведёт с бронью. Номер брони в назначении платежа обязателен:
-        без него сопоставить не с чем.
-      </p>
-      <div className="mt-6">
-        <PaymentCheck />
-      </div>
-
-      <h2 className="mt-14 font-display text-3xl text-cream">Переписка с консьержем</h2>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        То же самое, что придёт гостю в WhatsApp. Ответы настоящие, брони — тестовые.
-      </p>
-      <div className="mt-6">
+      <Step
+        number={2}
+        title="Переписка с консьержем"
+        subtitle="Напишите как гость и посмотрите, что он ответит. Это то же сообщение, которое уйдёт в WhatsApp. Под каждым ответом видно, смотрел ли он в систему бронирования или отвечал по справке об отеле."
+      >
         <ConciergeChat />
-      </div>
+      </Step>
+
+      <Step
+        number={3}
+        title="Проверка присланного чека"
+        subtitle="Гость присылает платёжку — система читает документ, сверяет получателя с реквизитами отеля, ищет следы правки и сводит с бронью. Чек — это заявление об оплате, а не сама оплата: деньги всё равно нужно увидеть в выписке."
+      >
+        <PaymentCheck />
+      </Step>
+
+      <Step
+        number={4}
+        sandbox
+        title="Песочница"
+        subtitle="Учебная копия шахматки в нашей базе. Нужна, чтобы проверить, как консьерж оформляет, переносит и отменяет брони: в настоящую Exely мы пока писать не можем, а проверить запись надо. Всё, что здесь стоит, — выдумка, на заселение это не влияет никак."
+      >
+        <div className="rounded-2xl border border-dashed border-sand-400/25 p-5">
+          <Shahmatka initial={board} />
+        </div>
+      </Step>
     </div>
   );
 }

@@ -328,7 +328,7 @@ async def qa_hybrid() -> None:
 
     made = await hybrid.create_booking(
         room_slug=available, rooms_count=1, check_in=check_in, check_out=check_out,
-        guest_name="QA Гость", guest_phone="+7 700 000 99 99", amount=90000)
+        guest_name=QA_LEAD, guest_phone="+7 700 000 99 99", amount=90000)
     check("заявка создана", made.external_id.startswith("Z-"), made.external_id)
     check("заявка действует", made.status == "booked")
 
@@ -360,6 +360,14 @@ async def qa_hybrid() -> None:
     check("несуществующая заявка не выдумывается", missing is None)
     check("чужой формат номера не ломает", await hybrid.get_booking("мусор") is None)
 
+    from sqlalchemy import delete as sql_delete
+
+    from app.db import Lead
+
+    async with SessionLocal() as session:
+        await session.execute(sql_delete(Lead).where(Lead.name == QA_LEAD))
+        await session.commit()
+
 
 # ──────────────────── права доступа в инструментах ────────────────────
 
@@ -372,7 +380,7 @@ async def qa_access() -> None:
     mine = await system.create_booking(
         room_slug="comfort", rooms_count=1, check_in=check_in,
         check_out=check_in + timedelta(days=1),
-        guest_name="Владелец брони", guest_phone="+7 701 555 44 33")
+        guest_name=QA_GUEST, guest_phone="+7 701 555 44 33")
 
     owner = {"phone": "+7 701 555 44 33"}
     stranger = {"phone": "+7 702 000 00 00"}
@@ -401,7 +409,28 @@ async def qa_access() -> None:
         system, {"check_in": "2026-09-10", "check_out": "2026-09-08"})
     check("выезд раньше заезда отвергается", "позже" in reversed_dates)
 
-    await system.cancel_booking(mine.external_id, "уборка после QA")
+    # Отмена оставляет строку в списке, и после десятка прогонов песочница
+    # состоит из «Владелец брони». Прогон должен убирать за собой полностью.
+    await _wipe(QA_GUEST)
+
+
+#: Имя, под которым прогон заводит свои брони. По нему же их и убирает:
+#: телефон в базе лежит как ввели, с пробелами, и поиск по цифрам мимо.
+QA_GUEST = "Владелец брони (QA)"
+#: То же для заявок гибридного режима.
+QA_LEAD = "Гость прогона (QA)"
+
+
+async def _wipe(guest_name: str) -> None:
+    from sqlalchemy import delete as sql_delete
+
+    from app.db import LocalBooking
+
+    async with SessionLocal() as session:
+        await session.execute(
+            sql_delete(LocalBooking).where(LocalBooking.guest_name == guest_name)
+        )
+        await session.commit()
 
 
 # ─────────────────────── справка и цены на сайте ───────────────────────

@@ -138,6 +138,20 @@ export function Shahmatka({ initial }: { initial: Board | null }) {
     }
   }
 
+  async function setStock(roomSlug: string, roomsTotal: number) {
+    if (!Number.isFinite(roomsTotal) || roomsTotal < 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      await adminSend("/local/stock", "PATCH", { roomSlug, roomsTotal });
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось изменить число номеров");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function act(ref: string, what: "cancel" | "delete") {
     setBusy(true);
     setError("");
@@ -208,7 +222,24 @@ export function Shahmatka({ initial }: { initial: Board | null }) {
               <tr key={row.roomSlug} className="border-t border-white/6">
                 <td className="sticky left-0 bg-ink-900 px-4 py-3 whitespace-nowrap text-cream">
                   {row.roomName}
-                  <span className="ml-2 text-xs text-muted">всего {row.roomsTotal}</span>
+                  {/* Числа взяты с настоящей шахматки, но две категории на
+                      снимке было не видно — там оценка. Пусть владелец
+                      поправит на месте, а не просит об этом разработчика. */}
+                  <label className="ml-3 inline-flex items-center gap-1.5 text-xs text-muted">
+                    всего
+                    <input
+                      type="number"
+                      min={0}
+                      max={200}
+                      defaultValue={row.roomsTotal}
+                      disabled={busy}
+                      onBlur={(e) => {
+                        const next = Number(e.target.value);
+                        if (next !== row.roomsTotal) void setStock(row.roomSlug, next);
+                      }}
+                      className="h-7 w-14 rounded-lg border border-white/12 bg-ink-950/60 px-2 text-center text-cream tabular-nums"
+                    />
+                  </label>
                 </td>
                 {days.map((day) => {
                   const taken = grid.get(`${row.roomSlug}|${day}`) ?? 0;
@@ -236,7 +267,9 @@ export function Shahmatka({ initial }: { initial: Board | null }) {
         </table>
       </div>
       <p className="mt-2 text-xs text-muted">
-        В клетках — сколько номеров свободно этой ночью. Красное — свободных нет.
+        В клетках — сколько номеров свободно этой ночью. Красное — свободных нет. Число
+        «всего» можно поправить прямо здесь: оно снято с настоящей шахматки, но по двум
+        категориям это оценка.
       </p>
 
       {/* ─────────────── Поставить бронь ─────────────── */}
