@@ -172,6 +172,87 @@ def qa_exely_parsing() -> None:
     check("коды категорий не потерялись", len(ROOM_TYPES) == 6, str(len(ROOM_TYPES)))
     check("Apart известен", "apart" in ROOM_TYPES.values())
 
+    # Тарифы: по ним консьерж называет цену, поэтому разбор проверяем отдельно.
+    from app.booking_system.exely import RATE_PLANS
+
+    priced = exely._offers(
+        {
+            "room_stays": [
+                {
+                    "rate_plans": [{"code": "10139493"}],
+                    "room_types": [
+                        {
+                            "code": "5050496",
+                            "room_type_quota_rph": "7",
+                            "placements": [
+                                {"price_after_tax": 41000.0,
+                                 "discount": {"basic_after_tax": 45000.0}}
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "rate_plans": [{"code": "10123672"}],
+                    "room_types": [
+                        {
+                            "code": "5050496",
+                            "room_type_quota_rph": "7",
+                            "placements": [{"price_after_tax": 40500.0}],
+                        }
+                    ],
+                },
+            ],
+            "room_type_quotas": [{"rph": "7", "quantity": 3}],
+        }
+    )
+    comfort_priced = next(o for o in priced if o.room_slug == "comfort")
+    check("тарифы разобраны", len(comfort_priced.rates) == 2, str(len(comfort_priced.rates)))
+    check("цена — самая низкая из тарифов", comfort_priced.price_per_night == 40500,
+          str(comfort_priced.price_per_night))
+    check("тарифы отсортированы по цене",
+          [r.price for r in comfort_priced.rates] == [40500, 41000])
+    no_breakfast = next(r for r in comfort_priced.rates if r.price == 41000)
+    check("«без завтрака» распознан", no_breakfast.breakfast is False)
+    check("старая цена сохранена", no_breakfast.was == 45000, str(no_breakfast.was))
+    weekend = next(r for r in comfort_priced.rates if r.price == 40500)
+    check("«выходные» — с завтраком", weekend.breakfast is True)
+    check("без скидки старой цены нет", weekend.was is None)
+
+    unnamed = exely._offers(
+        {
+            "room_stays": [
+                {
+                    "rate_plans": [{"code": "999", "name": "Новый тариф без завтрака"}],
+                    "room_types": [
+                        {"code": "5050493", "room_type_quota_rph": "1",
+                         "placements": [{"price_after_tax": 39000.0}]},
+                    ],
+                }
+            ],
+            "room_type_quotas": [{"rph": "1", "quantity": 2}],
+        }
+    )
+    fresh = next(o for o in unnamed if o.room_slug == "standart").rates[0]
+    check("незнакомый тариф разобран по названию", fresh.breakfast is False, str(fresh.breakfast))
+
+    mystery = exely._offers(
+        {
+            "room_stays": [
+                {
+                    "rate_plans": [{"code": "888", "name": "Спецпредложение"}],
+                    "room_types": [
+                        {"code": "5050493", "room_type_quota_rph": "1",
+                         "placements": [{"price_after_tax": 39000.0}]},
+                    ],
+                }
+            ],
+            "room_type_quotas": [{"rph": "1", "quantity": 2}],
+        }
+    )
+    vague = next(o for o in mystery if o.room_slug == "standart").rates[0]
+    check("про завтрак непонятно — не выдумываем", vague.breakfast is None, str(vague.breakfast))
+    check("известные тарифы отеля описаны", len(RATE_PLANS) == 3, str(len(RATE_PLANS)))
+
 
 # ───────────────────── режимы системы бронирования ─────────────────────
 

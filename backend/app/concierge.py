@@ -80,6 +80,8 @@ LIVE_AVAILABILITY_RULES = """
 У тебя есть инструмент check_availability. Он показывает, сколько номеров каждой категории свободно на весь период.
 - Вызывай его, когда гость назвал обе даты. Не угадывай даты за гостя.
 - Свободных ноль — так и скажи, и предложи соседние даты или другую категорию.
+- Инструмент возвращает тарифы с ценами. Если они пришли — называй цену оттуда, а не из справки: в справке прайс, а продаётся номер по тарифу, и он обычно дешевле. Скажи и то, входит ли в этот тариф завтрак.
+- Тарифов на один номер бывает несколько. Назови самый дешёвый и, если разница касается завтрака, объясни её одной фразой. Перечислять все подряд не нужно.
 - Инструмент показывает наличие, но не держит номер. Пока бронь не оформлена, номер могут занять — скажи об этом, если гость собирается приехать не сегодня.
 
 БРОНИРОВАНИЕ
@@ -268,12 +270,28 @@ async def _tool_availability(booking: BookingSystem, args: dict[str, Any]) -> st
     if result.source == "stub":
         prefix = "ТЕСТОВЫЕ ДАННЫЕ (локальная шахматка, не настоящее наличие).\n"
 
-    rows = "\n".join(
-        f"- {offer.room_name or offer.room_slug} (код {offer.room_slug}): "
-        + ("свободных нет" if not offer.rooms_left else f"свободно {offer.rooms_left}")
-        for offer in result.offers
+    lines = []
+    for offer in result.offers:
+        head = f"- {offer.room_name or offer.room_slug} (код {offer.room_slug}): "
+        if not offer.rooms_left:
+            lines.append(head + "свободных нет")
+            continue
+        lines.append(head + f"свободно {offer.rooms_left}")
+        # Тарифы, если система их отдаёт. Цена на сайте — прайс, а продаётся
+        # номер по тарифу, и он бывает заметно дешевле. Гость, услышавший от
+        # консьержа прайс, открывает форму и видит другое число.
+        for rate in offer.rates:
+            about = (
+                " с завтраком" if rate.breakfast
+                else (" без завтрака" if rate.breakfast is False else "")
+            )
+            was = f", обычно {rate.was}" if rate.was else ""
+            lines.append(f"    · {rate.name}: {rate.price} тенге за ночь{about}{was}")
+
+    return (
+        f"{prefix}{check_in} — {check_out}, ночей {result.nights}:\n"
+        + "\n".join(lines)
     )
-    return f"{prefix}{check_in} — {check_out}, ночей {result.nights}:\n{rows}"
 
 
 async def _tool_create(
@@ -299,8 +317,12 @@ async def _tool_create(
     rooms_count = max(1, int(args.get("rooms_count") or 1))
     nights = (check_out - check_in).days
 
-    # Сумму считает сервер по прайсу из справки. Если бы её передавала модель,
-    # в базу однажды попала бы цифра из разговора, а не из прайса.
+    # Сумму считает сервер, а не модель: иначе в базу однажды попадёт цифра из
+    # разговора. Считаем по продажному тарифу, если система его отдала, —
+    # прайс из справки выше того, по чему гость реально бронирует.
+    sold_at = await _live_price(booking, slug, check_in, check_out)
+    if sold_at:
+        price = sold_at
     amount = price * rooms_count * max(nights, 0)
 
     try:
@@ -322,6 +344,18 @@ async def _tool_create(
         f"Бронь оформлена. {_describe(created, room=room_name)}. "
         f"Ночей {nights}, гостей в номере {guests}, цена за ночь {price} тенге."
     )
+
+
+async def _live_price(
+    booking: BookingSystem, slug: str, check_in: date, check_out: date
+) -> int | None:
+    """Самая низкая продажная цена на категорию. None — система молчит."""
+    try:
+        result = await booking.availability(check_in, check_out)
+    except Exception:  # noqa: BLE001 — цена из справки остаётся запасным вариантом
+        return None
+    offer = next((o for o in result.offers if o.room_slug == slug), None)
+    return offer.price_per_night if offer and offer.price_per_night else None
 
 
 async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:

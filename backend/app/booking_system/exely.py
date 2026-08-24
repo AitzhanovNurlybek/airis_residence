@@ -39,7 +39,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from .base import Availability, BookingSystemUnavailable, RoomOffer
+from .base import Availability, BookingSystemUnavailable, RatePlan, RoomOffer
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,15 @@ ROOM_TYPES: dict[str, str] = {
     "5050496": "comfort",
     "5050495": "comfort-plus",
     "5070642": "apart",
+}
+
+#: Тарифы отеля. Название говорит о завтраке прямо, но полагаться на текст
+#: одного поля нельзя: переименуют — и мы начнём обещать завтрак там, где его
+#: нет. Поэтому знание закреплено кодом, а разбор названия остаётся запасным.
+RATE_PLANS: dict[str, tuple[str, bool]] = {
+    "10123672": ("Выгодные выходные", True),
+    "10139493": ("Тариф без завтрака", False),
+    "10145264": ("Best Deal: с завтраком", True),
 }
 
 NAMES: dict[str, str] = {
@@ -156,8 +165,10 @@ class ExelyBookingSystem:
         }
 
         left: dict[str, int] = {}
+        rates: dict[str, dict[str, RatePlan]] = {}
 
         for stay in data.get("room_stays") or []:
+            plans = stay.get("rate_plans") or []
             for room_type in stay.get("room_types") or []:
                 code = str(room_type.get("code") or "")
                 slug = ROOM_TYPES.get(code)
@@ -177,21 +188,33 @@ class ExelyBookingSystem:
                     count = max(left.get(slug, 0), 1)
                 left[slug] = max(left.get(slug, 0), int(count))
 
+                for plan in plans:
+                    parsed = _rate(plan, room_type)
+                    if parsed is not None:
+                        rates.setdefault(slug, {})[parsed.code] = parsed
+
         # Категории, которых в ответе не оказалось вовсе, свободными не
         # считаются: Exely присылает только то, что продаётся на эти даты.
         for slug in ROOM_TYPES.values():
             left.setdefault(slug, 0)
 
-        return [
-            RoomOffer(
-                room_slug=slug,
-                room_name=self.display(slug),
-                rooms_left=count,
-                price_per_night=None,
-                source="exely",
+        offers = []
+        for slug, count in sorted(left.items()):
+            plans = tuple(sorted(rates.get(slug, {}).values(), key=lambda r: r.price))
+            offers.append(
+                RoomOffer(
+                    room_slug=slug,
+                    room_name=self.display(slug),
+                    rooms_left=count,
+                    # Цена — самая низкая из доступных сегодня. Именно её гость
+                    # увидит в форме брони, и именно её должен называть
+                    # консьерж: прайс на сайте выше продажной цены.
+                    price_per_night=plans[0].price if plans else None,
+                    source="exely",
+                    rates=plans,
+                )
             )
-            for slug, count in sorted(left.items())
-        ]
+        return offers
 
     # ─── Запись: сознательно не реализована ───
 
@@ -200,3 +223,35 @@ class ExelyBookingSystem:
 
     async def invoices(self, *, company_bin: str = "", external_id: str = ""):
         raise BookingSystemUnavailable(WRITE_NOT_READY)
+
+
+def _rate(plan: dict[str, Any], room_type: dict[str, Any]) -> RatePlan | None:
+    """Тариф с ценой для конкретной категории."""
+    code = str(plan.get("code") or "")
+    known = RATE_PLANS.get(code)
+    if known:
+        name, breakfast = known
+    else:
+        name = str(plan.get("name") or f"тариф {code}").strip()
+        low = name.casefold()
+        # Запасной разбор для тарифов, которых мы ещё не видели. «Не знаю»
+        # честнее выдумки: пусть консьерж промолчит про завтрак, чем пообещает.
+        breakfast = False if "без завтрак" in low else (True if "завтрак" in low else None)
+
+    placements = room_type.get("placements") or []
+    if not placements:
+        return None
+    first = placements[0]
+    price = first.get("price_after_tax")
+    if price is None:
+        return None
+
+    discount = first.get("discount") or {}
+    was = discount.get("basic_after_tax")
+    return RatePlan(
+        code=code,
+        name=name,
+        price=int(round(float(price))),
+        breakfast=breakfast,
+        was=int(round(float(was))) if was and float(was) != float(price) else None,
+    )
