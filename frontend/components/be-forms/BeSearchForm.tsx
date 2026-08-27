@@ -48,34 +48,27 @@ export function BeSearchForm({formType}: BeSearchFormProps) {
         initSearchForm();
 
         const targetNode = document.documentElement;
-        const config = { attributes: true, attributeFilter: ["lang"] };
-
-        const callback = (mutationsList: MutationRecord[]) => {
-            for (const mutation of mutationsList) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
                 if (mutation.attributeName === "lang") {
                     initSearchForm();
                 }
-            }
-        };
+            });
+        });
 
-        if (observerRef.current) {
-            observerRef.current.disconnect();
-        }
-
-        observerRef.current = new MutationObserver(callback);
-        observerRef.current.observe(targetNode, config);
+        observer.observe(targetNode, { attributes: true, attributeFilter: ["lang"] });
+        observerRef.current = observer;
 
         return () => {
-            if (observerRef.current) {
-                observerRef.current.disconnect();
-            }
+            observer.disconnect();
+            if (containerRef.current) containerRef.current.innerHTML = '';
         };
     }, [pathname]);
 
     return (
         <div className="block-search-wrapper">
             <div id="block-search" className={`notranslate block-search ${formType ? 'block-search--' + formType : ''}`}>
-                <div id="be-search-form" className="be-container">
+                <div ref={containerRef} id="be-search-form" className="be-container">
                     <a href="https://exely.com/" rel="nofollow" target="_blank">Hotel management software</a>
                 </div>
             </div>

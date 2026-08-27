@@ -44,31 +44,24 @@ export function BeBookingForm() {
         initBookingForm();
 
         const targetNode = document.documentElement;
-        const config = { attributes: true, attributeFilter: ["lang"] };
-
-        const callback = (mutationsList: MutationRecord[]) => {
-            for (const mutation of mutationsList) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
                 if (mutation.attributeName === "lang") {
                     initBookingForm();
                 }
-            }
-        };
+            });
+        });
 
-        if (observerRef.current) {
-            observerRef.current.disconnect();
-        }
-
-        observerRef.current = new MutationObserver(callback);
-        observerRef.current.observe(targetNode, config);
+        observer.observe(targetNode, { attributes: true, attributeFilter: ["lang"] });
+        observerRef.current = observer;
 
         return () => {
-            if (observerRef.current) {
-                observerRef.current.disconnect();
-            }
+            observer.disconnect();
+            if (containerRef.current) containerRef.current.innerHTML = '';
         };
     }, [pathname]);
 
     return (
-        <div id="be-booking-form" />
+        <div ref={containerRef} id="be-booking-form" />
     );
 }
