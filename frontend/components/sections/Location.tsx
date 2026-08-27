@@ -57,14 +57,14 @@ export function Location() {
 
                   <a
                     href={`tel:${site.contacts.phonePrimaryRaw}`}
-                    className="flex gap-3.5 text-cream transition-colors hover:text-sand-300"
+                    className="flex min-h-11 items-center gap-3.5 py-1 text-cream transition-colors can-hover:hover:text-sand-300"
                   >
                     <IconPhone className="mt-0.5 size-5 shrink-0 text-sand-400" />
                     {site.contacts.phonePrimary}
                   </a>
                   <a
                     href={`tel:${site.contacts.phoneCityRaw}`}
-                    className="flex gap-3.5 text-cream transition-colors hover:text-sand-300"
+                    className="flex min-h-11 items-center gap-3.5 py-1 text-cream transition-colors can-hover:hover:text-sand-300"
                   >
                     <IconPhone className="mt-0.5 size-5 shrink-0 text-sand-400" />
                     {site.contacts.phoneCity}
