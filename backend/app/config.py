@@ -122,6 +122,30 @@ class Settings(BaseSettings):
     exely_api_key: str = ""
     exely_hotel_code: str = "509506"
 
+    # Доступ к официальному API Exely (OAuth 2.0). Выдаётся в кабинете:
+    # Настройки гостиницы → Подключения API → Создать подключение. Там же
+    # показываются адреса — подставлять их наугад нельзя, поэтому значений
+    # по умолчанию тут нет: пустое поле честно означает «не подключено».
+    #
+    # propertyId — это не код отеля 509506. Код отеля живёт в виджете, а
+    # propertyId выдаётся вместе с доступом; их легко перепутать.
+    exely_client_id: str = ""
+    exely_client_secret: str = ""
+    exely_property_id: str = ""
+    exely_auth_url: str = ""
+    exely_api_base: str = ""
+
+    @property
+    def exely_api_ready(self) -> bool:
+        """Есть ли всё, чтобы ходить в официальное API Exely."""
+        return all((
+            self.exely_client_id,
+            self.exely_client_secret,
+            self.exely_property_id,
+            self.exely_auth_url,
+            self.exely_api_base,
+        ))
+
     anthropic_api_key: str = ""
     concierge_model: str = "claude-sonnet-5"
     # Предел на ответ. Консьерж в мессенджере пишет коротко: длинную простыню

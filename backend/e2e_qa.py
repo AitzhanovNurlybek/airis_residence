@@ -33,7 +33,11 @@ from app.booking_system import (  # noqa: E402
     get_booking_system,
 )
 from app.booking_system.exely import ROOM_TYPES, booking_form_url  # noqa: E402
+from app.booking_system.exely import ExelyBookingSystem as _Exely  # noqa: E402
+from app.booking_system.exely_api import ExelyApi, _as_date, _money, _tail  # noqa: E402
 from app.concierge import (  # noqa: E402
+    _status_word,
+    FIND_TOOL,
     FULL_TOOLS,
     ROOM_PAGE_TOOL,
     _sane_price,
@@ -393,9 +397,16 @@ def qa_tools() -> None:
     # выдуманный номер брони. Ловится только сверкой.
     # room_page даётся всегда: страница номера есть у сайта и без системы
     # бронирования. Поэтому он в каждом наборе.
+    # Exely с договорным доступом: брони видно, но заводить их по-прежнему
+    # нельзя. Это отдельная ветка, и разойтись она может так же тихо.
+    lookup_mode = build_system_prompt(
+        brief, "2026-08-24", availability="exely", can_find=True
+    )
     for label, prompt, tools in (
         ("без системы", none_mode, [ROOM_PAGE_TOOL]),
         ("боевой Exely", live_mode, [ROOM_PAGE_TOOL, *READ_ONLY_TOOLS]),
+        ("Exely с доступом к броням", lookup_mode,
+         [ROOM_PAGE_TOOL, *READ_ONLY_TOOLS, FIND_TOOL]),
         ("тестовая шахматка", stub_mode, [ROOM_PAGE_TOOL, *FULL_TOOLS]),
     ):
         given = {t["name"] for t in tools}
@@ -417,6 +428,13 @@ def qa_tools() -> None:
         check(f"есть раздел «{rule}»", rule in live_mode)
     check("коды категорий гостю не показываем", "служебные" in live_mode)
     check("в боевом запрещено говорить «бронь оформлена»", "бронь оформлена" in live_mode)
+    check("без доступа честно сказано, что броней не видно",
+          "БРОНИ ТЫ НЕ ВИДИШЬ" in live_mode)
+    check("с доступом брони искать разрешено",
+          "БРОНИ ГОСТЯ ТЫ ВИДИШЬ" in lookup_mode)
+    # Читать — да, менять — нет: такого метода у Exely нет вовсе.
+    check("с доступом менять брони по-прежнему нельзя",
+          "change_booking" not in lookup_mode and "cancel_booking" not in lookup_mode)
 
     # Ссылка ведёт на нашу страницу с кодом категории Exely. Опечатка в коде
     # приводит гостя на пустую форму, и он об этом не сообщит — просто уйдёт.
@@ -431,6 +449,88 @@ def qa_tools() -> None:
 
 
 # ───────────────────────── проверка платёжек ─────────────────────────
+
+
+def qa_exely_api() -> None:
+    head("Официальное API Exely (брони)")
+
+    from app.config import get_settings
+
+    check("без ключей доступ не считается настроенным",
+          not get_settings().exely_api_ready)
+
+    api = ExelyApi("id", "secret", "777", auth_url="https://a/token", api_base="https://b")
+
+    tails = {_tail(p) for p in ("+7 777 531-00-09", "87775310009", "77775310009")}
+    check("телефон в трёх написаниях — один хвост", len(tails) == 1, str(tails))
+    check("пустой телефон не даёт хвоста", _tail("") == "")
+
+    check("дата с временем и зоной разобрана",
+          str(_as_date("2026-09-12T14:00:00Z")) == "2026-09-12")
+    check("дата без времени разобрана", str(_as_date("2026-09-12")) == "2026-09-12")
+    check("мусор вместо даты не роняет", _as_date("позавчера") is None)
+    check("сумма строкой разобрана", _money("81000.00") == 81000)
+    check("сумма мусором даёт ноль", _money("бесплатно") == 0)
+
+    # У Exely одно поле в разных API называется по-разному. Разбор обязан
+    # понимать оба написания, иначе на боевом доступе всё молча развалится.
+    first = {"number": "R-1", "arrivalDate": "2026-09-12", "departureDate": "2026-09-15",
+             "totalAmount": 135000, "phone": "+7 701 000 00 01", "status": "Confirmed",
+             "guest": {"lastName": "Айтжанов", "firstName": "Нурлыбек"}}
+    second = {"reservationNumber": "R-2", "checkInDate": "2026-10-01T00:00:00Z",
+              "checkOutDate": "2026-10-03T00:00:00Z", "total": {"amount": "81000.00"},
+              "state": "New",
+              "guests": [{"fullName": "Иван Петров", "phoneNumber": "87010000002"}]}
+
+    one = api._booking(first)
+    check("первое написание полей разобрано", one is not None and one.external_id == "R-1")
+    check("имя гостя собрано из частей", one is not None and one.guest_name == "Айтжанов Нурлыбек")
+
+    two = api._booking(second)
+    check("второе написание полей разобрано", two is not None and two.external_id == "R-2")
+    # Ловушка, на которой уже попались: пустое поле `guest` закрывало дорогу
+    # к списку `guests`, и бронь с телефоном внутри списка считалась чужой.
+    check("имя гостя найдено в списке guests", two is not None and two.guest_name == "Иван Петров")
+    check("телефон найден в списке guests", api._phone_of(second) == "87010000002")
+    check("сумма из вложенного объекта", two is not None and two.total_amount == 81000)
+
+    check("бронь без дат гостю не показывается", api._booking({"number": "R-3"}) is None)
+    check("бронь без номера гостю не показывается",
+          api._booking({"arrivalDate": "2026-11-01", "departureDate": "2026-11-02"}) is None)
+
+    check("список из обёртки", len(api._rows({"bookings": [first, second]})) == 2)
+    check("список массивом", len(api._rows([first])) == 1)
+    check("мусор вместо списка не роняет", api._rows({"нет": 1}) == [])
+
+    source = _Exely(hotel_code="509506")
+    check("без доступа Exely брони не ищет", source.can_find_bookings is False)
+    with_access = _Exely(hotel_code="509506", reservations=api)
+    check("с доступом Exely брони ищет", with_access.can_find_bookings is True)
+    check("Exely не заводит брони ни в каком случае",
+          not hasattr(with_access, "create_booking"))
+
+    # Самая дорогая ошибка этого раздела. Раньше статус считался так:
+    # «действует», если строка ровно "booked", иначе «отменена». Локальная
+    # шахматка присылает "booked", а Exely — "Confirmed", и гостю с
+    # подтверждённой бронью сообщали, что она отменена. Заметить это можно
+    # было только на стойке при заселении.
+    for status, expected in (
+        ("booked", "действует"),
+        ("Confirmed", "действует"),
+        ("CheckedIn", "действует"),
+        ("New", "ждёт подтверждения"),
+        ("PENDING", "ждёт подтверждения"),
+        ("Cancelled", "отменена"),
+        ("canceled", "отменена"),
+        ("NoShow", "отменена"),
+    ):
+        check(f"статус «{status}» → {expected}", _status_word(status) == expected,
+              _status_word(status))
+
+    for unknown in ("СтранноеСлово", "", "Whatever"):
+        word = _status_word(unknown)
+        check(f"незнакомый статус «{unknown}» не выдаётся за отмену",
+              "неизвестно" in word and "отменена" not in word, word)
 
 
 def qa_payments() -> None:
@@ -802,6 +902,7 @@ async def main() -> int:
     qa_exely_parsing()
     qa_modes()
     qa_tools()
+    qa_exely_api()
     qa_payments()
     await qa_hybrid()
     await qa_access()

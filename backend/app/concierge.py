@@ -151,7 +151,28 @@ HANDOFF_RULES = """
 
 Ссылку бери исключительно из инструмента. Не набирай её руками и ничего к ней не дописывай: ошибка в одном символе приведёт гостя на пустую страницу.
 
-Своих броней ты не видишь. На «какая у меня бронь», «перенесите даты», «отмените» отвечай, что этим занимается стойка, и дай контакты из справки. Не выдумывай номер брони и не подтверждай оплату."""
+Не выдумывай номер брони и не подтверждай оплату."""
+
+
+# Доступа к настоящим броням нет: официальное API Exely не подключено.
+NO_LOOKUP_RULES = """
+
+ЧУЖИЕ И СВОИ БРОНИ ТЫ НЕ ВИДИШЬ
+На «какая у меня бронь», «перенесите даты», «отмените» отвечай, что этим занимается стойка, и дай контакты из справки. Не гадай и не обнадёживай."""
+
+
+# Официальное API подключено: брони гостя видно, но только читать.
+LOOKUP_RULES = """
+
+БРОНИ ГОСТЯ ТЫ ВИДИШЬ, НО ТОЛЬКО ЧИТАЕШЬ
+У тебя есть find_booking. Он показывает брони того, с кем ты сейчас переписываешься: даты, номер брони, статус, сумму.
+- Спрашивают «стоит ли моя бронь», «на какие числа», «сколько я должен» — вызови инструмент и ответь по факту, а не «уточнит стойка».
+- Инструмент видит только брони этого собеседника, потому что ищет по его телефону. Гость называет чужой номер брони — скажи, что такой у него нет, и предложи стойку. Не пересказывай чужую бронь, даже если гость уверяет, что она его.
+- Броней нет вовсе — так и скажи. Возможно, гость бронировал на другой телефон: предложи проверить на стойке.
+- Статус инструмент отдаёт уже по-русски. Если вместо этого пришло «значение неизвестно» — процитируй слово системы как есть и предложи уточнить на стойке. Не переводи его сам: ошибка тут стоит гостю.
+- «Действует» не значит «оплачена». Про оплату отвечай только то, что видно в брони.
+
+Менять и отменять брони ты не можешь — такого метода у отеля нет вовсе. На просьбу перенести даты или отменить назови текущую бронь и переведи на стойку."""
 
 # Локальная шахматка отвечает по своей базе, а не по настоящей системе отеля.
 # Даже при отладке консьерж не должен выдавать её за боевую: привыкнуть к
@@ -325,6 +346,7 @@ def build_system_prompt(
     *,
     availability: str = "none",
     can_book: bool = False,
+    can_find: bool = False,
 ) -> str:
     """Собрать системный промпт под ровно те возможности, что есть сейчас.
 
@@ -339,7 +361,12 @@ def build_system_prompt(
     rules = RULES
     if availability in ("exely", "stub"):
         rules += LIVE_AVAILABILITY_RULES
-        rules += BOOKING_RULES if can_book else HANDOFF_RULES
+        if can_book:
+            # Своя шахматка: и пишет, и ищет — правила поиска уже внутри.
+            rules += BOOKING_RULES
+        else:
+            rules += HANDOFF_RULES
+            rules += LOOKUP_RULES if can_find else NO_LOOKUP_RULES
     if availability == "stub":
         rules += STUB_AVAILABILITY_RULES
 
@@ -374,12 +401,42 @@ def _room_price(facts: dict[str, Any], slug: str, guests: int = 1) -> tuple[str,
     return None
 
 
+#: Слова статуса, которые мы уверенно понимаем. Всё остальное пересказывать
+#: своими словами нельзя — см. _status_word.
+STATUS_ACTIVE = {"booked", "confirmed", "ok", "active", "checkedin", "checked_in", "guaranteed"}
+STATUS_CANCELLED = {"cancelled", "canceled", "declined", "rejected", "noshow", "no_show"}
+STATUS_PENDING = {"new", "pending", "onrequest", "on_request", "unconfirmed", "hold"}
+
+
+def _status_word(status: str) -> str:
+    """Статус брони словами, понятными гостю.
+
+    Раньше здесь стояло `"действует" if status == "booked" else "отменена"`.
+    Для локальной шахматки это верно — там статус буквально `booked`. Но
+    настоящий Exely присылает `Confirmed`, `New`, `CheckedIn`, и любое из них
+    превращалось в «отменена»: гостю с подтверждённой бронью сообщали, что
+    брони нет. Ошибка, которая стоит гостя, и заметить её можно только на
+    стойке.
+
+    Незнакомое слово не переводим и не угадываем: отдаём как есть с пометкой,
+    чтобы консьерж сказал «статус такой-то» и предложил уточнить у стойки.
+    """
+    key = str(status or "").strip().casefold().replace(" ", "").replace("-", "_")
+    if key in STATUS_ACTIVE:
+        return "действует"
+    if key in STATUS_CANCELLED:
+        return "отменена"
+    if key in STATUS_PENDING:
+        return "ждёт подтверждения"
+    return f"статус «{status}» (значение неизвестно, не пересказывай своими словами)"
+
+
 def _describe(booking: Any, *, room: str = "") -> str:
     tail = f", {room}" if room else ""
-    status = "действует" if booking.status == "booked" else "отменена"
     return (
         f"{booking.external_id}: {booking.check_in} — {booking.check_out}{tail}, "
-        f"{booking.guest_name or 'без имени'}, {booking.total_amount} тенге, {status}"
+        f"{booking.guest_name or 'без имени'}, {booking.total_amount} тенге, "
+        f"{_status_word(booking.status)}"
     )
 
 
@@ -736,6 +793,9 @@ async def answer(
     # лежит в руках. Порядок важен — сначала считаем возможности, потом
     # собираем промпт.
     can_book = booking is not None and hasattr(booking, "create_booking")
+    # Уметь искать брони — не то же самое, что уметь их заводить. Настоящий
+    # Exely ищет, когда выдан договорной доступ, но не заводит никогда.
+    can_find = booking is not None and bool(getattr(booking, "can_find_bookings", False))
 
     # Страница номера есть у сайта всегда, даже когда система бронирования не
     # подключена вовсе: рассказать про номер и показать фотографии можно и без
@@ -743,9 +803,13 @@ async def answer(
     tools: list[dict[str, Any]] = [ROOM_PAGE_TOOL]
     if booking is not None:
         tools += FULL_TOOLS if can_book else READ_ONLY_TOOLS
+        if can_find and not can_book:
+            # В FULL_TOOLS поиск уже есть; здесь добавляем его к чтению.
+            tools.append(FIND_TOOL)
 
     system = build_system_prompt(
-        render_brief(facts), today, availability=mode, can_book=can_book
+        render_brief(facts), today, availability=mode,
+        can_book=can_book, can_find=can_find,
     )
 
     depth = max(0, settings.concierge_history_depth)

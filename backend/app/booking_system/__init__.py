@@ -73,9 +73,24 @@ def get_booking_system(
     if mode == "exely":
         # Только чтение: наличие с открытого адреса виджета. Записывать через
         # него не будем — для этого нужен договорной доступ.
+        # Чтение броней подключается, только когда выдан договорной доступ.
+        # Без него консьерж работает как раньше: наличие видит, брони — нет.
+        reservations = None
+        if settings.exely_api_ready:
+            from .exely_api import ExelyApi
+
+            reservations = ExelyApi(
+                settings.exely_client_id,
+                settings.exely_client_secret,
+                settings.exely_property_id,
+                auth_url=settings.exely_auth_url,
+                api_base=settings.exely_api_base,
+            )
+
         return ExelyBookingSystem(
             hotel_code=settings.exely_hotel_code or "509506",
             room_names=room_names,
+            reservations=reservations,
         )
 
     if mode == "hybrid":

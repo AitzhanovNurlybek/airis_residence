@@ -140,6 +140,7 @@ class ExelyBookingSystem:
         host: str = IBE_HOST,
         room_names: dict[str, str] | None = None,
         timeout: float = 12.0,
+        reservations: Any = None,
     ) -> None:
         # Код отеля уходит в query-строку чужого сервиса, и проверить его
         # там некому: на неверный код Exely отвечает 200 с пустым результатом.
@@ -156,6 +157,26 @@ class ExelyBookingSystem:
         self._host = host.rstrip("/")
         self._names = room_names or {}
         self._timeout = timeout
+        # Чтение броней — отдельный, договорной доступ (см. exely_api.py).
+        # Наличие читается и без него, поэтому это не обязательная часть.
+        self._reservations = reservations
+
+    @property
+    def can_find_bookings(self) -> bool:
+        """Есть ли договорной доступ, по которому видно брони гостя.
+
+        Проверка идёт по объекту, а не по наличию метода: метод у класса есть
+        всегда, а доступа может не быть. Раньше на этом расходились обещания
+        в промпте и то, что консьерж мог сделать.
+        """
+        return self._reservations is not None
+
+    async def find_bookings(self, *, phone: str = "", name: str = ""):
+        if self._reservations is None:
+            raise BookingSystemUnavailable(
+                "Чтение броней Exely не подключено — нужен договорной доступ к API."
+            )
+        return await self._reservations.find_bookings(phone=phone, name=name)
 
     def display(self, slug: str) -> str:
         return self._names.get(slug) or NAMES.get(slug, slug)
@@ -272,7 +293,9 @@ class ExelyBookingSystem:
     # ─── Запись: сознательно не реализована ───
 
     async def get_booking(self, external_id: str):
-        raise BookingSystemUnavailable(WRITE_NOT_READY)
+        if self._reservations is None:
+            raise BookingSystemUnavailable(WRITE_NOT_READY)
+        return await self._reservations.get_booking(external_id)
 
     async def invoices(self, *, company_bin: str = "", external_id: str = ""):
         raise BookingSystemUnavailable(WRITE_NOT_READY)
