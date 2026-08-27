@@ -98,7 +98,7 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
                 href={site.address.mapUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex gap-3 text-cream/75 transition-colors hover:text-sand-300"
+                className="flex min-h-11 items-center gap-3 py-1 text-cream/75 transition-colors can-hover:hover:text-sand-300"
               >
                 <IconPin className="mt-0.5 size-4 shrink-0 text-sand-400" />
                 <span>
@@ -107,21 +107,21 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
               </a>
               <a
                 href={`tel:${site.contacts.phonePrimaryRaw}`}
-                className="flex gap-3 text-cream/75 transition-colors hover:text-sand-300"
+                className="flex min-h-11 items-center gap-3 py-1 text-cream/75 transition-colors can-hover:hover:text-sand-300"
               >
                 <IconPhone className="mt-0.5 size-4 shrink-0 text-sand-400" />
                 {site.contacts.phonePrimary}
               </a>
               <a
                 href={`tel:${site.contacts.phoneCityRaw}`}
-                className="flex gap-3 text-cream/75 transition-colors hover:text-sand-300"
+                className="flex min-h-11 items-center gap-3 py-1 text-cream/75 transition-colors can-hover:hover:text-sand-300"
               >
                 <IconPhone className="mt-0.5 size-4 shrink-0 text-sand-400" />
                 {site.contacts.phoneCity}
               </a>
               <a
                 href={`mailto:${site.contacts.email}`}
-                className="flex gap-3 break-all text-cream/75 transition-colors hover:text-sand-300"
+                className="flex min-h-11 items-center gap-3 py-1 break-all text-cream/75 transition-colors can-hover:hover:text-sand-300"
               >
                 <IconMail className="mt-0.5 size-4 shrink-0 text-sand-400" />
                 {site.contacts.email}

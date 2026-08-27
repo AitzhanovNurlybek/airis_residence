@@ -20,8 +20,8 @@ export function Amenities() {
             const Icon = amenityIcons[item.icon];
             return (
               <Reveal key={item.title} delay={(i % 4) * 0.06} depth={false}>
-                <div className="group h-full bg-ink-900 p-5 transition-colors duration-500 hover:bg-ink-800 md:p-7">
-                  <span className="grid size-10 place-items-center rounded-xl border border-sand-400/25 bg-sand-400/8 text-sand-300 transition-all duration-500 group-hover:scale-110 group-hover:border-sand-300/50 group-hover:text-sand-200 md:size-12 md:rounded-2xl">
+                <div className="group h-full bg-ink-900 p-5 transition-colors duration-200 ease-airis can-hover:hover:bg-ink-800 md:p-7">
+                  <span className="grid size-10 place-items-center rounded-xl border border-sand-400/25 bg-sand-400/8 text-sand-300 transition-[transform,border-color,color] duration-200 ease-airis can-hover:group-hover:scale-110 can-hover:group-hover:border-sand-300/50 can-hover:group-hover:text-sand-200 md:size-12 md:rounded-2xl">
                     {Icon && <Icon className="size-5 md:size-6" />}
                   </span>
                   <h3 className="mt-4 text-[0.92rem] font-medium text-cream md:mt-5 md:text-base">

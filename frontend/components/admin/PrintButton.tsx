@@ -18,7 +18,7 @@ export function PrintButton() {
     <button
       type="button"
       onClick={() => window.print()}
-      className="no-print inline-flex h-11 items-center justify-center gap-2 rounded-full bg-linear-to-b from-wine-500 to-wine-700 px-6 text-sm font-medium text-white transition-all hover:from-wine-400 hover:to-wine-600"
+      className="no-print inline-flex h-11 items-center justify-center gap-2 rounded-full bg-linear-to-b from-wine-500 to-wine-700 px-6 text-sm font-medium text-white transition-[transform,background-color] duration-200 ease-airis active:scale-[0.97] can-hover:hover:from-wine-400 can-hover:hover:to-wine-600"
     >
       Печать / сохранить как PDF
     </button>

@@ -136,7 +136,7 @@ function GalleryScrollDriven() {
                 alt={shot.alt}
                 fill
                 sizes="32vw"
-                className="object-cover transition-transform duration-700 group-hover:scale-105"
+                className="object-cover transition-transform duration-700 can-hover:group-hover:scale-105"
               />
               <div className="absolute inset-0 bg-linear-to-t from-ink-950/85 via-transparent to-transparent" />
               <Caption caption={shot.caption} index={i} />

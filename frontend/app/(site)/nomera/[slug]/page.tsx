@@ -177,7 +177,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
                     {other.area} · {formatPrice(other.price)}
                   </span>
                 </span>
-                <IconArrow className="size-5 shrink-0 text-sand-400 transition-transform group-hover:translate-x-1" />
+                <IconArrow className="size-5 shrink-0 text-sand-400 transition-transform can-hover:group-hover:translate-x-1" />
               </Link>
             ))}
           </div>

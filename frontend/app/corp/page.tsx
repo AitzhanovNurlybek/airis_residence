@@ -29,7 +29,7 @@ function Tile({ href, title, hint }: { href: string; title: string; hint: string
     <Link
       href={href}
       prefetch={false}
-      className="rounded-2xl bg-white px-6 py-5 shadow-sm transition-shadow hover:shadow-md"
+      className="rounded-2xl bg-white px-6 py-5 shadow-sm transition-shadow can-hover:hover:shadow-md"
     >
       <div className="font-display text-lg text-wine-500">{title}</div>
       <div className="mt-1 text-xs text-ink-700/60">{hint}</div>
@@ -57,7 +57,7 @@ function PrimaryAction({ href, title, hint }: { href: string; title: string; hin
       </div>
       <span
         aria-hidden
-        className="text-3xl leading-none transition-transform group-hover:translate-x-1"
+        className="text-3xl leading-none transition-transform can-hover:group-hover:translate-x-1"
       >
         →
       </span>

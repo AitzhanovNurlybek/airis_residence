@@ -39,7 +39,7 @@ export function FloatingActions() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Написать в WhatsApp"
-                className="grid size-13 place-items-center rounded-full bg-[#25D366] text-white shadow-[0_12px_30px_-8px_rgba(37,211,102,0.6)] transition-transform hover:scale-105"
+                className="grid size-13 place-items-center rounded-full bg-[#25D366] text-white shadow-[0_12px_30px_-8px_rgba(37,211,102,0.6)] transition-transform can-hover:hover:scale-105"
               >
                 <IconWhatsApp className="size-6" />
               </a>
@@ -48,7 +48,7 @@ export function FloatingActions() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Написать в Telegram"
-                className="grid size-13 place-items-center rounded-full bg-[#29a9eb] text-white shadow-[0_12px_30px_-8px_rgba(41,169,235,0.6)] transition-transform hover:scale-105"
+                className="grid size-13 place-items-center rounded-full bg-[#29a9eb] text-white shadow-[0_12px_30px_-8px_rgba(41,169,235,0.6)] transition-transform can-hover:hover:scale-105"
               >
                 <IconTelegram className="size-6" />
               </a>

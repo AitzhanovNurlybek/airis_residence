@@ -26,6 +26,11 @@ const facts = [
 
 export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) {
   const ref = useRef<HTMLElement>(null);
+  // Параллакс фона отключался и раньше, а вот появление заголовка и
+  // фактов ехало снизу при любом режиме: CSS-правило reduced-motion на
+  // framer-motion не действует — движение тут считает JavaScript.
+  // Получалось наоборот: безобидные исчезновения гасли, а именно то
+  // движение, от которого укачивает, оставалось.
   const reduced = usePrefersReducedMotion();
   const isDesktop = useIsDesktop();
 
@@ -85,7 +90,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             target="_blank"
             rel="noopener noreferrer"
             className="glass inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.7rem] text-cream/85 transition-colors hover:text-sand-200 sm:px-4 sm:text-xs"
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: reduced ? 0 : 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
           >
@@ -95,7 +100,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
 
           <motion.h1
             className="mt-5 font-display text-[clamp(2rem,6.4vw,5.4rem)] leading-[1.04] font-semibold tracking-[-0.02em] text-balance md:mt-6 md:leading-[0.98]"
-            initial={{ opacity: 0, y: 28 }}
+            initial={{ opacity: 0, y: reduced ? 0 : 28 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           >
@@ -105,7 +110,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
 
           <motion.p
             className="mt-4 max-w-xl text-[0.95rem] leading-relaxed text-cream/70 md:mt-6 md:text-lg"
-            initial={{ opacity: 0, y: 24 }}
+            initial={{ opacity: 0, y: reduced ? 0 : 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
@@ -116,7 +121,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
 
           <motion.dl
             className="mt-7 grid grid-cols-3 gap-4 md:mt-9 md:flex md:flex-wrap md:gap-x-10"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: reduced ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.45 }}
           >
@@ -138,7 +143,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
 
         <motion.div
           className="mt-8 max-w-4xl md:mt-12 be-hidden"
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: reduced ? 0 : 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >

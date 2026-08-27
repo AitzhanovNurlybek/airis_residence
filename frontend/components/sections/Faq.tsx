@@ -35,7 +35,7 @@ export function Faq() {
                       {item.q}
                     </span>
                     <span
-                      className={`grid size-8 shrink-0 place-items-center rounded-full border transition-all duration-300 ${
+                      className={`grid size-8 shrink-0 place-items-center rounded-full border transition-[transform,background-color,border-color,color] duration-200 ease-airis ${
                         isOpen
                           ? "rotate-45 border-sand-300/60 text-sand-200"
                           : "border-white/15 text-muted"

@@ -32,7 +32,7 @@ export function Header() {
   return (
     <>
       <header
-        className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${
+        className={`fixed inset-x-0 top-0 z-50 transition-[background-color,backdrop-filter,box-shadow] duration-200 ease-airis ${
           scrolled
             ? "border-b border-white/8 bg-ink-950/80 backdrop-blur-xl"
             : "border-b border-transparent bg-transparent"

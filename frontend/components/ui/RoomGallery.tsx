@@ -49,7 +49,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
                 onClick={() => setActive(i)}
                 aria-label={`Показать фото ${i + 1}`}
                 aria-current={i === active}
-                className={`relative aspect-4/3 overflow-hidden rounded-xl border transition-all duration-300 ${
+                className={`relative aspect-4/3 overflow-hidden rounded-xl border transition-[border-color,opacity,transform] duration-200 ease-airis ${
                   i === active
                     ? "border-sand-300/70 opacity-100"
                     : "border-white/8 opacity-55 hover:opacity-85"

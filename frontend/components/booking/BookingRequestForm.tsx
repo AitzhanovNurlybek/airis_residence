@@ -277,7 +277,7 @@ export function BookingRequestForm({
       <button
         type="submit"
         disabled={status === "sending"}
-        className="mt-7 h-14 w-full rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-[0.95rem] font-medium text-white shadow-[0_12px_34px_-12px_rgba(160,26,84,0.9)] transition-all hover:from-wine-400 hover:to-wine-600 disabled:opacity-60"
+        className="mt-7 h-14 w-full rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-[0.95rem] font-medium text-white shadow-[0_12px_34px_-12px_rgba(160,26,84,0.9)] transition-[transform,background-color] duration-200 ease-airis active:scale-[0.97] can-hover:hover:from-wine-400 can-hover:hover:to-wine-600 disabled:opacity-60"
       >
         {status === "sending" ? "Отправляем…" : "Отправить заявку"}
       </button>

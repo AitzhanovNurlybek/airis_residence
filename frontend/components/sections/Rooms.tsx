@@ -17,7 +17,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
   return (
     <Reveal delay={(index % 3) * 0.08} className={wide ? "lg:col-span-2" : ""}>
       <TiltCard className="group h-full" intensity={5}>
-        <article className="relative flex h-full flex-col overflow-hidden rounded-card border border-white/8 bg-ink-800 shadow-lift transition-shadow duration-500 group-hover:shadow-deep">
+        <article className="relative flex h-full flex-col overflow-hidden rounded-card border border-white/8 bg-ink-800 shadow-lift transition-shadow duration-500 can-hover:group-can-hover:hover:shadow-deep">
           {/* На телефоне все карточки во всю ширину — вертикальный кадр
               сделал бы ленту бесконечной, поэтому там 4:3 */}
           <div
@@ -30,7 +30,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
               alt={`${room.shortName} — ${room.area}, отель Airis Residence в Алматы`}
               fill
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 40vw"
-              className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.07]"
+              className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] can-hover:group-hover:scale-[1.07]"
             />
             <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/25 to-transparent" />
 
@@ -66,7 +66,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
                 <a
                   href={getRoomBookingHref(room.beRoomType)}
                   aria-label={`Забронировать ${room.shortName}`}
-                  className="grid size-10 place-items-center rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-white transition-transform hover:scale-105"
+                  className="grid size-10 place-items-center rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-white transition-transform can-hover:hover:scale-105"
                 >
                   <IconArrow className="size-4" />
                 </a>

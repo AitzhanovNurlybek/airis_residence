@@ -119,7 +119,7 @@ export function BookingBar({ roomSlug, compact = false }: { roomSlug?: string; c
 
         <button
           type="submit"
-          className={`col-span-2 h-12 w-full rounded-full bg-linear-to-b from-wine-500 to-wine-700 px-8 text-sm font-medium text-white shadow-[0_10px_30px_-10px_rgba(160,26,84,0.9)] transition-all hover:from-wine-400 hover:to-wine-600 ${
+          className={`col-span-2 h-12 w-full rounded-full bg-linear-to-b from-wine-500 to-wine-700 px-8 text-sm font-medium text-white shadow-[0_10px_30px_-10px_rgba(160,26,84,0.9)] transition-[transform,background-color,box-shadow] duration-200 ease-airis active:scale-[0.97] can-hover:hover:from-wine-400 can-hover:hover:to-wine-600 ${
             compact ? "" : "md:col-span-1 md:w-auto"
           }`}
         >

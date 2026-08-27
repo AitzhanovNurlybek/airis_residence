@@ -53,7 +53,7 @@ export function AdminButton({
 
   return (
     <button
-      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 ${styles} ${className}`}
+      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-[transform,background-color,box-shadow,border-color,color] duration-200 ease-airis active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 ${styles} ${className}`}
       {...rest}
     >
       {children}
