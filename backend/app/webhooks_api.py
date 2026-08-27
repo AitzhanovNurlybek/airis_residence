@@ -33,8 +33,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .booking_system import get_booking_system
+from .channels import WhatsAppChannel, WhatsAppError
+from .channels.flow import CHANNEL as WA_CHANNEL, reply_for
+from .channels.whatsapp import _parse, for_whatsapp
 from .config import Settings, get_settings
-from .db import ExelyEvent, get_session
+from .concierge import FALLBACK
+from .db import ExelyEvent, SessionLocal, get_session
+from .dialogs import save_turn, seen_before
 
 logger = logging.getLogger(__name__)
 
@@ -172,3 +178,79 @@ async def exely_webhook(
 
     logger.info("Вебхук Exely: %s по брони %s", kind, number or "без номера")
     return {"ok": True, "id": event.id, "kind": kind, "booking": number}
+
+
+@router.post("/whatsapp")
+async def whatsapp_webhook(
+    request: Request,
+    response: Response,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Входящее сообщение из WhatsApp через Green API.
+
+    Второй вход в тот же разговор. `whatsapp_bot.py` опрашивает очередь в
+    вечном цикле — это работает, пока включён компьютер. Здесь наоборот:
+    Green API сам стучится к нам на Vercel, и консьерж отвечает гостю в три
+    часа ночи, когда ноутбук закрыт.
+
+    Включать оба сразу нельзя: Green API отдаёт уведомление либо в вебхук,
+    либо в очередь. Если бот опроса тоже запущен, они будут драться за одно
+    и то же сообщение.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        logger.warning("Вебхук WhatsApp пришёл, но WHATSAPP_WEBHOOK_SECRET не задан")
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+
+    if _presented(request) != secret:
+        logger.warning("Вебхук WhatsApp с неверным ключом — отброшен")
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    raw = await request.body()
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        return {"ok": True, "skipped": "не объект"}
+
+    # Green API присылает и исходящие, и статусы доставки, и события групп.
+    # _parse отбирает только входящие сообщения от людей и возвращает None
+    # для всего остального — на такое отвечаем 200, иначе начнутся повторы.
+    message = _parse(payload)
+    if message is None or message.is_group:
+        return {"ok": True, "skipped": "не входящее сообщение гостя"}
+    if not message.text and not message.has_file:
+        return {"ok": True, "skipped": "пустое сообщение"}
+
+    # Тот же дедуп, что и у опроса: Green API штатно повторяет доставку, если
+    # мы ответили медленно. Отметку ставим ДО ответа — остаться без ответа
+    # неприятно, но получить два ответа и две брони хуже.
+    if await seen_before(SessionLocal, WA_CHANNEL, message.message_id):
+        logger.info("Вебхук WhatsApp: повтор %s — пропускаю", message.message_id)
+        return {"ok": True, "duplicate": True}
+
+    try:
+        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+    except WhatsAppError as error:
+        logger.warning("Вебхук WhatsApp: канал не создан: %s", error)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "green api is not configured"}
+
+    booking = get_booking_system(settings)
+    try:
+        text = await reply_for(settings, booking, channel, message)
+    except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём
+        logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
+        text = FALLBACK
+
+    try:
+        await channel.send(message.chat_id, for_whatsapp(text))
+    except WhatsAppError as error:
+        logger.warning("Вебхук WhatsApp: ответ не ушёл: %s", error)
+        return {"ok": False, "error": "send failed"}
+
+    logger.info("Вебхук WhatsApp: ответили %s", message.phone)
+    return {"ok": True, "replied": True}

@@ -38,102 +38,18 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.almaty import today as hotel_today  # noqa: E402
 from app.booking_system import get_booking_system  # noqa: E402
-from app.channels import Incoming, WhatsAppChannel, WhatsAppError  # noqa: E402
-from app.concierge import FALLBACK, answer  # noqa: E402
+from app.channels import WhatsAppChannel, WhatsAppError  # noqa: E402
+from app.channels.flow import CHANNEL, reply_for  # noqa: E402
+from app.concierge import FALLBACK  # noqa: E402
+from app.dialogs import seen_before  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
-from app.dialogs import load_history, save_turn, seen_before  # noqa: E402
-from app.payment_docs import describe, match_and_apply, read_document  # noqa: E402
-from app.knowledge import KnowledgeUnavailable, load_facts  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s", datefmt="%H:%M:%S")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("whatsapp")
-
-CHANNEL = "whatsapp"
-
-#: Что ответить на присланный файл, который не оказался платёжкой.
-NOT_A_RECEIPT = (
-    "Получили ваш файл, спасибо. Похоже, это не платёжный документ — передам его "
-    "менеджеру, он посмотрит и свяжется с вами."
-)
-
-#: И на платёжку, которую нельзя засчитать автоматически.
-NEEDS_MANAGER = (
-    "Спасибо, платёж получили. Он требует проверки менеджером — он посмотрит "
-    "сегодня и подтвердит. Если срочно, позвоните на стойку: +7 (777) 531-00-09."
-)
-
-
-async def handle_text(settings, booking, message: Incoming) -> str:
-    """Обычная реплика гостя."""
-    depth = max(0, settings.concierge_history_depth)
-    history = await load_history(SessionLocal, CHANNEL, message.chat_id, depth)
-
-    reply = await answer(
-        settings,
-        message=message.text,
-        history=history,
-        today=hotel_today().isoformat(),
-        booking=booking,
-        guest={"phone": message.phone, "name": message.sender_name},
-    )
-
-    if reply["ok"]:
-        # В историю кладём то, что модель реально видела: вместе с вызовами
-        # инструментов. Без них в следующий раз она не поймёт, откуда взяла
-        # числа в собственном прошлом ответе.
-        await save_turn(
-            SessionLocal, CHANNEL, message.chat_id, reply["messages"], len(history)
-        )
-    else:
-        log.warning("консьерж не ответил: %s", reply.get("reason"))
-
-    return reply["text"]
-
-
-async def handle_file(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
-    """Гость прислал файл — скорее всего чек."""
-    try:
-        data = await channel.download(message.file_url)
-    except Exception as error:  # noqa: BLE001
-        log.warning("файл не скачался: %s", error)
-        return NEEDS_MANAGER
-
-    try:
-        doc = await read_document(settings, data, message.file_name or "document.pdf")
-    except ValueError as error:
-        log.info("файл не разобран: %s", error)
-        return NOT_A_RECEIPT
-    except Exception as error:  # noqa: BLE001
-        log.warning("разбор файла упал: %s", error)
-        return NEEDS_MANAGER
-
-    if not doc.is_payment:
-        return NOT_A_RECEIPT
-
-    try:
-        facts = await load_facts(settings)
-    except KnowledgeUnavailable:
-        facts = None
-
-    result = await match_and_apply(booking, doc, facts=facts)
-    log.info("платёжка: %s — %s", result.verdict, result.reason)
-
-    if result.verdict == "applied":
-        return (
-            f"Оплата получена и записана по брони {result.booking_ref}: "
-            f"{result.applied_amount} ₸. Спасибо!"
-        )
-    if result.verdict == "duplicate":
-        return "Этот платёж мы уже получили раньше — всё в порядке, повторно ничего не нужно."
-    if result.verdict == "rejected" and not doc.is_payment:
-        return NOT_A_RECEIPT
-    return NEEDS_MANAGER
-
 
 async def serve(dry_run: bool = False) -> int:
     settings = get_settings()
@@ -200,10 +116,7 @@ async def serve(dry_run: bool = False) -> int:
         log.info("← %s: %s", who, (message.text or f"[файл {message.file_name}]")[:120])
 
         try:
-            if message.has_file:
-                text = await handle_file(settings, booking, channel, message)
-            else:
-                text = await handle_text(settings, booking, message)
+            text = await reply_for(settings, booking, channel, message)
         except Exception as error:  # noqa: BLE001 — бот не должен падать от одной реплики
             log.exception("ошибка обработки: %s", error)
             text = FALLBACK

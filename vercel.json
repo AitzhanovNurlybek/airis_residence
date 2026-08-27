@@ -8,17 +8,24 @@
     "backend": {
       "root": "backend",
       "framework": "fastapi",
-      "entrypoint": "main.py"
+      "entrypoint": "main.py",
+      "maxDuration": 60
     }
   },
   "rewrites": [
     {
       "source": "/api/backend(/.*)?",
-      "destination": { "type": "service", "service": "backend" }
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
     },
     {
       "source": "/(.*)",
-      "destination": { "type": "service", "service": "frontend" }
+      "destination": {
+        "type": "service",
+        "service": "frontend"
+      }
     }
   ]
 }
