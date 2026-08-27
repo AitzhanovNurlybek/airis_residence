@@ -128,9 +128,18 @@ class WhatsAppChannel:
         идентификатору не даст ответить дважды. Поэтому исключение здесь не
         поднимаем, а просто сообщаем неудачу.
         """
+        # _url() кладёт токен ПОСЛЕДНИМ сегментом (.../{method}/{token}), а
+        # у deleteNotification после токена идёт ещё receiptId — его нельзя
+        # засунуть в method вместе с остальным, иначе он окажется ПЕРЕД
+        # токеном: .../deleteNotification/{receipt_id}/{token} вместо
+        # верного .../deleteNotification/{token}/{receipt_id}. С таким
+        # порядком Green API не находил метод и подтверждение не проходило
+        # ни разу — бот вечно топтался на одном и том же уведомлении,
+        # думая, что confirm() просто иногда не срабатывает.
+        url = f"{self._url('deleteNotification')}/{receipt_id}"
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             try:
-                response = await client.delete(self._url(f"deleteNotification/{receipt_id}"))
+                response = await client.delete(url)
             except httpx.HTTPError:
                 return False
             return response.status_code < 400

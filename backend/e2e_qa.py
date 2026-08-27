@@ -867,6 +867,20 @@ async def _wipe(guest_name: str) -> None:
 async def qa_channels() -> None:
     head("Канал WhatsApp")
 
+    # Прямая проверка адреса подтверждения приёма. Раньше _url() собирала
+    # .../deleteNotification/{receipt_id}/{token} — receiptId оказывался
+    # ПЕРЕД токеном вместо после него, Green API такой путь не находил, и
+    # confirm() тихо возвращал неудачу на каждом вызове. Бот вечно
+    # опрашивал одно и то же уведомление, думая, что оно новое.
+    from app.channels import WhatsAppChannel
+
+    probe = WhatsAppChannel("999", "SECRETTOKEN")
+    delete_url = f"{probe._url('deleteNotification')}/77"
+    check("токен стоит перед receiptId в адресе подтверждения",
+          delete_url.endswith("/deleteNotification/SECRETTOKEN/77"), delete_url)
+    check("receiptId не встаёт перед токеном",
+          "/deleteNotification/77/SECRETTOKEN" not in delete_url, delete_url)
+
     check("телефон из chatId", _phone("77015550011@c.us") == "+77015550011")
     check("групповой чат распознан", Incoming("1", "123@g.us", "", "", "т").is_group)
     check("личный чат не групповой", not Incoming("1", "123@c.us", "", "", "т").is_group)
