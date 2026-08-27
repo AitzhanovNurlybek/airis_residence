@@ -79,7 +79,7 @@ RULES = """Ты — консьерж отеля Airis Residence в Алматы.
 - Про каждый номер — одной строкой: название, цена за ночь, площадь и кровать, и фраза, чем он хорош. Больше в мессенджере не читают.
 - Сравнивая соседние категории, называй разницу числами и словами: «Comfort — это +5 м² и зона отдыха, дороже на 5 000 за ночь». «Лучше» и «комфортнее» гостю ничего не говорят.
 - Не перечисляй то, что есть во всех номерах — Wi-Fi, кондиционер, сейф, телевизор, завтрак. Скажи про это один раз общей фразой или когда спросят прямо.
-- Хочет посмотреть, как выглядит, — дай ссылку на страницу номера из справки. Там фотографии. Описывать интерьер словами не пытайся.
+- Хочет посмотреть, как выглядит, — вызови room_page и пришли ссылку, которую он вернул. Там фотографии. Описывать интерьер словами не пытайся и адрес руками не набирай: он выглядит предсказуемо, но выдуманный ведёт на пустую страницу.
 - Коды в квадратных скобках ([код comfort]) — служебные, для инструментов. Гостю их не показывай никогда.
 
 ЧТО ПОЛЕЗНО ПРЕДЛОЖИТЬ САМОМУ
@@ -271,6 +271,27 @@ def _sane_price(price: int | None, rack: int | None) -> bool:
     return SANE_LOW * rack <= price <= SANE_HIGH * rack
 
 
+# Страница номера — то же правило, что и для ссылки на форму: адрес отдаёт
+# код. Соблазн «собрать самому» тут даже сильнее, потому что адрес выглядит
+# предсказуемо (/nomera/<код>), и модель уверенно пишет /nomera/komfort
+# вместо /nomera/comfort. Гость получает 404 и уходит.
+ROOM_PAGE_TOOL = {
+    "name": "room_page",
+    "description": (
+        "Ссылка на страницу номера с фотографиями, площадью и оснащением. "
+        "Вызывай, когда гость просит показать номер, спрашивает как он выглядит "
+        "или хочет подробностей сверх того, что есть у тебя."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "room": {"type": "string", "description": "Код категории (slug) из справки"},
+        },
+        "required": ["room"],
+    },
+}
+
+
 # Ссылку собирает код, а не модель. Модель охотно «вспоминает» правдоподобный
 # адрес с выдуманным кодом категории, и гость попадает на пустую форму —
 # ошибка, которую он заметит, только потратив время.
@@ -360,6 +381,22 @@ def _describe(booking: Any, *, room: str = "") -> str:
         f"{booking.external_id}: {booking.check_in} — {booking.check_out}{tail}, "
         f"{booking.guest_name or 'без имени'}, {booking.total_amount} тенге, {status}"
     )
+
+
+def _tool_room_page(facts: dict[str, Any], args: dict[str, Any]) -> str:
+    """Адрес страницы номера — из справки, не из догадки модели."""
+    slug = str(args.get("room") or "").strip()
+    for room in facts.get("rooms", []):
+        if str(room.get("slug")) == slug:
+            url = room.get("url")
+            if not url:
+                break
+            return (
+                f"Страница номера «{room.get('name')}»: {url}\n"
+                f"Там фотографии, {room.get('area')}, {room.get('beds')}."
+            )
+    codes = ", ".join(sorted(str(r.get("slug")) for r in facts.get("rooms", [])))
+    return f"Категории «{slug}» нет. Известные: {codes}"
 
 
 def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any]) -> str:
@@ -700,9 +737,12 @@ async def answer(
     # собираем промпт.
     can_book = booking is not None and hasattr(booking, "create_booking")
 
-    tools: list[dict[str, Any]] = []
+    # Страница номера есть у сайта всегда, даже когда система бронирования не
+    # подключена вовсе: рассказать про номер и показать фотографии можно и без
+    # наличия.
+    tools: list[dict[str, Any]] = [ROOM_PAGE_TOOL]
     if booking is not None:
-        tools = FULL_TOOLS if can_book else READ_ONLY_TOOLS
+        tools += FULL_TOOLS if can_book else READ_ONLY_TOOLS
 
     system = build_system_prompt(
         render_brief(facts), today, availability=mode, can_book=can_book
@@ -759,7 +799,9 @@ async def answer(
                 args = block.get("input") or {}
                 tool_calls.append({"name": name, "input": args})
 
-                if name == "booking_link":
+                if name == "room_page":
+                    output = _tool_room_page(facts, args)
+                elif name == "booking_link":
                     output = _tool_link(settings, facts, args)
                 elif name == "check_availability":
                     output = await _tool_availability(booking, args, facts)

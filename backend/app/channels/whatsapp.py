@@ -74,7 +74,7 @@ class WhatsAppChannel:
     def __init__(self, id_instance: str, token: str, timeout: float = 30.0) -> None:
         if not id_instance or not token:
             raise WhatsAppError(
-                "Нужны GREEN_API_ID_INSTANCE и GREEN_API_TOKEN_INSTANCE в .env"
+                "Нужны GREEN_API_ID и GREEN_API_TOKEN в backend/.env"
             )
         self._id = id_instance.strip()
         self._token = token.strip()

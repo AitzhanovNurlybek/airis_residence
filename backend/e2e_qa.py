@@ -35,6 +35,7 @@ from app.booking_system import (  # noqa: E402
 from app.booking_system.exely import ROOM_TYPES, booking_form_url  # noqa: E402
 from app.concierge import (  # noqa: E402
     FULL_TOOLS,
+    ROOM_PAGE_TOOL,
     _sane_price,
     READ_ONLY_TOOLS,
     build_system_prompt,
@@ -390,13 +391,15 @@ def qa_tools() -> None:
     # ничего, чего нет в руках. Расхождение не падает с ошибкой — модель
     # просто отвечает так, будто инструмент отработал, и гость получает
     # выдуманный номер брони. Ловится только сверкой.
+    # room_page даётся всегда: страница номера есть у сайта и без системы
+    # бронирования. Поэтому он в каждом наборе.
     for label, prompt, tools in (
-        ("без системы", none_mode, []),
-        ("боевой Exely", live_mode, READ_ONLY_TOOLS),
-        ("тестовая шахматка", stub_mode, FULL_TOOLS),
+        ("без системы", none_mode, [ROOM_PAGE_TOOL]),
+        ("боевой Exely", live_mode, [ROOM_PAGE_TOOL, *READ_ONLY_TOOLS]),
+        ("тестовая шахматка", stub_mode, [ROOM_PAGE_TOOL, *FULL_TOOLS]),
     ):
         given = {t["name"] for t in tools}
-        for name in ("check_availability", "booking_link", "create_booking",
+        for name in ("room_page", "check_availability", "booking_link", "create_booking",
                      "find_booking", "change_booking", "cancel_booking"):
             promised = name in prompt
             check(
