@@ -32,8 +32,10 @@ from .base import BookingSystemUnavailable, ExternalBooking
 
 logger = logging.getLogger(__name__)
 
-#: За сколько секунд до истечения просим новый токен. Токен живёт около часа,
-#: и запрос на границе срока иногда прилетает уже просроченным.
+#: За сколько секунд до истечения просим новый токен. Токен живёт всего
+#: 15 минут (900 секунд) и без обновления — по документации Exely его
+#: разрешено только перевыпускать заново. Запрос на самой границе срока
+#: иногда прилетает уже просроченным, отсюда запас.
 TOKEN_MARGIN = 60.0
 
 NOT_CONFIGURED = (
@@ -158,9 +160,11 @@ class ExelyApi:
             )
 
         try:
-            lifetime = float(_first(payload, "expires_in", "expiresIn") or 3600)
+            # Запасное значение — тоже 15 минут, а не час: столько документация
+            # обещает, если поле вдруг не придёт в ответе.
+            lifetime = float(_first(payload, "expires_in", "expiresIn") or 900)
         except (TypeError, ValueError):
-            lifetime = 3600.0
+            lifetime = 900.0
 
         self._token = token
         self._expires = time.monotonic() + lifetime

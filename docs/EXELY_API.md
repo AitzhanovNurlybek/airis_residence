@@ -191,8 +191,24 @@ EXELY_WEBHOOK_SECRET=...
 сохраняется целиком и отвечает 200. Но каждое лишнее уведомление — это запись
 в базе, которую никто не читает.
 
-Авторизация — OAuth 2.0: выдадут `client_id` и `client_secret`, по ним
-`POST /auth/token` возвращает токен для заголовка `Authorization: Bearer`.
+Авторизация — OAuth 2.0, client credentials flow. Адрес выдачи токена
+фиксированный, один на всех клиентов Exely:
+
+```
+POST https://connect.hopenapi.com/auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=...&client_secret=...
+```
+
+Токен — JWT, живёт **15 минут**, обновления (refresh) не предусмотрено:
+кончился срок — запрашивай новый тем же способом. Токен в заголовок
+`Authorization: Bearer <access_token>` на каждый запрос.
+
+Лимиты Read Reservation API: список броней — 3 запроса в секунду / 100 в
+минуту, одна бронь по номеру — 10 в секунду / 200 в минуту. Наш код кладёт
+это в EXELY_AUTH_URL — второй из пяти переменных, помимо client_id/secret,
+property_id и адреса самого API (EXELY_API_BASE).
 
 Ключ показывают один раз — сразу в менеджер паролей.
 
