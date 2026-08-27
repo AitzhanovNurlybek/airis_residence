@@ -107,9 +107,11 @@ def render_brief(facts: dict[str, Any]) -> str:
     payment = policy.get("payment") or []
     add(f"- Оплата: {', '.join(payment)}.")
 
+    rooms = facts.get("rooms", [])
+
     add("")
     add("НОМЕРА (цена за ночь, завтрак включён):")
-    for room in facts.get("rooms", []):
+    for room in rooms:
         single = int(room.get("price") or 0)
         double = int(room.get("priceDouble") or single)
         # Цену за двоих пишем, только когда она отличается. Повторять
@@ -123,11 +125,22 @@ def render_brief(facts: dict[str, Any]) -> str:
         if room.get("extraBedPrice"):
             extra = f" Дополнительное место — {_price(room['extraBedPrice'])}."
 
+        # Код нужен инструментам: по нему проверяется наличие и собирается
+        # ссылка на форму брони. Без него модель подставляет похожий на правду
+        # выдуманный, и гость приходит на пустую форму.
+        #
+        # Полные списки оснащения сюда не идут намеренно: они написаны для всех
+        # категорий почти одинаково («сейф и мини-бар», «телевизор, кондиционер,
+        # Wi-Fi»), занимают втрое больше места и различий за собой прячут.
+        # Отличает категории то, что уже есть в строке: площадь, кровати,
+        # вместимость и фраза описания. Общее для всех перечислено в УСЛУГАХ.
         add(
-            f"- {room.get('name')} — {money}. "
+            f"- {room.get('name')} [код {room.get('slug')}] — {money}. "
             f"{room.get('area')}, до {room.get('capacity')} {_guests(room.get('capacity'))}, {room.get('beds')}. "
             f"{room.get('summary')}{extra}"
         )
+        if room.get("url"):
+            add(f"  Фотографии и подробности: {room['url']}")
 
     add("")
     add("УСЛУГИ: " + "; ".join(f"{a.get('title')} ({a.get('note')})" for a in facts.get("amenities", [])))
