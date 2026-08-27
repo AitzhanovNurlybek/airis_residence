@@ -477,14 +477,24 @@ async def qa_hybrid() -> None:
     await init_db()
     hybrid = HybridBookingSystem(SessionLocal, {"comfort": "Comfort"})
 
-    check_in = hotel_today() + timedelta(days=2)
-    check_out = check_in + timedelta(days=2)
-
-    try:
-        free = await hybrid.availability(check_in, check_out)
-    except BookingSystemUnavailable as error:
-        print(f"  ⚠ Exely недоступен, раздел пропущен: {error}")
-        return
+    # Окно ищем, а не берём фиксированное. Отель бывает занят целиком: на
+    # полной загрузке фиксированные «послезавтра + 2 ночи» давали ноль
+    # свободных, и половина раздела — создание, перенос, отмена заявки —
+    # молча не проверялась. Пропуск выглядел как успех.
+    free = None
+    check_in = check_out = hotel_today()
+    for offset in (2, 5, 9, 14, 21, 30, 45):
+        check_in = hotel_today() + timedelta(days=offset)
+        check_out = check_in + timedelta(days=2)
+        try:
+            found = await hybrid.availability(check_in, check_out)
+        except BookingSystemUnavailable as error:
+            print(f"  ⚠ Exely недоступен, раздел пропущен: {error}")
+            return
+        free = found
+        if any((o.rooms_left or 0) > 0 for o in found.offers):
+            print(f"    окно для проверки записи: {check_in} → {check_out}")
+            break
 
     check("наличие пришло", bool(free.offers))
     check("источник — настоящий", free.source == "exely")
@@ -504,7 +514,7 @@ async def qa_hybrid() -> None:
                   str(error))
 
     if not available:
-        print("  ⚠ свободных категорий нет — запись не проверить")
+        print("  ⚠ отель занят на полтора месяца вперёд — запись не проверить")
         return
 
     made = await hybrid.create_booking(
