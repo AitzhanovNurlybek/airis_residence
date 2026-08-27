@@ -254,3 +254,34 @@ async def whatsapp_webhook(
 
     logger.info("Вебхук WhatsApp: ответили %s", message.phone)
     return {"ok": True, "replied": True}
+
+
+@router.post("/lifecycle")
+async def lifecycle_tick(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Разослать сообщения по ходу брони. Дёргается планировщиком.
+
+    Защита та же, что у остальных вебхуков: без верного секрета точка не
+    работает. Адрес открыт интернету, а по нему уходят сообщения гостям от
+    имени отеля — запускать это кто угодно не должен.
+
+    `?dry_run=1` показывает, что ушло бы, ничего не отправляя. С этого стоит
+    начинать после каждой правки текстов.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .lifecycle import run as lifecycle_run
+
+    dry = request.query_params.get("dry_run") in ("1", "true", "yes")
+    result = await lifecycle_run(session, settings, dry_run=dry)
+    return {"ok": True, **result}
