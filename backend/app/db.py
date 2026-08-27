@@ -526,6 +526,46 @@ class LocalPayment(Base):
     )
 
 
+class ExelyEvent(Base):
+    """
+    Уведомление от Exely: бронь создана или отменена.
+
+    Зачем хранить, а не обработать на лету. Гость оформляет бронь в форме
+    Exely — сами мы её не заводим и узнать о ней иначе не можем. Вебхук
+    приходит в веб-приложение, а с гостем переписывается отдельный процесс
+    бота: передать событие из одного в другой можно только через базу.
+
+    Тело сохраняется целиком строкой JSON. Разбор полей у Exely мы пишем по
+    документации, живых ответов ещё не видели, и первое же расхождение
+    разбирать будет не по чему, если сохранить только то, что поняли.
+
+    Повторы Exely присылает штатно: если мы ответили не сразу, уведомление
+    придёт снова. Отсюда `event_key` с уникальным индексом.
+    """
+
+    __tablename__ = "exely_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    #: Чем отличаем повтор от нового события: тип + номер брони.
+    event_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+
+    #: Что произошло, словом Exely: created, cancelled и т.д.
+    kind: Mapped[str] = mapped_column(String(60), default="", index=True)
+    booking_number: Mapped[str] = mapped_column(String(60), default="", index=True)
+    guest_phone: Mapped[str] = mapped_column(String(40), default="", index=True)
+
+    #: Сырое тело уведомления, как прислали.
+    payload: Mapped[str] = mapped_column(Text, default="")
+
+    #: Отработал ли по нему бот (написал гостю, обновил разговор).
+    handled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class DialogMessage(Base):
     """
     Одна реплика переписки с гостем.

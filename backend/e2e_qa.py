@@ -533,6 +533,83 @@ def qa_exely_api() -> None:
               "неизвестно" in word and "отменена" not in word, word)
 
 
+def qa_webhooks() -> None:
+    head("Приём вебхуков Exely")
+
+    import os as _os
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from app.config import get_settings as _gs
+
+    KEY = "qa-secret-abc"
+    was = _os.environ.get("EXELY_WEBHOOK_SECRET")
+    _os.environ["EXELY_WEBHOOK_SECRET"] = KEY
+    _gs.cache_clear()
+    try:
+        import app.main as _main
+
+        client = TestClient(_main.app)
+        # Номер свой на каждый прогон. События копятся в базе, и с постоянным
+        # номером второй запуск QA видел бы повтор там, где проверяет приём.
+        ref = f"QA-{int(time.time())}"
+        body = {"eventType": "BookingCreated", "number": ref,
+                "guest": {"phoneNumber": "+7 701 555 01 01"}}
+
+        # Адрес приёмника открыт всему интернету: его видно в настройках
+        # подключения. Без проверки ключа в базу отеля писала бы улица.
+        check("без ключа не пускает",
+              client.post("/api/webhooks/exely", json=body).status_code == 401)
+        check("с чужим ключом не пускает",
+              client.post("/api/webhooks/exely", json=body,
+                          headers={"X-Api-Key": "wrong-key"}).status_code == 401)
+
+        first = client.post("/api/webhooks/exely", json=body, headers={"X-Api-Key": KEY})
+        check("с верным ключом принимает", first.status_code == 200)
+        check("событие разобрано", first.json().get("booking") == ref, first.text[:80])
+
+        # Exely присылает уведомление снова, если мы ответили медленно.
+        # Второй раз заводить бронь нельзя.
+        again = client.post("/api/webhooks/exely", json=body, headers={"X-Api-Key": KEY})
+        check("повтор не заводит второе событие", again.json().get("duplicate") is True)
+        check("повтор указывает на ту же запись",
+              again.json().get("id") == first.json().get("id"))
+
+        # Ключ может прийти и заголовком Authorization, и параметром адреса:
+        # какой из способов выберет Exely, мы увидим только на боевом.
+        check("ключ в Authorization принимается",
+              client.post("/api/webhooks/exely", json=body,
+                          headers={"Authorization": f"Bearer {KEY}"}).status_code == 200)
+        check("ключ параметром адреса принимается",
+              client.post(f"/api/webhooks/exely?key={KEY}", json=body).status_code == 200)
+
+        # На ошибку отправитель начинает слать повторы. Неразобранное тело —
+        # не повод: оно сохранено целиком, разберёмся потом.
+        broken = client.post(f"/api/webhooks/exely?key={KEY}",
+                             content="не json".encode("utf-8"),
+                             headers={"Content-Type": "application/json"})
+        check("кривое тело не роняет приём", broken.status_code == 200)
+
+        cancel = client.post("/api/webhooks/exely",
+                             json={"event": "BookingCancelled", "reservationNumber": ref},
+                             headers={"X-Api-Key": KEY})
+        check("отмена той же брони — отдельное событие",
+              cancel.status_code == 200 and not cancel.json().get("duplicate"))
+
+        _os.environ["EXELY_WEBHOOK_SECRET"] = ""
+        _gs.cache_clear()
+        check("без настроенного секрета точка выключена",
+              client.post("/api/webhooks/exely", json=body,
+                          headers={"X-Api-Key": KEY}).status_code == 503)
+    finally:
+        if was is None:
+            _os.environ.pop("EXELY_WEBHOOK_SECRET", None)
+        else:
+            _os.environ["EXELY_WEBHOOK_SECRET"] = was
+        _gs.cache_clear()
+
+
 def qa_payments() -> None:
     head("Разбор платёжек")
 
@@ -903,6 +980,7 @@ async def main() -> int:
     qa_modes()
     qa_tools()
     qa_exely_api()
+    qa_webhooks()
     qa_payments()
     await qa_hybrid()
     await qa_access()

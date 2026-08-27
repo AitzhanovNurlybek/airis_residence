@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     exely_auth_url: str = ""
     exely_api_base: str = ""
 
+    #: Секрет вебхука. Адрес приёмника открыт всему интернету, и без секрета
+    #: точка не работает вовсе: писать в базу отеля должен только Exely.
+    exely_webhook_secret: str = ""
+
     @property
     def exely_api_ready(self) -> bool:
         """Есть ли всё, чтобы ходить в официальное API Exely."""
