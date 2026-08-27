@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from .booking_system import BookingSystem, BookingSystemUnavailable
+from .booking_system.exely import booking_form_url
 from .config import Settings
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 
@@ -88,7 +89,15 @@ LIVE_AVAILABILITY_RULES = """
 - Тарифов на один номер бывает несколько. Назови самый дешёвый и, если разница касается завтрака, объясни её одной фразой. Перечислять все подряд не нужно.
 - Условия отмены инструмент возвращает словами отеля. Своими словами их не пересказывай и не смягчай: гость будет на них ссылаться при споре. Если гость спрашивает про отмену, а инструмент условий не вернул, — скажи, что уточнит стойка.
 - Инструмент показывает наличие, но не держит номер. Пока бронь не оформлена, номер могут занять — скажи об этом, если гость собирается приехать не сегодня.
+"""
 
+# Правила записи. Добавляются, ТОЛЬКО когда система бронирования
+# действительно умеет писать. Раньше они шли в одном куске с правилами
+# наличия, и в режиме `exely` консьержу обещали четыре инструмента,
+# которых ему не давали: Exely не создаёт брони через API вовсе.
+# Обещание, которого не подкрепили, модель отрабатывает как умеет —
+# то есть выдумывает.
+BOOKING_RULES = """
 БРОНИРОВАНИЕ
 Ты умеешь оформлять, переносить и отменять брони: create_booking, find_booking, change_booking, cancel_booking.
 
@@ -105,6 +114,27 @@ LIVE_AVAILABILITY_RULES = """
 Найти чужую бронь ты не можешь — инструменты видят только брони этого собеседника. Если гость называет чужой номер брони, скажи, что такой у него нет, и предложи стойку.
 
 Ты не подтверждаешь оплату. Бронь без оплаты — это бронь, а не оплаченный номер; так и говори."""
+
+
+# Правила для режима, где записи нет вовсе, — настоящий Exely. Бронь там
+# рождается только в форме, и другого пути нет. Консьерж доводит гостя до
+# формы и честно говорит, что сам не бронирует. Раньше в этом режиме ему
+# выдавали правила записи выше, и он обещал оформить бронь, не имея ни
+# одного инструмента для этого.
+HANDOFF_RULES = """
+
+БРОНИРОВАНИЕ — ТОЛЬКО ЧЕРЕЗ ФОРМУ
+Сам ты бронь не оформляешь. Брони заводятся в форме бронирования отеля, другого пути нет.
+Не пиши «я забронировал», «бронь оформлена», «поставил вас на эти даты» — этого не произошло, и гость приедет к пустой стойке.
+
+Когда гость определился с датами и категорией:
+1. Проговори выбор словами: даты, категория, цена за ночь, входит завтрак или нет.
+2. Вызови booking_link и пришли ссылку, которую он вернул. Форма откроется с подставленными датами и номером — гостю останется ввести имя и подтвердить.
+3. Скажи прямо: номер закрепится за гостем, только когда он заполнит форму. До этого номер свободен для всех.
+
+Ссылку бери исключительно из инструмента. Не набирай её руками и ничего к ней не дописывай: ошибка в одном символе приведёт гостя на пустую страницу.
+
+Своих броней ты не видишь. На «какая у меня бронь», «перенесите даты», «отмените» отвечай, что этим занимается стойка, и дай контакты из справки. Не выдумывай номер брони и не подтверждай оплату."""
 
 # Локальная шахматка отвечает по своей базе, а не по настоящей системе отеля.
 # Даже при отладке консьерж не должен выдавать её за боевую: привыкнуть к
@@ -224,16 +254,56 @@ def _sane_price(price: int | None, rack: int | None) -> bool:
     return SANE_LOW * rack <= price <= SANE_HIGH * rack
 
 
-READ_ONLY_TOOLS = [AVAILABILITY_TOOL]
+# Ссылку собирает код, а не модель. Модель охотно «вспоминает» правдоподобный
+# адрес с выдуманным кодом категории, и гость попадает на пустую форму —
+# ошибка, которую он заметит, только потратив время.
+BOOKING_LINK_TOOL = {
+    "name": "booking_link",
+    "description": (
+        "Ссылка на форму бронирования отеля с подставленными датами и категорией. "
+        "Вызывай, когда гость выбрал даты и номер и готов бронировать. "
+        "Пришли гостю ровно ту ссылку, которую вернёт инструмент."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "room": {"type": "string", "description": "Код категории (slug) из справки"},
+            "check_in": {"type": "string", "description": "Дата заезда, YYYY-MM-DD"},
+            "check_out": {"type": "string", "description": "Дата выезда, YYYY-MM-DD"},
+            "guests": {"type": "integer", "description": "Гостей в номере"},
+        },
+        "required": ["room"],
+    },
+}
+
+
+READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL]
 FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
 
 
-def build_system_prompt(brief: str, today: str, *, availability: str = "none") -> str:
+def build_system_prompt(
+    brief: str,
+    today: str,
+    *,
+    availability: str = "none",
+    can_book: bool = False,
+) -> str:
+    """Собрать системный промпт под ровно те возможности, что есть сейчас.
+
+    `can_book` — не настройка, а факт: умеет ли подключённая система писать.
+    Раньше правила зависели только от источника наличия, а инструменты — от
+    наличия метода create_booking, и в режиме `exely` эти две ветки
+    расходились: консьержу перечисляли четыре инструмента бронирования, а
+    давали один check_availability. Модель в такой ситуации не сдаётся — она
+    отвечает так, будто инструмент отработал. Теперь признак один на оба
+    решения, и разойтись им негде.
+    """
     rules = RULES
-    if availability == "exely":
+    if availability in ("exely", "stub"):
         rules += LIVE_AVAILABILITY_RULES
-    elif availability == "stub":
-        rules += LIVE_AVAILABILITY_RULES + STUB_AVAILABILITY_RULES
+        rules += BOOKING_RULES if can_book else HANDOFF_RULES
+    if availability == "stub":
+        rules += STUB_AVAILABILITY_RULES
 
     return (
         f"{rules}\n\n"
@@ -273,6 +343,38 @@ def _describe(booking: Any, *, room: str = "") -> str:
         f"{booking.external_id}: {booking.check_in} — {booking.check_out}{tail}, "
         f"{booking.guest_name or 'без имени'}, {booking.total_amount} тенге, {status}"
     )
+
+
+def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any]) -> str:
+    """Собрать ссылку на форму брони.
+
+    Адрес берём из справки (`hotel.url`), а не из настроек: settings.site_url
+    на локальной машине указывает на 127.0.0.1, и такую ссылку гостю слать
+    некуда. Настройки — запасной вариант, если справка почему-то без адреса.
+    """
+    slug = str(args.get("room") or "").strip()
+    known = {str(room.get("slug", "")) for room in facts.get("rooms", [])}
+    if slug and slug not in known:
+        codes = ", ".join(sorted(c for c in known if c))
+        return f"Категории «{slug}» нет. Известные: {codes}"
+
+    site = str(facts.get("hotel", {}).get("url") or getattr(settings, "site_url", "") or "")
+    if not site:
+        return "Адрес сайта неизвестен — ссылку собрать не из чего, дай гостю телефон стойки"
+
+    try:
+        guests = int(args.get("guests") or 0)
+    except (TypeError, ValueError):
+        guests = 0
+
+    url = booking_form_url(
+        site,
+        room_slug=slug,
+        check_in=args.get("check_in"),
+        check_out=args.get("check_out"),
+        guests=guests,
+    )
+    return f"Ссылка на форму брони: {url}"
 
 
 async def _tool_availability(
@@ -527,11 +629,18 @@ async def answer(
 
     guest = guest or {}
     mode = booking.source if booking else "none"
-    system = build_system_prompt(render_brief(facts), today, availability=mode)
+    # Один признак на промпт и на инструменты: что обещано в правилах, то и
+    # лежит в руках. Порядок важен — сначала считаем возможности, потом
+    # собираем промпт.
+    can_book = booking is not None and hasattr(booking, "create_booking")
 
     tools: list[dict[str, Any]] = []
     if booking is not None:
-        tools = FULL_TOOLS if hasattr(booking, "create_booking") else READ_ONLY_TOOLS
+        tools = FULL_TOOLS if can_book else READ_ONLY_TOOLS
+
+    system = build_system_prompt(
+        render_brief(facts), today, availability=mode, can_book=can_book
+    )
 
     depth = max(0, settings.concierge_history_depth)
     messages: list[dict[str, Any]] = [
@@ -584,7 +693,9 @@ async def answer(
                 args = block.get("input") or {}
                 tool_calls.append({"name": name, "input": args})
 
-                if name == "check_availability":
+                if name == "booking_link":
+                    output = _tool_link(settings, facts, args)
+                elif name == "check_availability":
                     output = await _tool_availability(booking, args, facts)
                 elif name == "create_booking":
                     output = await _tool_create(booking, args, facts, guest)

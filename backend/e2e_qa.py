@@ -32,7 +32,7 @@ from app.booking_system import (  # noqa: E402
     StubBookingSystem,
     get_booking_system,
 )
-from app.booking_system.exely import ROOM_TYPES  # noqa: E402
+from app.booking_system.exely import ROOM_TYPES, booking_form_url  # noqa: E402
 from app.concierge import (  # noqa: E402
     FULL_TOOLS,
     _sane_price,
@@ -172,7 +172,59 @@ def qa_exely_parsing() -> None:
     check("продаётся, но количество неизвестно — считаем что есть", plus.rooms_left >= 1,
           str(plus.rooms_left))
 
+    # Exely присылает цену за весь период, а сайт и консьерж говорят «за ночь».
+    # Пока их не разделили, гость на двух ночах слышал двойную цену, а на трёх
+    # — тройную. Проверка идёт на одних и тех же данных с разным числом ночей:
+    # цена за ночь обязана быть одинаковой.
+    def stay(total: float, rack: float) -> dict:
+        return {
+            "room_stays": [
+                {
+                    "room_types": [
+                        {
+                            "code": "5050496",
+                            "room_type_quota_rph": "111",
+                            "placements": [
+                                {"price_after_tax": total, "discount": {"basic_after_tax": rack}}
+                            ],
+                        }
+                    ],
+                    "rate_plans": [{"code": "10123672"}],
+                }
+            ],
+            "room_type_quotas": [{"rph": "111", "quantity": 3}],
+        }
+
+    for nights, total in ((1, 40500.0), (2, 81000.0), (3, 121500.0)):
+        offers = exely._offers(stay(total, 45000.0 * nights), nights)
+        comfort_n = next(o for o in offers if o.room_slug == "comfort")
+        check(f"цена за ночь при {nights} ноч. — 40 500, а не {int(total)}",
+              comfort_n.price_per_night == 40500, str(comfort_n.price_per_night))
+        check(f"прайс при {nights} ноч. тоже за ночь",
+              comfort_n.rates[0].was == 45000, str(comfort_n.rates[0].was))
+
+    # Скидки нет — «было» показывать нечего, иначе гость увидит зачёркнутую
+    # цену, равную настоящей.
+    same = exely._offers(stay(45000.0, 45000.0), 1)
+    check("без скидки старая цена не показывается",
+          next(o for o in same if o.room_slug == "comfort").rates[0].was is None)
+
     check("коды категорий не потерялись", len(ROOM_TYPES) == 6, str(len(ROOM_TYPES)))
+
+    # Неверный код отеля Exely отдаёт как 200 с пустым результатом — это
+    # неотличимо от «всё занято». Опечатка в переменной окружения обязана
+    # падать при создании клиента, а не превращаться в отказ каждому гостю.
+    for bad in ("", "abc", "5095-06", "код"):
+        try:
+            ExelyBookingSystem(hotel_code=bad)
+            check(f"код отеля {bad!r} отклонён", False, "прошёл, хотя не число")
+        except ValueError:
+            check(f"код отеля {bad!r} отклонён", True)
+    check("правильный код принят", ExelyBookingSystem(hotel_code="509506")._hotel == "509506")
+    # Лишний пробел в переменной окружения — частая случайность, и ронять
+    # из-за него весь консьерж незачем: срезаем.
+    check("пробелы вокруг кода срезаются",
+          ExelyBookingSystem(hotel_code=" 509506 ")._hotel == "509506")
     check("Apart известен", "apart" in ROOM_TYPES.values())
 
     # Тарифы: по ним консьерж называет цену, поэтому разбор проверяем отдельно.
@@ -298,9 +350,9 @@ def qa_tools() -> None:
     check("полный набор — пять инструментов", len(FULL_TOOLS) == 5, str(len(FULL_TOOLS)))
     check("есть проверка наличия", "check_availability" in names)
     check("есть оформление", "create_booking" in names)
-    check("только чтение — один инструмент", len(READ_ONLY_TOOLS) == 1)
-    check("в режиме чтения оформления нет",
-          "create_booking" not in {t["name"] for t in READ_ONLY_TOOLS})
+    read_names = {t["name"] for t in READ_ONLY_TOOLS}
+    check("в режиме чтения оформления нет", "create_booking" not in read_names)
+    check("в режиме чтения есть ссылка на форму", "booking_link" in read_names)
 
     for tool in FULL_TOOLS:
         schema = tool["input_schema"]
@@ -325,7 +377,7 @@ def qa_tools() -> None:
 
     brief = "СПРАВКА"
     none_mode = build_system_prompt(brief, "2026-08-24", availability="none")
-    stub_mode = build_system_prompt(brief, "2026-08-24", availability="stub")
+    stub_mode = build_system_prompt(brief, "2026-08-24", availability="stub", can_book=True)
     live_mode = build_system_prompt(brief, "2026-08-24", availability="exely")
     check("без системы — правило про стойку", "подтвердит стойка" in none_mode)
     check("без системы инструментов не обещаем", "check_availability" not in none_mode)
@@ -333,6 +385,39 @@ def qa_tools() -> None:
     check("в боевом предупреждения нет", "ТЕСТОВЫЙ РЕЖИМ" not in live_mode)
     check("везде запрещено выдумывать скидки", all("скидки" in m for m in (none_mode, live_mode)))
     check("везде сказано про язык гостя", all("казахский" in m for m in (none_mode, live_mode)))
+
+    # Главная проверка этого раздела: в правилах не должно быть обещано
+    # ничего, чего нет в руках. Расхождение не падает с ошибкой — модель
+    # просто отвечает так, будто инструмент отработал, и гость получает
+    # выдуманный номер брони. Ловится только сверкой.
+    for label, prompt, tools in (
+        ("без системы", none_mode, []),
+        ("боевой Exely", live_mode, READ_ONLY_TOOLS),
+        ("тестовая шахматка", stub_mode, FULL_TOOLS),
+    ):
+        given = {t["name"] for t in tools}
+        for name in ("check_availability", "booking_link", "create_booking",
+                     "find_booking", "change_booking", "cancel_booking"):
+            promised = name in prompt
+            check(
+                f"{label}: «{name}» обещан ровно тогда, когда есть",
+                promised == (name in given),
+                "обещан в правилах, но не выдан" if promised else "выдан, но в правилах не описан",
+            )
+
+    check("в боевом режиме бронь только через форму", "ТОЛЬКО ЧЕРЕЗ ФОРМУ" in live_mode)
+    check("в боевом запрещено говорить «бронь оформлена»", "бронь оформлена" in live_mode)
+
+    # Ссылка ведёт на нашу страницу с кодом категории Exely. Опечатка в коде
+    # приводит гостя на пустую форму, и он об этом не сообщит — просто уйдёт.
+    link = booking_form_url("https://airisresidence.kz", room_slug="comfort",
+                            check_in="2026-09-12", check_out="2026-09-15", guests=2)
+    check("ссылка ведёт на форму брони", link.startswith("https://airisresidence.kz/booking?"))
+    check("в ссылке код категории Exely", "room-type=5050496" in link)
+    check("в ссылке даты гостя", "checkin=2026-09-12" in link and "checkout=2026-09-15" in link)
+    check("неизвестная категория не ломает ссылку",
+          booking_form_url("https://airisresidence.kz", room_slug="нет-такого")
+          == "https://airisresidence.kz/booking")
 
 
 # ───────────────────────── проверка платёжек ─────────────────────────

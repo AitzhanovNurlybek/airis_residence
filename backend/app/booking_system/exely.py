@@ -71,6 +71,48 @@ RATE_PLANS: dict[str, tuple[str, bool]] = {
     "10145264": ("Best Deal: с завтраком", True),
 }
 
+# Обратная сторона ROOM_TYPES: по slug сайта — код категории в Exely.
+# Строится из того же словаря, чтобы код категории нельзя было завести
+# в двух местах и разойтись.
+CODES: dict[str, str] = {slug: code for code, slug in ROOM_TYPES.items()}
+
+
+def booking_form_url(
+    site_url: str,
+    *,
+    room_slug: str = "",
+    check_in: date | str | None = None,
+    check_out: date | str | None = None,
+    guests: int = 0,
+) -> str:
+    """Ссылка на страницу /booking с подставленными датами и категорией.
+
+    Бронь через API Exely создать нельзя — такого метода нет вовсе (см.
+    docs/EXELY_API.md). Единственный способ довести гостя до брони — форма
+    Exely на нашей же странице. Консьерж присылает ссылку, гость подтверждает
+    сам.
+
+    Про параметры. `room-type` форма читает — на нём построены кнопки
+    «Забронировать» на страницах номеров. Даты и число гостей передаются
+    именами, которые использует сайт; подхватывает ли их виджет, до конца
+    не проверено. Если не подхватит, гость просто выберет даты в самой форме:
+    ссылка всё равно открывает нужную страницу, а не ведёт в никуда.
+    """
+    params: list[tuple[str, str]] = []
+    code = CODES.get(room_slug, "")
+    if code:
+        params.append(("room-type", code))
+    if check_in:
+        params.append(("checkin", str(check_in)))
+    if check_out:
+        params.append(("checkout", str(check_out)))
+    if guests > 0:
+        params.append(("adults", str(guests)))
+
+    base = site_url.rstrip("/") + "/booking"
+    return f"{base}?{urlencode(params)}" if params else base
+
+
 NAMES: dict[str, str] = {
     "standart-single": "Standart Single",
     "standart": "Standart",
@@ -99,7 +141,18 @@ class ExelyBookingSystem:
         room_names: dict[str, str] | None = None,
         timeout: float = 12.0,
     ) -> None:
-        self._hotel = hotel_code
+        # Код отеля уходит в query-строку чужого сервиса, и проверить его
+        # там некому: на неверный код Exely отвечает 200 с пустым результатом.
+        # Пустой результат неотличим от «всё занято» — консьерж начнёт всем
+        # отказывать, и никто не заметит, потому что ошибки нет. Опечатка в
+        # переменной окружения обязана падать здесь и сразу.
+        code = str(hotel_code).strip()
+        if not code.isdigit():
+            raise ValueError(
+                f"Код отеля Exely должен быть числом, получено {code[:40]!r}. "
+                "Проверь EXELY_HOTEL_CODE."
+            )
+        self._hotel = code
         self._host = host.rstrip("/")
         self._names = room_names or {}
         self._timeout = timeout
@@ -145,9 +198,9 @@ class ExelyBookingSystem:
             logger.warning("Exely не ответил про наличие: %s", error)
             raise BookingSystemUnavailable(f"Exely не ответил: {error}") from error
 
-        return Availability(check_in, check_out, nights, self._offers(data), "exely")
+        return Availability(check_in, check_out, nights, self._offers(data, nights), "exely")
 
-    def _offers(self, data: dict[str, Any]) -> list[RoomOffer]:
+    def _offers(self, data: dict[str, Any], nights: int = 1) -> list[RoomOffer]:
         """
         Свободные номера из ответа Exely.
 
@@ -189,7 +242,7 @@ class ExelyBookingSystem:
                 left[slug] = max(left.get(slug, 0), int(count))
 
                 for plan in plans:
-                    parsed = _rate(plan, room_type)
+                    parsed = _rate(plan, room_type, nights)
                     if parsed is not None:
                         rates.setdefault(slug, {})[parsed.code] = parsed
 
@@ -225,8 +278,15 @@ class ExelyBookingSystem:
         raise BookingSystemUnavailable(WRITE_NOT_READY)
 
 
-def _rate(plan: dict[str, Any], room_type: dict[str, Any]) -> RatePlan | None:
-    """Тариф с ценой для конкретной категории."""
+def _rate(plan: dict[str, Any], room_type: dict[str, Any], nights: int = 1) -> RatePlan | None:
+    """Тариф с ценой за ночь для конкретной категории.
+
+    Exely присылает цену за весь период проживания, а не за ночь: на две ночи
+    в Comfort приходит 81 000 при цене 40 500 за ночь. Мы кладём в RatePlan
+    цену за ночь, потому что именно её называет консьерж и именно её показывает
+    сайт. Без деления консьерж говорил гостю двойную цену на двух ночах и
+    тройную на трёх — и звучало это правдоподобно, поэтому не бросалось в глаза.
+    """
     code = str(plan.get("code") or "")
     known = RATE_PLANS.get(code)
     if known:
@@ -248,13 +308,18 @@ def _rate(plan: dict[str, Any], room_type: dict[str, Any]) -> RatePlan | None:
 
     discount = first.get("discount") or {}
     was = discount.get("basic_after_tax")
+
+    per_night = max(int(nights), 1)
+    price_night = int(round(float(price) / per_night))
+    was_night = int(round(float(was) / per_night)) if was else 0
+
     return RatePlan(
         cancellation=_cancellation(plan),
         code=code,
         name=name,
-        price=int(round(float(price))),
+        price=price_night,
         breakfast=breakfast,
-        was=int(round(float(was))) if was and float(was) != float(price) else None,
+        was=was_night if was_night and was_night != price_night else None,
     )
 
 
