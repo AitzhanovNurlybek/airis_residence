@@ -175,7 +175,11 @@ async def serve(dry_run: bool = False) -> int:
 
         # Подтверждаем всё, что пришло, включая чужое и служебное. Иначе
         # очередь застрянет на первом же уведомлении, которое мы игнорируем.
-        await channel.confirm(receipt)
+        # Если Green API не подтвердил удаление — не поднимаем ошибку (сам
+        # confirm() её проглатывает), но хотя бы видно в логе, что творится:
+        # молчаливый сбой здесь неотличим от шторма повторов на глаз.
+        if not await channel.confirm(receipt):
+            log.warning("Green API не подтвердил удаление уведомления %s", receipt)
 
         if message is None or message.is_group:
             continue
@@ -184,6 +188,12 @@ async def serve(dry_run: bool = False) -> int:
 
         if await seen_before(SessionLocal, CHANNEL, message.message_id):
             log.info("повтор %s — пропускаю", message.message_id)
+            # Пауза, а не мгновенный следующий опрос. Без неё повторная
+            # доставка одного и того же сообщения превращается в спин-цикл:
+            # receiveNotification не ждёт полный receiveTimeout, если в
+            # очереди уже есть что отдать, и без задержки здесь бот долбит
+            # API без остановки — увидели это вживую 2026-08-27.
+            await asyncio.sleep(3)
             continue
 
         who = message.sender_name or message.phone
