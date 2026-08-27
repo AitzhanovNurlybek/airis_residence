@@ -20,9 +20,18 @@
 ставить, при повторном запуске он получит второе такое же — это хуже:
 WhatsApp считает повторы спамом и блокирует номер отеля.
 
-**Ночью молчим.** Сообщение в три часа ночи раздражает сильнее, чем
-радует, а гость на него всё равно не ответит. Всё, что выпало на ночь,
-ждёт утра.
+**Ночь различает два вида сообщений, а не запрещает всё подряд.**
+
+Ответ на действие гостя уходит немедленно, в любое время суток. Забронировал
+в три часа ночи — значит не спит и ждёт подтверждения именно сейчас;
+придержать его до утра было бы хуже, чем прислать.
+
+Напоминания, время которых выбираем мы («завтра заезд», «оставьте отзыв»),
+ждут дня. Их польза от часа не зависит, а разбудить ими гостя — верный
+способ получить жалобу вместо отзыва.
+
+Сам консьерж ночного ограничения не имеет вовсе: на вопрос гостя он
+отвечает круглосуточно.
 
 **Без телефона не отправляем.** Бронь могли завести на стойке или с
 агрегатора, где номера нет. Молча пропускаем — писать некуда.
@@ -268,9 +277,6 @@ async def plan_from_calendar(session: AsyncSession, settings: Any) -> list[Plann
 
 async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) -> dict[str, Any]:
     """Разобрать поводы и отправить сообщения."""
-    if quiet_hours():
-        return {"skipped": "ночь — сообщения ждут утра", "hour": hotel_now().hour}
-
     planned = await plan_from_events(session, settings)
 
     # Бронь, созданная накануне заезда, попадает сразу в оба списка: и
@@ -278,23 +284,38 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
     # сообщения подряд — ровно то, за что WhatsApp блокирует номера.
     # Подтверждение важнее: в нём все детали, включая завтрашнюю дату.
     just_confirmed = {p.reason.split()[-1] for p in planned}
+    night = quiet_hours()
+    postponed = 0
     for item in await plan_from_calendar(session, settings):
         if item.reason.split()[-1] in just_confirmed:
             logger.info("Пропускаю «%s»: подтверждение брони уже уходит", item.reason)
             continue
+        if night:
+            # Напоминание никуда не денется: пометка о нём ставится только
+            # при отправке, значит утренний запуск подхватит его снова.
+            postponed += 1
+            continue
         planned.append(item)
 
+    if postponed:
+        logger.info("Ночь: %d напоминаний отложено до утра", postponed)
     await session.commit()
 
     if dry_run:
+        # Отложенные показываем и здесь. Без этого проверка вхолостую ночью
+        # выглядит так, будто напоминаний нет вовсе, — а они есть, просто
+        # ждут утра.
         return {
             "dry_run": True,
+            "hour": hotel_now().hour,
+            "postponed": postponed,
             "planned": [{"phone": p.phone[-4:], "reason": p.reason, "text": p.text}
                         for p in planned],
         }
 
     if not planned:
-        return {"sent": 0, "note": "поводов нет"}
+        return {"sent": 0, "note": "поводов нет",
+                "postponed": postponed, "hour": hotel_now().hour}
 
     try:
         channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
@@ -329,4 +350,4 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
         except WhatsAppError as error:
             logger.warning("Не отправилось (%s): %s", item.reason, error)
 
-    return {"sent": sent, "planned": len(planned)}
+    return {"sent": sent, "planned": len(planned), "postponed": postponed}
