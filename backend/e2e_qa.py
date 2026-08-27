@@ -576,6 +576,14 @@ def qa_webhooks() -> None:
         check("повтор указывает на ту же запись",
               again.json().get("id") == first.json().get("id"))
 
+        # В кабинете Exely имя заголовка задаётся вручную полем «Имя ключа»,
+        # и там стоит EXELY_WEBHOOK_SECRET — то же имя, что у переменной
+        # окружения, но два разных места. Без этого имени в списке настоящее
+        # уведомление получало бы 401 при правильном секрете.
+        check("заголовок EXELY_WEBHOOK_SECRET (как в кабинете Exely) принимается",
+              client.post("/api/webhooks/exely", json=body,
+                          headers={"EXELY_WEBHOOK_SECRET": KEY}).status_code == 200)
+
         # Ключ может прийти и заголовком Authorization, и параметром адреса:
         # какой из способов выберет Exely, мы увидим только на боевом.
         check("ключ в Authorization принимается",
