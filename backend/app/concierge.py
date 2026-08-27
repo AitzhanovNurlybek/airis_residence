@@ -827,6 +827,13 @@ async def answer(
     tool_calls: list[dict[str, Any]] = []
     spent_in = 0
     spent_out = 0
+    # Кешируемая часть считается отдельно: у неё другая цена. Запись в кеш
+    # дороже обычного ввода, чтение — заметно дешевле. Без этих двух счётчиков
+    # учёт врёт: при включённом кешировании input_tokens падает до десятка,
+    # и расход выглядит копеечным, хотя за первый запрос платится за весь
+    # промпт целиком.
+    spent_cache_write = 0
+    spent_cache_read = 0
 
     # Пять кругов: хватает на «посмотреть наличие → оформить → назвать номер».
     # Предел нужен на случай, если модель зациклится на уточнении, — в
@@ -862,6 +869,8 @@ async def answer(
         usage = data.get("usage", {})
         spent_in += usage.get("input_tokens") or 0
         spent_out += usage.get("output_tokens") or 0
+        spent_cache_write += usage.get("cache_creation_input_tokens") or 0
+        spent_cache_read += usage.get("cache_read_input_tokens") or 0
         content = data.get("content", [])
 
         if data.get("stop_reason") == "tool_use" and booking is not None:
@@ -910,7 +919,12 @@ async def answer(
             "availability": mode,
             "toolCalls": tool_calls,
             "messages": messages + [{"role": "assistant", "content": text}],
-            "usage": {"in": spent_in, "out": spent_out},
+            "usage": {
+                "in": spent_in,
+                "out": spent_out,
+                "cacheWrite": spent_cache_write,
+                "cacheRead": spent_cache_read,
+            },
         }
 
     return {"text": FALLBACK, "ok": False, "reason": "модель не сошлась за пять кругов"}
