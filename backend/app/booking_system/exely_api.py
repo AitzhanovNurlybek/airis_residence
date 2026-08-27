@@ -197,9 +197,16 @@ class ExelyApi:
         if not number:
             return None
         data = await self._get(f"/v1/properties/{self._property}/bookings/{number}")
-        if not data:
+        if not isinstance(data, dict):
             return None
-        return self._booking(data if isinstance(data, dict) else {})
+        # Документация подтверждена: ответ обёрнут в {"booking": {...}},
+        # а не отдаёт бронь на верхнем уровне. Раньше код читал данные из
+        # обёртки целиком — все поля оказывались бы None, и бронь молча
+        # пропадала бы, хотя запрос прошёл успешно.
+        booking = data.get("booking")
+        if not isinstance(booking, dict):
+            return None
+        return self._booking(booking)
 
     async def find_bookings(self, *, phone: str = "", name: str = "") -> list[ExternalBooking]:
         """Брони гостя.
@@ -239,7 +246,11 @@ class ExelyApi:
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
-            for key in ("bookings", "reservations", "items", "data", "results"):
+            # bookingSummaries — подтверждённое имя из документации
+            # («Get booking summaries»). Остальные — на случай, если у
+            # других версий API оно называется иначе.
+            for key in ("bookingSummaries", "bookings", "reservations", "items",
+                       "data", "results"):
                 value = data.get(key)
                 if isinstance(value, list):
                     return value
@@ -294,8 +305,34 @@ class ExelyApi:
         return str(_first(row, "guestName", "customerName") or "")
 
     def _booking(self, row: dict[str, Any]) -> ExternalBooking | None:
+        # Подтверждено документацией: у полной брони дат на верхнем уровне
+        # нет вовсе — они лежат внутри каждого элемента roomStays (бронь может
+        # включать несколько проживаний с разными периодами). У краткой
+        # сводки (bookingSummaries) точная форма не показана примером, поэтому
+        # сначала пробуем верхний уровень на случай, если она плоская, и
+        # только потом идём в roomStays.
         check_in = _as_date(_first(row, "arrivalDate", "checkInDate", "checkIn", "startDate"))
         check_out = _as_date(_first(row, "departureDate", "checkOutDate", "checkOut", "endDate"))
+        if check_in is None or check_out is None:
+            stays = row.get("roomStays")
+            if isinstance(stays, list):
+                ins = [
+                    d for stay in stays if isinstance(stay, dict)
+                    for d in [_as_date(_first(stay, "arrivalDate", "checkInDate", "checkIn"))]
+                    if d is not None
+                ]
+                outs = [
+                    d for stay in stays if isinstance(stay, dict)
+                    for d in [_as_date(_first(stay, "departureDate", "checkOutDate", "checkOut"))]
+                    if d is not None
+                ]
+                # Несколько проживаний — берём весь период целиком: от самого
+                # раннего заезда до самого позднего выезда.
+                if ins:
+                    check_in = min(ins)
+                if outs:
+                    check_out = max(outs)
+
         number = _first(row, "number", "reservationNumber", "bookingNumber", "id")
 
         # Бронь без номера или без дат показывать гостю нельзя: он спросит

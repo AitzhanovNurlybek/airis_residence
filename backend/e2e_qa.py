@@ -454,10 +454,21 @@ def qa_tools() -> None:
 def qa_exely_api() -> None:
     head("Официальное API Exely (брони)")
 
-    from app.config import get_settings
+    from app.config import Settings
 
+    # Не читаем боевой .env: к моменту подключения реальных ключей отеля
+    # проверка на пустых значениях иначе стала бы неверной — не про баг,
+    # а про то, что .env больше не пуст. Собираем Settings напрямую.
     check("без ключей доступ не считается настроенным",
-          not get_settings().exely_api_ready)
+          not Settings(
+              exely_client_id="", exely_client_secret="",
+              exely_property_id="", exely_auth_url="", exely_api_base="",
+          ).exely_api_ready)
+    check("с ключами доступ считается настроенным",
+          Settings(
+              exely_client_id="a", exely_client_secret="b",
+              exely_property_id="c", exely_auth_url="d", exely_api_base="e",
+          ).exely_api_ready)
 
     api = ExelyApi("id", "secret", "777", auth_url="https://a/token", api_base="https://b")
 
@@ -508,6 +519,37 @@ def qa_exely_api() -> None:
     check("с доступом Exely брони ищет", with_access.can_find_bookings is True)
     check("Exely не заводит брони ни в каком случае",
           not hasattr(with_access, "create_booking"))
+
+    # Три факта, подтверждённых официальной документацией 2026-08-27, а не
+    # угаданных. Раньше код был написан по догадке, и все три оказались бы
+    # неверны на боевом ответе.
+    detail_response = {
+        "booking": {
+            "propertyId": "7291", "number": "20240325-7291-260123396",
+            "status": "Cancelled", "currencyCode": "RUB",
+            "roomStays": [{"arrivalDate": "2026-09-12", "departureDate": "2026-09-15"}],
+            "total": {"amount": 121500}, "customer": {"phone": "+77015550101",
+                                                       "fullName": "Тест Тестов"},
+        }
+    }
+    # Ответ на бронь обёрнут в {"booking": {...}} — без распаковки все поля
+    # читались бы из обёртки и оказывались бы пустыми.
+    inner = detail_response["booking"]
+    parsed = api._booking(inner)
+    check("бронь из детального ответа разобрана", parsed is not None
+          and parsed.external_id == "20240325-7291-260123396")
+    check("даты найдены внутри roomStays, а не на верхнем уровне",
+          parsed is not None and str(parsed.check_in) == "2026-09-12"
+          and str(parsed.check_out) == "2026-09-15")
+    check("сумма из объекта total.amount", parsed is not None
+          and parsed.total_amount == 121500)
+
+    # Список сводок лежит под ключом bookingSummaries, а не bookings —
+    # общее для многих API имя, которое мы предполагали по умолчанию.
+    summary_response = {"continueToken": "x", "hasMoreData": False,
+                        "bookingSummaries": [inner]}
+    check("список сводок читается из bookingSummaries",
+          len(api._rows(summary_response)) == 1)
 
     # Самая дорогая ошибка этого раздела. Раньше статус считался так:
     # «действует», если строка ровно "booked", иначе «отменена». Локальная
