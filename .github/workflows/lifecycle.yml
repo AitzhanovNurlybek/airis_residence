@@ -23,6 +23,15 @@ jobs:
   send:
     runs-on: ubuntu-latest
     steps:
+      - name: Перенести брони для поиска по имени
+        run: |
+          # Порция за раз; первый полный обход займёт несколько дней запусков,
+          # дальше почти мгновенно — неизменившиеся пропускаются.
+          code=$(curl -s -o sync.json -w "%{http_code}" --max-time 120             -X POST "https://airisresidence.kz/api/backend/api/webhooks/sync-bookings"             -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "sync → $code"; cat sync.json; echo
+          # Не роняем шаг: рассылка гостям важнее и должна пойти в любом случае.
+          [ "$code" = "200" ] || echo "::warning::перенос броней вернул $code"
+
       - name: Разослать
         run: |
           code=$(curl -s -o response.json -w "%{http_code}" \

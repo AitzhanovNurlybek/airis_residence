@@ -295,3 +295,38 @@ async def lifecycle_tick(
     dry = request.query_params.get("dry_run") in ("1", "true", "yes")
     result = await lifecycle_run(session, settings, dry_run=dry)
     return {"ok": True, **result}
+
+
+@router.post("/sync-bookings")
+async def sync_bookings(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Перенести порцию броней из Exely — для поиска по имени гостя.
+
+    Дёргается планировщиком. Обрабатывает небольшую пачку за раз и
+    продолжает с места, где остановился, поэтому первый полный обход
+    занимает несколько запусков, а дальше почти ничего не делает.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    if not settings.exely_api_ready:
+        return {"ok": False, "error": "доступ к API Exely не настроен"}
+
+    from .booking_sync import sync
+    from .booking_system.exely_api import ExelyApi
+
+    api = ExelyApi(
+        settings.exely_client_id, settings.exely_client_secret,
+        settings.exely_property_id, auth_url=settings.exely_auth_url,
+        api_base=settings.exely_api_base, timeout=30.0,
+    )
+    return await sync(session, api, settings.exely_property_id)

@@ -566,6 +566,46 @@ class ExelyEvent(Base):
     )
 
 
+class ExelyBooking(Base):
+    """
+    Копия брони из Exely — чтобы искать её по имени гостя.
+
+    Зачем копия. Гость, забывший номер брони, называет своё имя. А имя в
+    Exely лежит только в детальном запросе по каждой броне отдельно: в
+    списке есть лишь номер, статус и дата изменения. Замерено: собрать имена
+    всех броней отеля — двенадцать минут. В переписке столько не ждут.
+
+    Поэтому брони переносятся сюда заранее, порциями, по расписанию. Поиск
+    по имени идёт уже здесь и занимает миллисекунды.
+
+    Хранится только то, что нужно для ответа гостю о его же броне. Ни карт,
+    ни паспортов, ни адресов — этого и в API нет.
+    """
+
+    __tablename__ = "exely_bookings"
+
+    number: Mapped[str] = mapped_column(String(60), primary_key=True)
+    status: Mapped[str] = mapped_column(String(40), default="", index=True)
+
+    #: Имя целиком, как в Exely, и оно же в нижнем регистре — по второму
+    #: идёт поиск. Отдельная колонка, а не приведение при запросе: иначе
+    #: индекс не работает и поиск идёт перебором всей таблицы.
+    guest_name: Mapped[str] = mapped_column(String(200), default="")
+    guest_search: Mapped[str] = mapped_column(String(200), default="", index=True)
+
+    check_in: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    check_out: Mapped[date | None] = mapped_column(Date, nullable=True)
+    total_amount: Mapped[int] = mapped_column(Integer, default=0)
+    room_name: Mapped[str] = mapped_column(String(120), default="")
+
+    #: Когда бронь последний раз менялась в Exely. По нему решаем, надо ли
+    #: перечитывать деталь: неизменившиеся не трогаем.
+    modified_at: Mapped[str] = mapped_column(String(40), default="")
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class DialogMessage(Base):
     """
     Одна реплика переписки с гостем.

@@ -470,7 +470,7 @@ def qa_tools() -> None:
 # ───────────────────────── проверка платёжек ─────────────────────────
 
 
-def qa_exely_api() -> None:
+async def qa_exely_api() -> None:
     head("Официальное API Exely (брони)")
 
     from app.config import Settings
@@ -549,6 +549,26 @@ def qa_exely_api() -> None:
     found = _a.get_event_loop().run_until_complete(api.find_bookings(phone="+77087241460"))         if False else []
     check("поиск по телефону больше ничего не обещает",
           "не отдаёт" in (api.find_bookings.__doc__ or ""))
+    # Имя не пароль: в базе отеля один человек встречается дважды, а
+    # однофамильцы — тем более. Поэтому одной фамилии для выдачи брони
+    # мало, нужна ещё дата заезда: свой гость её помнит, чужой не угадает.
+    from app.booking_sync import find_by_name as _by_name
+    from app.db import SessionLocal as _S2, ExelyBooking as _EB, init_db as _init
+    await _init()
+    async with _S2() as _sess:
+        _sess.add(_EB(number="QA-NAME-1", status="Active", guest_name="Тестов Пётр",
+                      guest_search="тестов пётр", check_in=date(2026, 9, 20),
+                      check_out=date(2026, 9, 22), total_amount=50000,
+                      room_name="Comfort"))
+        await _sess.commit()
+        check("поиск по фамилии находит", len(await _by_name(_sess, "Тестов")) >= 1)
+        check("регистр не мешает", len(await _by_name(_sess, "тестов")) >= 1)
+        # Два символа совпадут с половиной базы — такой поиск бесполезен и
+        # опасен: он выдаст первую попавшуюся чужую бронь.
+        check("слишком короткий запрос игнорируется", not await _by_name(_sess, "Те"))
+        check("несуществующая фамилия ничего не даёт",
+              not await _by_name(_sess, "Такоготочнонет"))
+
     check("в правилах запрещено говорить «броней нет» без номера",
           "у вас нет броней" in build_system_prompt(
               "с", "2026-08-29", availability="exely", can_find=True).lower())
@@ -1184,7 +1204,7 @@ async def main() -> int:
     qa_exely_parsing()
     qa_modes()
     qa_tools()
-    qa_exely_api()
+    await qa_exely_api()
     qa_webhooks()
     qa_freedompay()
     qa_payments()
