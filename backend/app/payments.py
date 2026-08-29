@@ -21,9 +21,12 @@ ForteBank. Названия полей могут отличаться: свер
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import secrets
 import uuid
 from abc import ABC, abstractmethod
+from typing import Any
 
 import httpx
 
@@ -164,12 +167,128 @@ class ForteBankProvider(HalykEpayProvider):
     name = "fortebank"
 
 
+class FreedomPayProvider(PaymentProvider):
+    """
+    FreedomPay (Казахстан), протокол Merchant API.
+
+    Отличается от Halyk и Forte тем, что не использует OAuth: каждый запрос
+    подписывается MD5-подписью из его собственных полей и секретного слова.
+    Токен получать не нужно, зато подпись обязана совпасть до символа.
+
+    Как считается подпись (docs.freedompay.kz → Merchant API → Введение):
+
+        имя_скрипта ; поля_по_алфавиту ; секретное_слово
+
+    Всё через точку с запятой, MD5 в нижнем регистре. Тонкость, на которой
+    ошибаются чаще всего: **в подпись входят ВСЕ поля запроса**, включая те,
+    что добавили сверх документации. Добавил параметр и забыл про подпись —
+    получишь отказ без объяснения причины.
+
+    Вторая тонкость: сортировка по имени поля, а не по порядку в запросе.
+    """
+
+    name = "freedompay"
+    BASE = "https://api.freedompay.kz"
+
+    def _sign(self, script: str, fields: dict[str, Any]) -> str:
+        """Подпись запроса или проверка ответа — считается одинаково."""
+        # pg_sig в подпись не входит: его как раз и вычисляем.
+        parts = [script] + [
+            str(fields[k]) for k in sorted(fields) if k != "pg_sig"
+        ] + [self.settings.payment_client_secret]
+        return hashlib.md5(";".join(parts).encode("utf-8")).hexdigest()
+
+    async def create_payment(
+        self,
+        *,
+        order_id: str,
+        amount_tenge: int,
+        description: str,
+        email: str | None = None,
+        phone: str | None = None,
+    ) -> str:
+        script = "init_payment.php"
+        fields: dict[str, Any] = {
+            "pg_order_id": order_id,
+            "pg_merchant_id": self.settings.payment_terminal_id,
+            "pg_amount": str(amount_tenge),
+            "pg_currency": "KZT",
+            "pg_description": description[:255],
+            "pg_salt": secrets.token_hex(8),
+            "pg_success_url": self.settings.payment_success_url,
+            "pg_failure_url": self.settings.payment_failure_url,
+            "pg_result_url": self.settings.payment_result_url,
+            # Просим не автосписание, а обычную оплату с формы банка.
+            "pg_testing_mode": "1" if self.settings.payment_testing else "0",
+        }
+        if email:
+            fields["pg_user_contact_email"] = email
+        if phone:
+            fields["pg_user_phone"] = "".join(c for c in phone if c.isdigit())
+
+        fields["pg_sig"] = self._sign(script, fields)
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(f"{self.BASE}/{script}", data=fields)
+                response.raise_for_status()
+                body = response.text
+        except Exception as error:  # noqa: BLE001
+            logger.warning("FreedomPay не ответил: %s", error)
+            raise PaymentError(f"FreedomPay недоступен: {error}") from error
+
+        # Ответ приходит XML — тащить ради него парсер незачем, полей два.
+        status = _tag(body, "pg_status")
+        if status != "ok":
+            code = _tag(body, "pg_error_code")
+            message = _tag(body, "pg_error_description") or "без описания"
+            logger.warning("FreedomPay отказал: код %s, %s", code, message)
+            raise PaymentError(f"FreedomPay отказал ({code}): {message}")
+
+        url = _tag(body, "pg_redirect_url")
+        if not url:
+            raise PaymentError("FreedomPay не вернул ссылку на оплату")
+        return url
+
+    def verify_callback(self, payload: dict, headers: dict) -> bool:
+        """Уведомление подписано тем же способом, что и запрос.
+
+        Проверять обязательно: адрес уведомления открыт интернету, и без
+        проверки подписи любой желающий мог бы объявить бронь оплаченной.
+        """
+        got = str(payload.get("pg_sig") or "")
+        if not got:
+            return False
+        # Имя скрипта в подписи уведомления — последняя часть нашего
+        # result_url, а не init_payment.php.
+        script = self.settings.payment_result_url.rstrip("/").rsplit("/", 1)[-1]
+        return secrets.compare_digest(got.lower(), self._sign(script, payload))
+
+    @staticmethod
+    def parse_callback(payload: dict) -> tuple[str | None, str]:
+        order = payload.get("pg_order_id")
+        result = str(payload.get("pg_result") or "")
+        # pg_result: 1 — оплачено, 0 — отказ. Всё прочее считаем «в процессе»:
+        # объявлять бронь оплаченной по незнакомому коду нельзя.
+        status = {"1": "paid", "0": "failed"}.get(result, "pending")
+        return (str(order) if order else None, status)
+
+
+def _tag(xml: str, name: str) -> str:
+    """Значение одного тега из плоского XML-ответа."""
+    start, end = f"<{name}>", f"</{name}>"
+    if start not in xml or end not in xml:
+        return ""
+    return xml.split(start, 1)[1].split(end, 1)[0].strip()
+
+
 def get_provider(settings: Settings) -> PaymentProvider | None:
     if not settings.payment_configured:
         return None
     providers = {
         "epay_halyk": HalykEpayProvider,
         "fortebank": ForteBankProvider,
+        "freedompay": FreedomPayProvider,
     }
     cls = providers.get(settings.payment_provider)
     if cls is None:

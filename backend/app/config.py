@@ -86,7 +86,16 @@ class Settings(BaseSettings):
     payment_base_url: str = ""          # адрес API банка
     payment_success_url: str = "https://airisresidence.kz/oplata/uspeh"
     payment_failure_url: str = "https://airisresidence.kz/oplata/oshibka"
-    payment_webhook_secret: str = ""    # для проверки подписи колбэка
+    payment_webhook_secret: str = ""
+
+    #: Секретное слово мерчанта. У FreedomPay им подписывается каждый запрос
+    #: и каждое уведомление — отдельного токена там нет.
+    payment_client_secret: str = ""
+    #: Куда банк присылает результат. Отличается от success_url: тот для
+    #: браузера гостя, этот — для сервера, и гость его не видит.
+    payment_result_url: str = "https://airisresidence.kz/api/backend/api/payments/result"
+    #: Тестовый режим банка: платежи проходят без списания денег.
+    payment_testing: bool = True    # для проверки подписи колбэка
 
     # ─── ИИ-консьерж (WhatsApp, Instagram, сайт) ───────────────────────
     # Факты об отеле консьерж не хранит у себя: он берёт их с /api/knowledge

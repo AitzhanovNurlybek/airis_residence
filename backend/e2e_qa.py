@@ -671,6 +671,58 @@ def qa_webhooks() -> None:
         _gs.cache_clear()
 
 
+def qa_freedompay() -> None:
+    head("FreedomPay: подпись и разбор ответа")
+
+    import hashlib as _h
+    from app.config import Settings as _S
+    from app.payments import FreedomPayProvider, _tag
+
+    prov = FreedomPayProvider(_S(
+        payment_provider="freedompay", payment_terminal_id="570767",
+        payment_client_secret="secret_word",
+        payment_result_url="https://airisresidence.kz/api/backend/api/payments/result"))
+
+    fields = {"pg_amount": "1000", "pg_currency": "KZT", "pg_description": "Test",
+              "pg_merchant_id": "570767", "pg_salt": "abc123"}
+    want = _h.md5(";".join(["init_payment.php", "1000", "KZT", "Test",
+                            "570767", "abc123", "secret_word"]).encode()).hexdigest()
+
+    # Подпись — единственное, что отделяет наш запрос от чужого. Ошибка в
+    # ней даёт отказ банка без внятной причины, поэтому сверяем с примером
+    # из документации FreedomPay посимвольно.
+    check("подпись совпадает с алгоритмом документации",
+          prov._sign("init_payment.php", fields) == want)
+    check("pg_sig не участвует в собственном расчёте",
+          prov._sign("init_payment.php", dict(fields, pg_sig="мусор")) == want)
+    # Поля сортируются по имени, а не по порядку в словаре: иначе подпись
+    # зависела бы от того, в каком порядке их собрали в коде.
+    check("порядок полей не влияет на подпись",
+          prov._sign("init_payment.php",
+                     {k: fields[k] for k in reversed(list(fields))}) == want)
+
+    # Уведомление об оплате приходит на открытый адрес. Без проверки подписи
+    # любой желающий мог бы объявить чужую бронь оплаченной.
+    good = dict(fields)
+    good["pg_sig"] = prov._sign("result", good)
+    check("верно подписанное уведомление принимается", prov.verify_callback(good, {}))
+    check("подделанное уведомление отвергается",
+          not prov.verify_callback(dict(good, pg_sig="0" * 32), {}))
+    check("уведомление без подписи отвергается",
+          not prov.verify_callback(dict(fields), {}))
+
+    check("оплата распознана", FreedomPayProvider.parse_callback(
+        {"pg_order_id": "A-1", "pg_result": "1"}) == ("A-1", "paid"))
+    check("отказ распознан", FreedomPayProvider.parse_callback(
+        {"pg_order_id": "A-1", "pg_result": "0"}) == ("A-1", "failed"))
+    # Незнакомый код не должен превращаться в «оплачено»: это деньги.
+    check("незнакомый код не считается оплатой", FreedomPayProvider.parse_callback(
+        {"pg_order_id": "A-1", "pg_result": "7"}) == ("A-1", "pending"))
+
+    check("тег из ответа читается", _tag("<pg_status>ok</pg_status>", "pg_status") == "ok")
+    check("отсутствующий тег не роняет", _tag("<a>1</a>", "pg_redirect_url") == "")
+
+
 def qa_payments() -> None:
     head("Разбор платёжек")
 
@@ -1056,6 +1108,7 @@ async def main() -> int:
     qa_tools()
     qa_exely_api()
     qa_webhooks()
+    qa_freedompay()
     qa_payments()
     await qa_hybrid()
     await qa_access()
