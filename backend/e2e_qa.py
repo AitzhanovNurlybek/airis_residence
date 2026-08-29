@@ -1293,6 +1293,187 @@ async def qa_channels() -> None:
     await wipe()
 
 
+async def qa_corporate() -> None:
+    """Корпоративный кабинет: от заведения компании до брони сотрудником.
+
+    Раздел появился позже остальных, и до него на кабинет не было ни одной
+    проверки — при том, что это отдельный продукт, который показывают
+    компаниям. Ломается он тихо: страницы открываются, вход работает, а
+    договорная цена не применяется, и сотрудник видит обычный прайс.
+    Заметят это на счёте, то есть поздно.
+
+    Всё идёт по HTTP, а не вызовом функций: половина смысла кабинета — в
+    доступах и схемах запроса, а они живут именно на этом слое. Проверка
+    убирает за собой и потому переживает повторный запуск.
+    """
+    head("Корпоративный кабинет")
+
+    from httpx import ASGITransport  # noqa: PLC0415 — нужен только здесь
+    from sqlalchemy import delete, select  # noqa: PLC0415
+
+    from app.db import (  # noqa: PLC0415
+        Company,
+        CompanyRate,
+        CompanyUser,
+        CorpBooking,
+        Room,
+    )
+    from app.config import get_settings  # noqa: PLC0415
+    from app.main import app  # noqa: PLC0415
+
+    settings = get_settings()
+
+    SLUG = "qa-korp-proverka"
+    MAIL = "qa-korp@example.invalid"
+    PASS = "qa-parol-sotrudnika-1"
+
+    async def wipe_corp() -> None:
+        async with SessionLocal() as ses:
+            found = (
+                await ses.execute(select(Company).where(Company.slug == SLUG))
+            ).scalar_one_or_none()
+            if found is None:
+                return
+            await ses.execute(delete(CorpBooking).where(CorpBooking.company_id == found.id))
+            await ses.execute(delete(CompanyRate).where(CompanyRate.company_id == found.id))
+            await ses.execute(delete(CompanyUser).where(CompanyUser.company_id == found.id))
+            await ses.execute(delete(Company).where(Company.id == found.id))
+            await ses.commit()
+
+    await wipe_corp()
+    try:
+        async with SessionLocal() as ses:
+            room = (
+                await ses.execute(select(Room).where(Room.is_published.is_(True)).limit(1))
+            ).scalar_one_or_none()
+        if room is None:
+            check("есть опубликованный номер для проверки", False, "в базе нет номеров")
+            return
+        slug, public = room.slug, room.price
+
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://qa") as hotel:
+            answer = await hotel.post(
+                "/api/auth/login",
+                json={"username": settings.admin_username, "password": settings.admin_password},
+            )
+            body = answer.json() if answer.status_code == 200 else {}
+            token = body.get("token") or body.get("accessToken") or body.get("access_token")
+            check("отель входит в админку", bool(token), f"HTTP {answer.status_code}")
+            if not token:
+                return
+            head_auth = {"Authorization": f"Bearer {token}"}
+
+            made = await hotel.post(
+                "/api/admin/corp/companies",
+                headers=head_auth,
+                json={
+                    "slug": SLUG,
+                    "name": "ТОО Проверка",
+                    "discountPercent": 15,
+                    "contactName": "И",
+                    "contactPhone": "+77000000000",
+                    "contactEmail": "qa@example.invalid",
+                },
+            )
+            check("компания заводится", made.status_code == 201,
+                  f"HTTP {made.status_code} {made.text[:80]}")
+
+            # Договорная цена за конкретную категорию — то, ради чего кабинет и
+            # существует. Ставим заведомо ниже прайса, чтобы подмена была видна,
+            # а не совпала со скидкой случайно.
+            deal = max(100, public // 2 // 100 * 100)
+            rates = await hotel.put(
+                f"/api/admin/corp/companies/{SLUG}/rates",
+                headers=head_auth,
+                json=[{"roomSlug": slug, "price": deal}],
+            )
+            check("договорные цены сохраняются", rates.status_code == 200,
+                  f"HTTP {rates.status_code} {rates.text[:80]}")
+
+            staff_made = await hotel.post(
+                f"/api/admin/corp/companies/{SLUG}/users",
+                headers=head_auth,
+                json={
+                    "email": MAIL,
+                    "fullName": "Бухгалтер",
+                    "phone": "+77001112233",
+                    "role": "admin",
+                    "password": PASS,
+                },
+            )
+            check("первый сотрудник заводится отелем", staff_made.status_code == 201,
+                  f"HTTP {staff_made.status_code} {staff_made.text[:80]}")
+
+            booking: dict = {}
+            # Отдельный клиент: у сотрудника компании свои доступы, и одалживать
+            # ему админский токен нельзя — иначе проверка докажет только то, что
+            # работает админка.
+            async with httpx.AsyncClient(transport=transport, base_url="http://qa") as staff:
+                entered = await staff.post(
+                    "/api/corp/login", json={"email": MAIL, "password": PASS}
+                )
+                check("сотрудник входит в кабинет", entered.status_code == 200,
+                      f"HTTP {entered.status_code}")
+                sj = entered.json() if entered.status_code == 200 else {}
+                stoken = sj.get("token") or sj.get("accessToken") or sj.get("access_token")
+                staff_auth = {"Authorization": f"Bearer {stoken}"}
+
+                wrong = await staff.post(
+                    "/api/corp/login", json={"email": MAIL, "password": "неверный"}
+                )
+                check("с неверным паролем в кабинет не пускают", wrong.status_code >= 400,
+                      f"HTTP {wrong.status_code}")
+
+                listing = await staff.get("/api/corp/rooms", headers=staff_auth)
+                rooms = listing.json() if listing.status_code == 200 else []
+                mine = next((x for x in rooms if x.get("slug") == slug), None)
+                check("номера отдаются сотруднику", mine is not None, f"HTTP {listing.status_code}")
+                if mine:
+                    check("договорная цена применилась", mine.get("corpPrice") == deal,
+                          f"{mine.get('corpPrice')} вместо {deal}")
+                    # Публичная цена рядом — нарочно: сотрудник должен видеть,
+                    # что через кабинет дешевле, иначе уйдёт на агрегатор.
+                    check("прайс показан рядом для сравнения",
+                          mine.get("publicPrice") == public, str(mine.get("publicPrice")))
+
+                closed = await staff.get("/api/corp/rooms")
+                check("без входа кабинет закрыт", closed.status_code >= 400,
+                      f"HTTP {closed.status_code}")
+
+                check_in = (hotel_today() + timedelta(days=10)).isoformat()
+                check_out = (hotel_today() + timedelta(days=12)).isoformat()
+                created = await staff.post(
+                    "/api/corp/bookings",
+                    headers=staff_auth,
+                    json={
+                        "checkIn": check_in,
+                        "checkOut": check_out,
+                        "comment": "проверка",
+                        "items": [{"roomSlug": slug, "guestName": "Петров П.", "guests": 1}],
+                    },
+                )
+                check("сотрудник оформляет бронь", created.status_code == 201,
+                      f"HTTP {created.status_code} {created.text[:80]}")
+                booking = created.json() if created.status_code == 201 else {}
+                check("две ночи посчитаны по договорной цене",
+                      booking.get("totalAmount") == deal * 2,
+                      f"{booking.get('totalAmount')} вместо {deal * 2}")
+                check("номер брони присвоен", bool(booking.get("number")),
+                      str(booking.get("number")))
+
+                own = await staff.get("/api/corp/bookings", headers=staff_auth)
+                check("бронь видна сотруднику",
+                      own.status_code == 200 and len(own.json() or []) == 1,
+                      f"HTTP {own.status_code}")
+
+            seen = await hotel.get("/api/admin/corp/bookings", headers=head_auth)
+            ours = [b for b in (seen.json() or []) if b.get("number") == booking.get("number")]
+            check("бронь видна отелю", bool(ours), f"HTTP {seen.status_code}")
+    finally:
+        await wipe_corp()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -1360,6 +1541,7 @@ async def main() -> int:
     await qa_hybrid()
     await qa_access()
     await qa_channels()
+    await qa_corporate()
     await qa_knowledge()
 
     total = passed + len(failed)
