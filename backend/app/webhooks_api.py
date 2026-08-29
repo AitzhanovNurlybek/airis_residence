@@ -40,7 +40,7 @@ from .channels.whatsapp import _parse, for_whatsapp
 from .config import Settings, get_settings
 from .concierge import FALLBACK
 from .db import ExelyEvent, SessionLocal, get_session
-from .dialogs import save_turn, seen_before
+from .dialogs import answered_same_recently, save_turn, seen_before
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +231,16 @@ async def whatsapp_webhook(
     if await seen_before(SessionLocal, WA_CHANNEL, message.message_id):
         logger.info("Вебхук WhatsApp: повтор %s — пропускаю", message.message_id)
         return {"ok": True, "duplicate": True}
+
+    # Вторая защита, поверх дедупа по идентификатору: WhatsApp при плохой
+    # связи доставляет одну фразу гостя как два РАЗНЫХ сообщения, и по
+    # идентификатору это не поймать. Гость на этом получал два ответа подряд.
+    if message.text and await answered_same_recently(
+        SessionLocal, WA_CHANNEL, message.chat_id, message.text
+    ):
+        logger.info("Вебхук WhatsApp: та же фраза от %s только что — пропускаю",
+                    message.phone)
+        return {"ok": True, "duplicate": True, "reason": "same text"}
 
     try:
         channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)

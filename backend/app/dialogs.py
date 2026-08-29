@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .almaty import now as hotel_now
-from .db import ChannelReceipt, DialogMessage
+from .db import ChannelReceipt, DialogMessage, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,55 @@ async def seen_before(
             await session.commit()
         except IntegrityError:
             await session.rollback()
+            return True
+    return False
+
+
+async def answered_same_recently(
+    sessions: async_sessionmaker[AsyncSession],
+    channel: str,
+    chat_id: str,
+    text: str,
+    window_seconds: int = 90,
+) -> bool:
+    """Отвечали ли только что на точно такое же сообщение из этого чата.
+
+    Вторая защита от двойного ответа, поверх дедупа по idMessage.
+
+    Тот дедуп ловит повтор одного и того же уведомления — и ловит надёжно,
+    в логах это видно. Но гость получил два ответа на одну свою фразу, а
+    значит WhatsApp доставил её как ДВА разных сообщения с разными
+    идентификаторами. Такое бывает при плохой связи, и по идентификатору
+    это не поймать: они честно разные.
+
+    Ловим по содержимому: тот же чат, тот же текст, меньше полутора минут
+    назад. Живой человек, отправивший одну фразу дважды подряд, не ждёт двух
+    одинаковых ответов — так что ложное срабатывание здесь безобидно.
+    """
+    if not chat_id or not text:
+        return False
+
+    since = utcnow() - timedelta(seconds=window_seconds)
+    async with sessions() as session:
+        rows = (
+            await session.execute(
+                select(DialogMessage)
+                .where(DialogMessage.channel == channel)
+                .where(DialogMessage.chat_id == chat_id)
+                .where(DialogMessage.created_at >= since)
+                .order_by(DialogMessage.id.desc())
+                .limit(12)
+            )
+        ).scalars().all()
+
+    needle = " ".join(text.split()).casefold()
+    for row in rows:
+        if row.role != "user":
+            continue
+        body = row.content or ""
+        # Реплики гостя хранятся строкой JSON, но текст внутри виден и так —
+        # разбирать его ради сравнения незачем.
+        if needle and needle in " ".join(body.split()).casefold():
             return True
     return False
 
