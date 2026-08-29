@@ -71,6 +71,11 @@ export async function GET() {
       summary: room.summary,
       features: room.features,
       url: `${site.url}/nomera/${room.slug}`,
+      // Снимки нужны консьержу: гость в переписке просит «покажите фото»,
+      // и ссылка на страницу — не то, о чём он просил. Отдаём первые три:
+      // больше в мессенджере превращается в спам, меньше не даёт понять
+      // номер.
+      images: (room.images ?? []).slice(0, 3),
     })),
 
     priceFrom: rooms.length ? Math.min(...rooms.map((room) => room.price)) : null,

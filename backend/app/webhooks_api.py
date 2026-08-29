@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .booking_system import get_booking_system
 from .channels import WhatsAppChannel, WhatsAppError
-from .channels.flow import CHANNEL as WA_CHANNEL, reply_for
+from .channels.flow import CHANNEL as WA_CHANNEL, Reply, reply_for
 from .channels.whatsapp import _parse, for_whatsapp
 from .config import Settings, get_settings
 from .concierge import FALLBACK
@@ -251,19 +251,31 @@ async def whatsapp_webhook(
 
     booking = get_booking_system(settings)
     try:
-        text = await reply_for(settings, booking, channel, message)
+        reply = await reply_for(settings, booking, channel, message)
     except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём
         logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
-        text = FALLBACK
+        reply = Reply(FALLBACK)
 
     try:
-        await channel.send(message.chat_id, for_whatsapp(text))
+        await channel.send(message.chat_id, for_whatsapp(reply.text))
     except WhatsAppError as error:
         logger.warning("Вебхук WhatsApp: ответ не ушёл: %s", error)
         return {"ok": False, "error": "send failed"}
 
-    logger.info("Вебхук WhatsApp: ответили %s", message.phone)
-    return {"ok": True, "replied": True}
+    # Снимки идут после текста и по одному. Сбой на картинке не должен
+    # выглядеть как сбой ответа: текст гость уже получил, и обрывать
+    # обработку из-за неотправленной фотографии — значит превратить мелкую
+    # неудачу в молчание.
+    sent_photos = 0
+    for photo in reply.photos:
+        try:
+            await channel.send_file(message.chat_id, photo["url"], caption=photo.get("room", ""))
+            sent_photos += 1
+        except WhatsAppError as error:
+            logger.warning("Вебхук WhatsApp: снимок не ушёл: %s", error)
+
+    logger.info("Вебхук WhatsApp: ответили %s, снимков %d", message.phone, sent_photos)
+    return {"ok": True, "replied": True, "photos": sent_photos}
 
 
 @router.post("/lifecycle")

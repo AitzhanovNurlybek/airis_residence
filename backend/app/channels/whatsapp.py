@@ -167,6 +167,34 @@ class WhatsAppChannel:
             raise WhatsAppError(f"нет idMessage в ответе: {response.text[:200]}")
         return str(message_id)
 
+    async def send_file(self, chat_id: str, url: str, caption: str = "",
+                        filename: str = "") -> str:
+        """Отправить снимок по ссылке.
+
+        Гость, попросивший «покажите фото», хочет увидеть номер, а не открыть
+        браузер. Ссылка вместо изображения — это отказ, оформленный как ответ.
+
+        Green API забирает файл по ссылке сам, поэтому картинку никуда не
+        нужно выгружать: снимки уже лежат в открытом хранилище сайта.
+        """
+        payload = {"chatId": chat_id, "urlFile": url,
+                   "fileName": filename or url.rsplit("/", 1)[-1] or "photo.jpg"}
+        if caption:
+            payload["caption"] = for_whatsapp(caption)
+
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            try:
+                response = await client.post(self._url("sendFileByUrl"), json=payload)
+            except httpx.HTTPError as error:
+                raise WhatsAppError(f"сеть: {error}") from error
+
+        if response.status_code >= 400:
+            raise WhatsAppError(f"HTTP {response.status_code}: {response.text[:200]}")
+        message_id = (response.json() or {}).get("idMessage")
+        if not message_id:
+            raise WhatsAppError(f"нет idMessage в ответе: {response.text[:200]}")
+        return str(message_id)
+
     async def download(self, url: str) -> bytes:
         """Забрать присланный файл — чек или скан платёжки."""
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:

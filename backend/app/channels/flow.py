@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 from ..almaty import today as hotel_today
 from ..concierge import answer
@@ -35,6 +35,23 @@ log = logging.getLogger("whatsapp")
 
 CHANNEL = "whatsapp"
 
+#: Сколько снимков отправлять за один ответ. Гость просит «фото номера», а не
+#: галерею: четыре категории по три снимка — это дюжина картинок подряд, что
+#: WhatsApp и сам гость воспримут одинаково плохо.
+MAX_PHOTOS = 4
+
+
+@dataclass
+class Reply:
+    """Что уходит гостю: текст и, если он просил показать номер, снимки.
+
+    Раньше здесь была просто строка. Но на «покажите фото» текстом ответить
+    нечем — нужны файлы, и порядок важен: сначала подпись, потом картинки.
+    """
+
+    text: str
+    photos: list[dict[str, str]] = field(default_factory=list)
+
 #: Что ответить на присланный файл, который не оказался платёжкой.
 NOT_A_RECEIPT = (
     "Получили ваш файл, спасибо. Похоже, это не платёжный документ — передам его "
@@ -48,7 +65,7 @@ NEEDS_MANAGER = (
 )
 
 
-async def handle_text(settings, booking, message: Incoming) -> str:
+async def handle_text(settings, booking, message: Incoming) -> Reply:
     """Обычная реплика гостя."""
     depth = max(0, settings.concierge_history_depth)
     history = await load_history(SessionLocal, CHANNEL, message.chat_id, depth)
@@ -62,6 +79,8 @@ async def handle_text(settings, booking, message: Incoming) -> str:
         guest={"phone": message.phone, "name": message.sender_name},
     )
 
+    photos = reply.get("photos") or [] if reply["ok"] else []
+
     if reply["ok"]:
         # В историю кладём то, что модель реально видела: вместе с вызовами
         # инструментов. Без них в следующий раз она не поймёт, откуда взяла
@@ -72,28 +91,28 @@ async def handle_text(settings, booking, message: Incoming) -> str:
     else:
         log.warning("консьерж не ответил: %s", reply.get("reason"))
 
-    return reply["text"]
+    return Reply(reply["text"], photos[:MAX_PHOTOS])
 
 
-async def handle_file(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
+async def handle_file(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:
     """Гость прислал файл — скорее всего чек."""
     try:
         data = await channel.download(message.file_url)
     except Exception as error:  # noqa: BLE001
         log.warning("файл не скачался: %s", error)
-        return NEEDS_MANAGER
+        return Reply(NEEDS_MANAGER)
 
     try:
         doc = await read_document(settings, data, message.file_name or "document.pdf")
     except ValueError as error:
         log.info("файл не разобран: %s", error)
-        return NOT_A_RECEIPT
+        return Reply(NOT_A_RECEIPT)
     except Exception as error:  # noqa: BLE001
         log.warning("разбор файла упал: %s", error)
-        return NEEDS_MANAGER
+        return Reply(NEEDS_MANAGER)
 
     if not doc.is_payment:
-        return NOT_A_RECEIPT
+        return Reply(NOT_A_RECEIPT)
 
     try:
         facts = await load_facts(settings)
@@ -104,18 +123,18 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
     log.info("платёжка: %s — %s", result.verdict, result.reason)
 
     if result.verdict == "applied":
-        return (
+        return Reply(
             f"Оплата получена и записана по брони {result.booking_ref}: "
             f"{result.applied_amount} ₸. Спасибо!"
         )
     if result.verdict == "duplicate":
-        return "Этот платёж мы уже получили раньше — всё в порядке, повторно ничего не нужно."
+        return Reply("Этот платёж мы уже получили раньше — всё в порядке, повторно ничего не нужно.")
     if result.verdict == "rejected" and not doc.is_payment:
-        return NOT_A_RECEIPT
-    return NEEDS_MANAGER
+        return Reply(NOT_A_RECEIPT)
+    return Reply(NEEDS_MANAGER)
 
 
-async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
+async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:
     """Гость записал голосовое.
 
     Расшифровываем и дальше ведём обычный разговор: для консьержа это
@@ -151,10 +170,10 @@ async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Inc
         phone = facts.get("hotel", {}).get("contacts", {}).get("phonePrimary") or phone
     except KnowledgeUnavailable:
         pass
-    return render(VOICE_NOT_SUPPORTED, phone=phone)
+    return Reply(render(VOICE_NOT_SUPPORTED, phone=phone))
 
 
-async def reply_for(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
+async def reply_for(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:
     """Единая точка: голос, файл или текст — решается здесь, а не в двух местах."""
     if message.is_voice:
         # Проверка стоит первой: голосовое приходит со ссылкой на файл, и без
