@@ -70,11 +70,43 @@ async def load_history(
             content = row.content
         history.append({"role": row.role, "content": content})
 
-    # Модель не примет историю, которая начинается с её собственной реплики:
-    # разговор обязан открываться словами гостя.
-    while history and history[0]["role"] != "user":
-        history.pop(0)
-    return history
+    return _openable(history)
+
+
+def _blocks(message: dict[str, Any], kind: str) -> bool:
+    """Есть ли в реплике блоки такого рода."""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") == kind for b in content)
+
+
+def _openable(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Обрезать историю так, чтобы модель её приняла.
+
+    Окно последних реплик режется по счёту, а вызов инструмента — это ДВЕ
+    записи: обращение консьержа (`tool_use`) и пришедший ответ
+    (`tool_result`). Граница окна проходит между ними примерно в каждом
+    шестом разговоре, и тогда история открывается ответом инструмента, к
+    которому нет вопроса. Модель на такое отвечает 400, консьерж — запасным
+    текстом, а гость видит «я не смог обработать сообщение».
+
+    Найдено на живом голосовом 2026-08-29: расшифровка сработала, а ответа
+    гость не получил — и дело было не в голосе, просто разговор дорос до
+    длины, на которой окно разрезало пару. Чем дольше человек переписывается,
+    тем вероятнее он это поймает.
+
+    Отсюда два правила. История начинается репликой гостя — и не осиротевшим
+    ответом инструмента. История не заканчивается обращением к инструменту
+    без ответа: следом модель ждёт результат, а получит новое сообщение
+    гостя.
+    """
+    out = list(history)
+    while out and (out[0]["role"] != "user" or _blocks(out[0], "tool_result")):
+        out.pop(0)
+    while out and out[-1]["role"] == "assistant" and _blocks(out[-1], "tool_use"):
+        out.pop()
+    return out
 
 
 async def save_turn(

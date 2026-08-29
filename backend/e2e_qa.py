@@ -1308,6 +1308,36 @@ async def qa_channels() -> None:
 
     short = await load_history(SessionLocal, "whatsapp", CHAT, depth=2)
     check("глубина ограничивает выдачу", len(short) <= 2, str(len(short)))
+
+    # Вызов инструмента — это ДВЕ записи: обращение консьержа и ответ на него.
+    # Окно последних реплик режется по счёту и рано или поздно проходит между
+    # ними. Тогда история открывается ответом инструмента, к которому нет
+    # вопроса, модель отвечает 400, а гость получает «не смог обработать».
+    #
+    # Поймано на живом голосовом 2026-08-29: расшифровка сработала, ответа
+    # гость не получил, и дело было не в голосе — разговор просто дорос до
+    # длины, на которой окно разрезало пару. Чем дольше человек переписывается,
+    # тем вероятнее он это поймает, а по симптому не догадаешься.
+    for depth in range(1, 7):
+        window = await load_history(SessionLocal, "whatsapp", CHAT, depth=depth)
+        if not window:
+            continue
+        first, last = window[0], window[-1]
+        opens_ok = first["role"] == "user" and not (
+            isinstance(first["content"], list)
+            and any(b.get("type") == "tool_result" for b in first["content"]
+                    if isinstance(b, dict))
+        )
+        closes_ok = not (
+            last["role"] == "assistant"
+            and isinstance(last["content"], list)
+            and any(b.get("type") == "tool_use" for b in last["content"]
+                    if isinstance(b, dict))
+        )
+        check(f"глубина {depth}: история открывается репликой гостя", opens_ok,
+              f"{first['role']}: {str(first['content'])[:60]}")
+        check(f"глубина {depth}: история не обрывается на вызове инструмента", closes_ok,
+              f"{last['role']}: {str(last['content'])[:60]}")
     check("история всегда начинается с гостя",
           not short or short[0]["role"] == "user", short[0]["role"] if short else "")
 
