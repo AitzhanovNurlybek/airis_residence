@@ -47,7 +47,8 @@ from app.concierge import (  # noqa: E402
     _tool_cancel,
     _tool_find,
 )
-from app.channels.whatsapp import Incoming, _parse, _phone, for_whatsapp  # noqa: E402
+from app.channels.whatsapp import Incoming, WhatsAppChannel, _parse, _phone, for_whatsapp  # noqa: E402
+from app.channels.flow import reply_for  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.dialogs import load_history, save_turn, seen_before  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
@@ -556,10 +557,19 @@ async def qa_exely_api() -> None:
     from app.db import SessionLocal as _S2, ExelyBooking as _EB, init_db as _init
     await _init()
     async with _S2() as _sess:
-        _sess.add(_EB(number="QA-NAME-1", status="Active", guest_name="Тестов Пётр",
-                      guest_search="тестов пётр", check_in=date(2026, 9, 20),
-                      check_out=date(2026, 9, 22), total_amount=50000,
-                      room_name="Comfort"))
+        # Запись переиспользуется, а не вставляется заново: прогон QA не
+        # должен падать оттого, что он уже запускался.
+        _row = await _sess.get(_EB, "QA-NAME-1")
+        if _row is None:
+            _row = _EB(number="QA-NAME-1")
+            _sess.add(_row)
+        _row.status = "Active"
+        _row.guest_name = "Тестов Пётр"
+        _row.guest_search = "тестов пётр"
+        _row.check_in = date(2026, 9, 20)
+        _row.check_out = date(2026, 9, 22)
+        _row.total_amount = 50000
+        _row.room_name = "Comfort"
         await _sess.commit()
         check("поиск по фамилии находит", len(await _by_name(_sess, "Тестов")) >= 1)
         check("регистр не мешает", len(await _by_name(_sess, "тестов")) >= 1)
@@ -1075,6 +1085,38 @@ async def qa_channels() -> None:
                                             "fileName": "чек.pdf", "caption": "оплатил"}},
     })
     check("файл разобран", doc_in is not None and doc_in.has_file)
+
+    # Голосовое не распознавалось вовсе: типа audioMessage не было в списке,
+    # сообщение выходило пустым, и вебхук отвечал «пустое сообщение». Гость
+    # отправлял голосовое и не получал НИЧЕГО. Тишина хуже отказа.
+    for kind in ("audioMessage", "pttMessage", "voiceMessage"):
+        voice = _parse({
+            "typeWebhook": "incomingMessageReceived", "idMessage": "V-" + kind,
+            "senderData": {"chatId": "77015550011@c.us"},
+            "messageData": {"typeMessage": kind, "fileMessageData": {
+                "downloadUrl": "https://example/v.oga", "fileName": "v.oga"}},
+        })
+        check(f"«{kind}» распознан как голосовое", voice is not None and voice.is_voice)
+
+    # Ссылка на файл у голосового есть — она понадобится, когда появится
+    # расшифровка речи. Защита не в её отсутствии, а в порядке проверок:
+    # reply_for смотрит is_voice ПЕРВЫМ. Иначе голосовое ушло бы в разбор
+    # платёжек, и гость получил бы «это не платёжный документ» на свой
+    # вопрос о брони. Проверяем именно поведение, а не поле.
+    from app.config import get_settings as _gs
+
+    voice_reply = await reply_for(
+        _gs(), None, WhatsAppChannel("1", "2"),
+        _parse({"typeWebhook": "incomingMessageReceived", "idMessage": "V-ROUTE",
+                "senderData": {"chatId": "77015550011@c.us"},
+                "messageData": {"typeMessage": "audioMessage", "fileMessageData": {
+                    "downloadUrl": "https://example/v.oga", "fileName": "v.oga"}}}))
+    check("голосовое ведёт к просьбе написать текстом",
+          "текстом" in voice_reply.lower(), voice_reply[:60])
+    check("голосовое не разбирается как платёжка",
+          "платёжный документ" not in voice_reply)
+
+    check("обычный файл голосовым не считается", doc_in is not None and not doc_in.is_voice)
     check("имя файла взято", doc_in.file_name == "чек.pdf")
     check("подпись к файлу не потеряна", doc_in.text == "оплатил")
 

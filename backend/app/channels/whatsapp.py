@@ -56,6 +56,9 @@ class Incoming:
     #: Ссылка на присланный файл и его имя, если это не текст.
     file_url: str = ""
     file_name: str = ""
+    #: Голосовое сообщение. Отличается от обычного файла: разбирать его как
+    #: платёжку бессмысленно, а молчать в ответ нельзя.
+    is_voice: bool = False
 
     @property
     def is_group(self) -> bool:
@@ -188,6 +191,7 @@ def _parse(body: dict[str, Any]) -> Incoming | None:
     text = ""
     file_url = ""
     file_name = ""
+    is_voice = False
 
     kind = str(data.get("typeMessage") or "")
     if kind == "textMessage":
@@ -199,6 +203,16 @@ def _parse(body: dict[str, Any]) -> Incoming | None:
         file_url = str(payload.get("downloadUrl") or "")
         file_name = str(payload.get("fileName") or "")
         text = str(payload.get("caption") or "")
+    elif kind in ("audioMessage", "pttMessage", "voiceMessage"):
+        # Голосовое. Расшифровывать мы его пока не умеем, но и молчать
+        # нельзя: до этой ветки голосовое не распознавалось вовсе, выходило
+        # пустым, и вебхук отвечал «пустое сообщение». Гость отправлял
+        # голосовое и не получал НИЧЕГО — ни ответа, ни отказа. Тишина хуже
+        # любого ответа: человек решает, что отель его игнорирует.
+        payload = data.get("fileMessageData") or {}
+        file_url = str(payload.get("downloadUrl") or "")
+        file_name = str(payload.get("fileName") or "voice.oga")
+        is_voice = True
 
     return Incoming(
         message_id=str(body.get("idMessage") or ""),
@@ -208,6 +222,7 @@ def _parse(body: dict[str, Any]) -> Incoming | None:
         text=text.strip(),
         file_url=file_url,
         file_name=file_name,
+        is_voice=is_voice,
     )
 
 

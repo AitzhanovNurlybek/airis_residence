@@ -26,6 +26,7 @@ from ..db import SessionLocal
 from ..dialogs import load_history, save_turn
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
+from ..guest_messages import VOICE_NOT_SUPPORTED, render
 from .whatsapp import Incoming, WhatsAppChannel
 
 log = logging.getLogger("whatsapp")
@@ -113,7 +114,20 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
 
 
 async def reply_for(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
-    """Единая точка: текст это или файл — решается здесь, а не в двух местах."""
+    """Единая точка: голос, файл или текст — решается здесь, а не в двух местах."""
+    if message.is_voice:
+        # Раньше голосовое проваливалось мимо всех веток и гость не получал
+        # ничего. Проверка стоит первой: голосовое приходит с ссылкой на
+        # файл, и без неё оно ушло бы в разбор платёжек, где ему не место.
+        phone = "+7 (777) 531-00-09"
+        try:
+            facts = await load_facts(settings)
+            phone = facts.get("hotel", {}).get("contacts", {}).get(
+                "phonePrimary") or phone
+        except KnowledgeUnavailable:
+            pass
+        return render(VOICE_NOT_SUPPORTED, phone=phone)
+
     if message.has_file:
         return await handle_file(settings, booking, channel, message)
     return await handle_text(settings, booking, message)

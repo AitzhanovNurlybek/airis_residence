@@ -222,7 +222,7 @@ async def whatsapp_webhook(
     message = _parse(payload)
     if message is None or message.is_group:
         return {"ok": True, "skipped": "не входящее сообщение гостя"}
-    if not message.text and not message.has_file:
+    if not message.text and not message.has_file and not message.is_voice:
         return {"ok": True, "skipped": "пустое сообщение"}
 
     # Тот же дедуп, что и у опроса: Green API штатно повторяет доставку, если
