@@ -316,6 +316,38 @@ async def lifecycle_tick(
     return {"ok": True, **result}
 
 
+@router.post("/followup")
+async def followup_tick(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Написать тем, чей разговор оборвался на полпути. Дёргается планировщиком.
+
+    Отдельная точка, а не часть рассылки по броням: там поводы календарные и
+    хватает двух запусков в день, здесь — тишина в переписке, и проверять её
+    нужно часто. Смешав их, пришлось бы либо гонять брони каждый час, либо
+    отвечать гостю к вечеру.
+
+    `?dry_run=1` показывает, кому и что ушло бы, ничего не отправляя, и
+    работает в любой час — иначе проверить тексты можно было бы только днём.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .followup import run as followup_run
+
+    dry = request.query_params.get("dry_run") in ("1", "true", "yes")
+    result = await followup_run(session, settings, dry_run=dry)
+    return {"ok": True, **result}
+
+
 @router.post("/sync-bookings")
 async def sync_bookings(
     request: Request,

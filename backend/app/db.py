@@ -656,6 +656,33 @@ class ChannelReceipt(Base):
     )
 
 
+class DialogFollowup(Base):
+    """
+    Отметка «по этому разговору мы уже написали вдогонку».
+
+    Гость, спросивший про номера и пропавший, получает напоминание — но
+    строго ограниченное число раз. Считать отправленное по самой переписке
+    нельзя: напоминание лежит в ней такой же строкой, как обычный ответ, и
+    отличить одно от другого потом нечем.
+
+    Отдельная таблица заодно даёт бесплатный сброс. Отметки учитываются
+    только те, что легли ПОСЛЕ последней реплики гостя: написал — значит
+    разговор живой, и счёт начинается заново. Отдельного сброса писать не
+    пришлось, а значит, и забыть его негде.
+    """
+
+    __tablename__ = "dialog_followups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), index=True)
+    chat_id: Mapped[str] = mapped_column(String(80), index=True)
+    #: Какое по счёту: 1 — вернуть к разговору, 2 — попрощаться. Третьего нет.
+    step: Mapped[int] = mapped_column(Integer, default=1)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {

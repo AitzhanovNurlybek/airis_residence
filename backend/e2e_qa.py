@@ -39,6 +39,7 @@ from app.concierge import (  # noqa: E402
     _status_word,
     FIND_TOOL,
     FULL_TOOLS,
+    FIRST_ACTION,
     ROOM_PAGE_TOOL,
     _tool_room_page,
     _sane_price,
@@ -430,7 +431,8 @@ def qa_tools() -> None:
     # правила выдачи ссылки идут после правил наличия, и «узнай число гостей»
     # побеждало по свежести. Если блок уедет с конца, эффект пропадёт молча —
     # поэтому проверяем именно место.
-    check("напоминание порядка стоит последним", live_mode.rstrip().endswith("сошлётся."),
+    check("напоминание порядка стоит последним",
+          live_mode.rstrip().endswith(FIRST_ACTION.rstrip()),
           live_mode.rstrip()[-60:])
     check("первым действием — проверка наличия",
           "ПЕРВЫМ ДЕЙСТВИЕМ вызови check_availability" in live_mode)
@@ -1474,6 +1476,159 @@ async def qa_corporate() -> None:
         await wipe_corp()
 
 
+async def qa_followup() -> None:
+    """Дожим оборванных разговоров.
+
+    Обращение к модели здесь не проверяется — оно стоит денег и отвечает
+    каждый раз по-разному. Проверяется всё, что вокруг: кого вообще берём в
+    работу, сколько раз можно написать и когда счёт обнуляется. Ошибка в этой
+    арифметике не падает, а тихо превращается в рассылку — гость получает
+    третье и четвёртое напоминание, и номер отеля улетает в блокировку.
+    """
+    head("Дожим оборванных разговоров")
+
+    import json  # noqa: PLC0415
+    from datetime import timezone as _tz  # noqa: PLC0415
+
+    from sqlalchemy import delete as _delete  # noqa: PLC0415
+
+    from app.db import DialogFollowup, DialogMessage  # noqa: PLC0415
+    from app.followup import (  # noqa: PLC0415
+        DECIDE_PROMPT,
+        FINAL_HOURS,
+        MAX_AGE_HOURS,
+        MAX_STEPS,
+        STALE_HOURS,
+        _stale_chats,
+        _step_for,
+        _text_of,
+        _who,
+    )
+
+    check("номер в логе скрыт до последних цифр", _who("77054004448@c.us") == "…4448",
+          _who("77054004448@c.us"))
+    check("чат без цифр не роняет опознание", bool(_who("@g.us")))
+
+    # В историю ложатся и вызовы инструментов. Для решения важно то, что
+    # консьерж сказал ГОСТЮ, — иначе модель увидит служебный JSON вместо
+    # разговора и решит по нему.
+    tool_call = json.dumps(
+        [{"type": "text", "text": "Свободен Comfort"},
+         {"type": "tool_use", "name": "check_availability", "input": {}}],
+        ensure_ascii=False,
+    )
+    check("из служебной записи достаётся сказанное гостю",
+          _text_of(tool_call) == "Свободен Comfort", _text_of(tool_call))
+    check("обычная реплика не искажается", _text_of("Добрый день") == "Добрый день")
+    check("нечитаемая запись не роняет разбор", _text_of("[не json") == "[не json")
+
+    CHAT = "qa-followup-77000000000@c.us"
+
+    async def wipe_followup() -> None:
+        async with SessionLocal() as ses:
+            await ses.execute(_delete(DialogFollowup).where(DialogFollowup.chat_id == CHAT))
+            await ses.execute(_delete(DialogMessage).where(DialogMessage.chat_id == CHAT))
+            await ses.commit()
+
+    async def say(role: str, text: str, hours_ago: float) -> None:
+        async with SessionLocal() as ses:
+            ses.add(DialogMessage(
+                channel="whatsapp", chat_id=CHAT, role=role, content=text,
+                created_at=datetime.now(_tz.utc) - timedelta(hours=hours_ago),
+            ))
+            await ses.commit()
+
+    async def mark(step: int, hours_ago: float) -> None:
+        async with SessionLocal() as ses:
+            ses.add(DialogFollowup(
+                channel="whatsapp", chat_id=CHAT, step=step,
+                sent_at=datetime.now(_tz.utc) - timedelta(hours=hours_ago),
+            ))
+            await ses.commit()
+
+    await wipe_followup()
+    try:
+        # Свежий разговор трогать рано: гость мог отойти на десять минут.
+        await say("user", "есть номера?", 1.2)
+        await say("assistant", "Свободен Comfort, 45 000 ₸", 1.0)
+        async with SessionLocal() as ses:
+            chats = {c for c, _ in await _stale_chats(ses, 500)}
+            check("свежий разговор не дожимают", CHAT not in chats)
+
+        # Прошло достаточно — берём в работу.
+        await wipe_followup()
+        await say("user", "есть номера?", STALE_HOURS + 1.5)
+        await say("assistant", "Свободен Comfort, 45 000 ₸", STALE_HOURS + 1.0)
+        async with SessionLocal() as ses:
+            chats = {c for c, _ in await _stale_chats(ses, 500)}
+            check("замолчавший разговор берётся в работу", CHAT in chats)
+            check("первое сообщение — шаг 1", await _step_for(ses, CHAT) == 1,
+                  str(await _step_for(ses, CHAT)))
+
+        # Последним говорил гость — значит ждём ответа консьержа, а не дожима.
+        await say("user", "а сколько всего?", STALE_HOURS + 0.5)
+        async with SessionLocal() as ses:
+            chats = {c for c, _ in await _stale_chats(ses, 500)}
+            check("если последним писал гость, дожима нет", CHAT not in chats)
+
+        # Слишком старый разговор закрыт навсегда: напоминание через неделю —
+        # это рассылка, а не забота.
+        await wipe_followup()
+        await say("user", "есть номера?", MAX_AGE_HOURS + 10)
+        await say("assistant", "Свободен Comfort", MAX_AGE_HOURS + 5)
+        async with SessionLocal() as ses:
+            chats = {c for c, _ in await _stale_chats(ses, 500)}
+            check("давно заброшенный разговор не трогают", CHAT not in chats)
+
+        # Счёт шагов и пауза между ними.
+        await wipe_followup()
+        await say("user", "есть номера?", 30)
+        await say("assistant", "Свободен Comfort", 29)
+        await mark(1, 1)
+        async with SessionLocal() as ses:
+            check("сразу после первого второго не шлём", await _step_for(ses, CHAT) is None)
+
+        await wipe_followup()
+        await say("user", "есть номера?", 60)
+        await say("assistant", "Свободен Comfort", 59)
+        await mark(1, FINAL_HOURS + 1)
+        async with SessionLocal() as ses:
+            check("через сутки уместно прощальное", await _step_for(ses, CHAT) == MAX_STEPS,
+                  str(await _step_for(ses, CHAT)))
+
+        await mark(2, 0.5)
+        async with SessionLocal() as ses:
+            check("третьего сообщения не бывает", await _step_for(ses, CHAT) is None)
+
+        # Гость ответил — разговор живой, и всё начинается заново. Считаются
+        # только отметки после его последней реплики, поэтому отдельного
+        # сброса нет и забыть его негде.
+        await say("user", "извините, отвлёкся", 0.2)
+        async with SessionLocal() as ses:
+            check("реплика гостя обнуляет счёт", await _step_for(ses, CHAT) == 1,
+                  str(await _step_for(ses, CHAT)))
+
+        await wipe_followup()
+        async with SessionLocal() as ses:
+            check("без реплик гостя дожимать нечего", await _step_for(ses, CHAT) is None)
+
+        # Живая проверка на боевой переписке показала два вранья, оба опасные:
+        # «номер всё ещё зарезервирован» (отель ничего не держит до оформления)
+        # и попытка назвать цену заново, не проверив её.
+        check("запрещено обещать, что номер держат",
+              "Не обещай, что номер держится" in DECIDE_PROMPT)
+        check("названы слова, которыми это враньё выглядит",
+              "«зарезервирован»" in DECIDE_PROMPT and "«отложен»" in DECIDE_PROMPT)
+        check("цены берутся из прозвучавшего, а не выдумываются",
+              "Проверить их заново ты сейчас не можешь" in DECIDE_PROMPT)
+        check("сообщение заканчивается закрытым вопросом",
+              "ответ «да» или «нет»" in DECIDE_PROMPT)
+        check("жалобу дожимать нельзя", "злится или жалуется" in DECIDE_PROMPT)
+        check("отказавшегося не дожимают", "спасибо, не надо" in DECIDE_PROMPT)
+    finally:
+        await wipe_followup()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -1542,6 +1697,7 @@ async def main() -> int:
     await qa_access()
     await qa_channels()
     await qa_corporate()
+    await qa_followup()
     await qa_knowledge()
 
     total = passed + len(failed)
