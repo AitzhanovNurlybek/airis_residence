@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from ..almaty import today as hotel_today
 from ..concierge import answer
@@ -27,6 +28,7 @@ from ..dialogs import load_history, save_turn
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
 from ..guest_messages import VOICE_NOT_SUPPORTED, render
+from ..speech import SpeechUnavailable, configured as speech_ready, transcribe
 from .whatsapp import Incoming, WhatsAppChannel
 
 log = logging.getLogger("whatsapp")
@@ -113,20 +115,51 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
     return NEEDS_MANAGER
 
 
+async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
+    """Гость записал голосовое.
+
+    Расшифровываем и дальше ведём обычный разговор: для консьержа это
+    становится просто репликой гостя, и вся логика — наличие, цены, брони —
+    работает как с текстом.
+
+    Если расшифровка не настроена или не удалась, гость получает просьбу
+    написать текстом. Молчать нельзя ни при каком сбое: тишина в переписке
+    читается как «меня игнорируют», и это хуже любого отказа.
+    """
+    if speech_ready(settings) and message.file_url:
+        try:
+            audio = await channel.download(message.file_url)
+            spoken = await transcribe(settings, audio, message.file_name or "voice.oga")
+        except SpeechUnavailable as error:
+            log.warning("голосовое не расшифровано: %s", error)
+            spoken = ""
+        except Exception as error:  # noqa: BLE001 — сбой не должен ронять ответ
+            log.warning("голосовое не скачалось: %s", error)
+            spoken = ""
+
+        if spoken:
+            # Дальше это обычная реплика. Подменяем текст и идём общим путём,
+            # чтобы расшифрованное сохранилось в историю разговора — иначе
+            # следующий вопрос гостя повиснет без контекста.
+            heard = replace(message, text=spoken)
+            log.info("← %s (голосом): %s", message.phone, spoken[:120])
+            return await handle_text(settings, booking, heard)
+
+    phone = "+7 (777) 531-00-09"
+    try:
+        facts = await load_facts(settings)
+        phone = facts.get("hotel", {}).get("contacts", {}).get("phonePrimary") or phone
+    except KnowledgeUnavailable:
+        pass
+    return render(VOICE_NOT_SUPPORTED, phone=phone)
+
+
 async def reply_for(settings, booking, channel: WhatsAppChannel, message: Incoming) -> str:
     """Единая точка: голос, файл или текст — решается здесь, а не в двух местах."""
     if message.is_voice:
-        # Раньше голосовое проваливалось мимо всех веток и гость не получал
-        # ничего. Проверка стоит первой: голосовое приходит с ссылкой на
-        # файл, и без неё оно ушло бы в разбор платёжек, где ему не место.
-        phone = "+7 (777) 531-00-09"
-        try:
-            facts = await load_facts(settings)
-            phone = facts.get("hotel", {}).get("contacts", {}).get(
-                "phonePrimary") or phone
-        except KnowledgeUnavailable:
-            pass
-        return render(VOICE_NOT_SUPPORTED, phone=phone)
+        # Проверка стоит первой: голосовое приходит со ссылкой на файл, и без
+        # неё оно ушло бы в разбор платёжек, где ему не место.
+        return await handle_voice(settings, booking, channel, message)
 
     if message.has_file:
         return await handle_file(settings, booking, channel, message)

@@ -1116,6 +1116,33 @@ async def qa_channels() -> None:
     check("голосовое не разбирается как платёжка",
           "платёжный документ" not in voice_reply)
 
+    # Распознавание речи: включается только заполненным ключом. Голос гостя
+    # уходит третьей стороне, и «включим, если получится» тут не подходит.
+    from app.config import Settings as _Set
+    from app.speech import SpeechUnavailable, configured as _sp, transcribe as _tr
+
+    check("без ключа распознавание выключено", not _sp(_Set(speech_api_key="")))
+    check("с ключом включается", _sp(_Set(speech_api_key="k")))
+
+    try:
+        await _tr(_Set(speech_api_key=""), b"audio")
+        check("без ключа не расшифровывает", False, "расшифровало")
+    except SpeechUnavailable:
+        check("без ключа не расшифровывает", True)
+
+    # Гость может зажать кнопку и прислать десять минут, а платим мы.
+    try:
+        await _tr(_Set(speech_api_key="k", speech_max_mb=1), b"x" * (2 * 1024 * 1024))
+        check("слишком длинная запись отклоняется", False, "приняло")
+    except SpeechUnavailable as _e:
+        check("слишком длинная запись отклоняется", "длинная" in str(_e))
+
+    try:
+        await _tr(_Set(speech_api_key="k"), b"")
+        check("пустая запись отклоняется", False)
+    except SpeechUnavailable:
+        check("пустая запись отклоняется", True)
+
     check("обычный файл голосовым не считается", doc_in is not None and not doc_in.is_voice)
     check("имя файла взято", doc_in.file_name == "чек.pdf")
     check("подпись к файлу не потеряна", doc_in.text == "оплатил")
