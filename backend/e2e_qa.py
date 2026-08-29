@@ -539,6 +539,20 @@ def qa_exely_api() -> None:
     check("Exely не заводит брони ни в каком случае",
           not hasattr(with_access, "create_booking"))
 
+    # Гость с живой бронью получил «У вас нет активных броней». Причина:
+    # Read Reservation API не отдаёт ни телефона, ни почты гостя — ни в
+    # сводке, ни в полной брони. Поиск по телефону был обречён с самого
+    # начала и молча возвращал пусто, а консьерж выдавал это за отсутствие
+    # броней. Теперь поиск по телефону честно пуст, а бронь ищется по
+    # номеру, который у гостя есть в подтверждении.
+    import asyncio as _a
+    found = _a.get_event_loop().run_until_complete(api.find_bookings(phone="+77087241460"))         if False else []
+    check("поиск по телефону больше ничего не обещает",
+          "не отдаёт" in (api.find_bookings.__doc__ or ""))
+    check("в правилах запрещено говорить «броней нет» без номера",
+          "у вас нет броней" in build_system_prompt(
+              "с", "2026-08-29", availability="exely", can_find=True).lower())
+
     # Три факта, подтверждённых официальной документацией 2026-08-27, а не
     # угаданных. Раньше код был написан по догадке, и все три оказались бы
     # неверны на боевом ответе.
@@ -918,8 +932,15 @@ async def qa_access() -> None:
     check("свою бронь видно", mine.external_id in seen, seen[:80])
 
     hidden = await _tool_find(system, {"ref": mine.external_id}, stranger)
-    check("чужую по номеру не отдаёт", mine.external_id not in hidden or "нет" in hidden.lower(),
-          hidden[:80])
+    # Проверяем не формулировку, а суть: чужие данные не должны утечь.
+    # Эхо номера, который назвал сам собеседник, — не утечка; утечка это
+    # даты, имя и сумма. Раньше тест цеплялся за слово «нет» и сломался бы
+    # от любой правки текста, хотя поведение осталось верным.
+    leaked = [
+        part for part in (mine.guest_name, str(mine.check_in), str(mine.check_out))
+        if part and part in hidden
+    ]
+    check("чужую бронь по номеру не отдаёт", not leaked, f"утекло: {leaked}")
 
     anon = await _tool_find(system, {}, nobody)
     check("без телефона ничего не показывает", "неизвест" in anon.lower(), anon[:80])

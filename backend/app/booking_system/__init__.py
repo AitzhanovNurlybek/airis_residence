@@ -85,6 +85,12 @@ def get_booking_system(
                 settings.exely_property_id,
                 auth_url=settings.exely_auth_url,
                 api_base=settings.exely_api_base,
+                # Обычно токен и бронь приходят меньше чем за секунду, но
+                # Exely изредка притормаживает, и на 15 секундах гость
+                # получал «не получается связаться с системой» вместо своей
+                # брони. Запас дешевле: лишние секунды ожидания заметны
+                # меньше, чем отказ.
+                timeout=30.0,
             )
 
         return ExelyBookingSystem(
