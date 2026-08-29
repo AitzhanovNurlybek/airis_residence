@@ -1,7 +1,13 @@
 """Настройки бэкенда. Всё читается из окружения — секретов в коде нет."""
 
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+
+# Часовой пояс отеля берём из almaty: он ничего из проекта не импортирует,
+# поэтому кольца не возникает, а второе определение того же пояса рано или
+# поздно разъехалось бы с первым.
+from .almaty import HOTEL_TZ
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -193,6 +199,38 @@ class Settings(BaseSettings):
     concierge_max_tokens: int = 700
     # Сколько прошлых сообщений диалога подкладывать в запрос.
     concierge_history_depth: int = 12
+
+    # С какого момента дожимать оборванные разговоры. Пустое значение —
+    # не дожимать вовсе, и это нарочно значение по умолчанию: включать
+    # рассылку гостям молча, одним лишь выкладыванием кода, нельзя.
+    #
+    # Дата нужна ещё и потому, что в базе лежат прошлые переписки — тестовые
+    # и просто старые. Без границы первый же запуск написал бы всем сразу,
+    # разом превратив аккуратную функцию в рассылку. Учитываются только
+    # разговоры, где гость написал ПОЗЖЕ этого момента.
+    #
+    # Формат: 2026-08-30 или 2026-08-30T09:00. Время алматинское.
+    followup_since: str = ""
+
+    # Через сколько часов тишины писать вдогонку и когда прощаться. Вынесено
+    # в настройки, чтобы отель мог сделать бота сдержаннее без правки кода:
+    # «навязчиво» — вопрос вкуса владельца, а не программиста.
+    followup_after_hours: int = 2
+    followup_final_hours: int = 24
+
+    @property
+    def followup_from(self) -> datetime | None:
+        """Момент, раньше которого разговоры не трогаем. None — дожим выключен."""
+        raw = (self.followup_since or "").strip()
+        if not raw:
+            return None
+        try:
+            moment = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        # Без часового пояса считаем алматинским: именно так его напишет
+        # человек, а сравнивать придётся с UTC из базы.
+        return moment.replace(tzinfo=HOTEL_TZ) if moment.tzinfo is None else moment
 
     @property
     def cors_list(self) -> list[str]:

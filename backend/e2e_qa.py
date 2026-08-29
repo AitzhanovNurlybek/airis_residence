@@ -1634,6 +1634,132 @@ async def qa_followup() -> None:
         await wipe_followup()
 
 
+async def qa_funnel() -> None:
+    """Воронка и граница включения дожима.
+
+    Граница проверяется здесь же, а не в разделе дожима, потому что защищает
+    она ровно от того, что воронка показывает: в базе лежат прошлые
+    переписки, и запуск без границы написал бы всем сразу — тестовым чатам,
+    разговорам недельной давности, людям, давно всё решившим. Одна аккуратная
+    функция мгновенно стала бы рассылкой.
+    """
+    head("Воронка и включение дожима")
+
+    import json  # noqa: PLC0415
+    from datetime import timezone as _tz  # noqa: PLC0415
+
+    from sqlalchemy import delete as _delete  # noqa: PLC0415
+
+    from app.config import Settings  # noqa: PLC0415
+    from app.db import DialogFollowup, DialogMessage  # noqa: PLC0415
+    from app.followup import _stale_chats  # noqa: PLC0415
+    from app.funnel import _tool_names, collect, summarize  # noqa: PLC0415
+
+    # ── Граница включения ────────────────────────────────────────────────
+    # Пустая настройка означает «не дожимать», а не «дожимать всех подряд»:
+    # рассылка гостям не должна включаться сама собой от выкладки кода.
+    check("без даты включения дожим выключен",
+          Settings(followup_since="").followup_from is None)
+    check("мусор вместо даты не включает дожим",
+          Settings(followup_since="позавчера").followup_from is None)
+    check("дата разбирается", Settings(followup_since="2026-08-30").followup_from is not None)
+    check("дата со временем разбирается",
+          str(Settings(followup_since="2026-08-30T09:30").followup_from).startswith("2026-08-30 09:30"))
+    # Человек пишет местное время, а в базе лежит UTC — без пояса сравнение
+    # уехало бы на пять часов.
+    check("дата без пояса считается алматинской",
+          "+05:00" in str(Settings(followup_since="2026-08-30").followup_from))
+
+    CHAT = "qa-funnel-77000000000@c.us"
+
+    async def wipe() -> None:
+        async with SessionLocal() as ses:
+            await ses.execute(_delete(DialogFollowup).where(DialogFollowup.chat_id == CHAT))
+            await ses.execute(_delete(DialogMessage).where(DialogMessage.chat_id == CHAT))
+            await ses.commit()
+
+    async def say(role: str, text: str, hours_ago: float) -> None:
+        async with SessionLocal() as ses:
+            ses.add(DialogMessage(
+                channel="whatsapp", chat_id=CHAT, role=role, content=text,
+                created_at=datetime.now(_tz.utc) - timedelta(hours=hours_ago),
+            ))
+            await ses.commit()
+
+    def tool(name: str) -> str:
+        return json.dumps([{"type": "tool_use", "id": "t1", "name": name, "input": {}}],
+                          ensure_ascii=False)
+
+    await wipe()
+    try:
+        # Разговор старше границы включения не берётся в работу, хотя по
+        # тишине подходит. Это и есть защита тестовых переписок.
+        await say("user", "есть номера?", 5)
+        await say("assistant", "Свободен Comfort", 4)
+        async with SessionLocal() as ses:
+            after = datetime.now(_tz.utc) - timedelta(hours=1)
+            before = datetime.now(_tz.utc) - timedelta(hours=48)
+            late = {c for c, _ in await _stale_chats(ses, 500, since=after)}
+            early = {c for c, _ in await _stale_chats(ses, 500, since=before)}
+        check("разговор до даты включения не дожимают", CHAT not in late)
+        check("разговор после даты включения дожимают", CHAT in early)
+
+        # ── Стадии воронки ───────────────────────────────────────────────
+        check("вызов инструмента опознаётся",
+              _tool_names(tool("check_availability")) == {"check_availability"})
+        check("обычная реплика инструментом не считается", _tool_names("Добрый день") == set())
+        check("нечитаемая запись не роняет разбор", _tool_names("[сломано") == set())
+
+        await wipe()
+        await say("user", "есть номера?", 3)
+        async with SessionLocal() as ses:
+            talks = [t for t in await collect(ses, 30) if t.chat_id == CHAT]
+        check("разговор без инструментов — «просто написал»",
+              talks and talks[0].stage == "просто написал",
+              talks[0].stage if talks else "не найден")
+
+        await say("assistant", tool("check_availability"), 2.9)
+        await say("assistant", "Свободен Comfort, 45 000 ₸", 2.8)
+        async with SessionLocal() as ses:
+            talks = [t for t in await collect(ses, 30) if t.chat_id == CHAT]
+        check("после проверки наличия — «показали цены»",
+              talks[0].stage == "показали цены", talks[0].stage)
+        # Служебные записи гость не видел: считая их сообщениями, один вопрос
+        # превращается в переписку из пяти реплик.
+        check("вызовы инструментов не идут в счёт сообщений",
+              talks[0].messages == 2, str(talks[0].messages))
+
+        await say("assistant", tool("booking_link"), 2.5)
+        async with SessionLocal() as ses:
+            talks = [t for t in await collect(ses, 30) if t.chat_id == CHAT]
+        check("после ссылки — «довели до формы»",
+              talks[0].stage == "довели до формы", talks[0].stage)
+        check("стадия — максимум, а не последнее действие", talks[0].saw_prices)
+        check("молчание после ответа консьержа видно",
+              talks[0].outcome == "молчит", talks[0].outcome)
+
+        # Гость написал последним — это единственное, что требует действия
+        # прямо сейчас, и путать его с молчанием нельзя.
+        await say("user", "а завтрак входит?", 0.1)
+        async with SessionLocal() as ses:
+            talks = [t for t in await collect(ses, 30) if t.chat_id == CHAT]
+        check("неотвеченный гость помечен «ждёт ответа»",
+              talks[0].outcome == "ждёт ответа", talks[0].outcome)
+
+        # ── Свод ─────────────────────────────────────────────────────────
+        async with SessionLocal() as ses:
+            total = summarize(await collect(ses, 30))
+        check("этапы вложены друг в друга",
+              total["этапы"][0]["сколько"] >= total["этапы"][1]["сколько"] >= total["этапы"][2]["сколько"],
+              str([s["сколько"] for s in total["этапы"]]))
+        check("первый этап всегда 100 %", total["этапы"][0]["доля"] == 100)
+        check("пустая воронка не делит на ноль",
+              summarize([])["этапы"][0]["доля"] == 100)
+        check("пустая воронка не падает", summarize([])["разговоров"] == 0)
+    finally:
+        await wipe()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -1703,6 +1829,7 @@ async def main() -> int:
     await qa_channels()
     await qa_corporate()
     await qa_followup()
+    await qa_funnel()
     await qa_knowledge()
 
     total = passed + len(failed)

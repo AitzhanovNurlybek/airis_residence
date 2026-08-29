@@ -22,6 +22,7 @@ from .notify import notify_telegram
 from .payments import PaymentError, get_provider, new_order_id
 from .corp_api import admin as corp_admin_router, corp as corp_router
 from .local_api import router as local_router
+from .funnel_api import router as funnel_router
 from .webhooks_api import router as webhooks_router
 from .rooms_api import admin as rooms_admin_router, public as rooms_public_router
 from .site_videos_api import (
@@ -169,6 +170,7 @@ app.include_router(corp_admin_router)
 # Отладочная оснастка: локальная шахматка и окно переписки с консьержем.
 # Уйдёт вместе с шахматкой, когда подключим настоящий Exely.
 app.include_router(local_router)
+app.include_router(funnel_router)
 app.include_router(webhooks_router)
 
 

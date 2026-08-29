@@ -164,8 +164,17 @@ def _text_of(content: str) -> str:
     return ""
 
 
-async def _stale_chats(session: AsyncSession, limit: int = BATCH) -> list[tuple[str, int]]:
+async def _stale_chats(session: AsyncSession, limit: int = BATCH,
+                       stale_hours: int = STALE_HOURS,
+                       since: Any = None) -> list[tuple[str, int]]:
     """Разговоры, где консьерж сказал последнее слово и наступила тишина.
+
+    `since` отсекает всё, что началось раньше назначенного момента. Это не
+    тонкость, а защита от единственного по-настоящему опасного сценария:
+    в базе лежат прошлые переписки, и первый же запуск без границы написал
+    бы всем сразу — тестовым чатам, разговорам месячной давности, людям,
+    давно всё решившим. Одна аккуратная функция мгновенно стала бы
+    рассылкой, а номер отеля — заблокированным.
 
     Возвращает пары «чат, сколько часов молчит».
     """
@@ -191,14 +200,17 @@ async def _stale_chats(session: AsyncSession, limit: int = BATCH) -> list[tuple[
         if role != "assistant" or when is None:
             continue
         said = when if when.tzinfo else when.replace(tzinfo=border.tzinfo)
+        if since is not None and said < since:
+            continue
         hours = int((border - said).total_seconds() // 3600)
-        if STALE_HOURS <= hours <= MAX_AGE_HOURS:
+        if stale_hours <= hours <= MAX_AGE_HOURS:
             out.append((str(chat_id), hours))
     out.sort(key=lambda pair: pair[1])
     return out[:limit]
 
 
-async def _step_for(session: AsyncSession, chat_id: str) -> int | None:
+async def _step_for(session: AsyncSession, chat_id: str,
+                    final_hours: int = FINAL_HOURS) -> int | None:
     """Какое по счёту сообщение вдогонку сейчас уместно.
 
     Считаются только отметки после последней реплики гостя: написал — значит
@@ -234,7 +246,7 @@ async def _step_for(session: AsyncSession, chat_id: str) -> int | None:
     last = done[0].sent_at
     border = utcnow()
     sent = last if last.tzinfo else last.replace(tzinfo=border.tzinfo)
-    if border - sent < timedelta(hours=FINAL_HOURS):
+    if border - sent < timedelta(hours=final_hours):
         return None
     return len(done) + 1
 
@@ -318,6 +330,16 @@ async def _decide(settings: Any, talk: list[dict[str, str]], hours: int,
 
 async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
     """Собрать сообщения вдогонку по оборванным разговорам."""
+    since = settings.followup_from
+    if since is None:
+        # Пустая настройка — не «дожимать всех подряд», а «не дожимать».
+        # Рассылка гостям не должна включаться сама собой от выкладки кода.
+        logger.info("Дожим выключен: FOLLOWUP_SINCE не задан")
+        return []
+
+    stale_hours = max(1, int(getattr(settings, "followup_after_hours", STALE_HOURS)))
+    final_hours = max(1, int(getattr(settings, "followup_final_hours", FINAL_HOURS)))
+
     try:
         brief = render_brief(await load_facts(settings))
     except KnowledgeUnavailable as error:
@@ -325,8 +347,8 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
         return []
 
     out: list[Nudge] = []
-    for chat_id, hours in await _stale_chats(session):
-        step = await _step_for(session, chat_id)
+    for chat_id, hours in await _stale_chats(session, stale_hours=stale_hours, since=since):
+        step = await _step_for(session, chat_id, final_hours=final_hours)
         if step is None:
             continue
         talk = await _history(session, chat_id)
@@ -351,6 +373,7 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
         return {
             "dry_run": True,
             "hour": hotel_now().hour,
+            "since": str(settings.followup_from or "не задан — дожим выключен"),
             "planned": [{"chat": _who(n.chat_id), "step": n.step,
                          "why": n.reason, "text": n.text} for n in nudges],
         }
