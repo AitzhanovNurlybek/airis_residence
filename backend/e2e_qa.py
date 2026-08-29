@@ -562,6 +562,35 @@ def qa_exely_api() -> None:
     check("список сводок читается из bookingSummaries",
           len(api._rows(summary_response)) == 1)
 
+    # Живая бронь 2026-08-29 показала, что документация и реальность
+    # расходятся: даты лежат в roomStays[].stayDates двумя полями со
+    # временем, сумма — в total.priceAfterTax. Прежний разбор возвращал
+    # None, то есть бронь молча пропадала.
+    real = {
+        "number": "20250715-509506-1233688442", "status": "Cancelled",
+        "currencyCode": "KZT",
+        "customer": {"firstName": "Пётр", "lastName": "Тестов"},
+        "total": {"priceBeforeTax": 45000.0, "priceAfterTax": 45000.0},
+        "roomStays": [{
+            "stayDates": {"arrivalDateTime": "2025-07-15T14:00",
+                          "departureDateTime": "2025-07-16T12:00"},
+            "roomType": {"id": "5050493", "name": "Standart"},
+            "guestCount": {"adultCount": 2},
+        }],
+    }
+    parsed = api._booking(real)
+    check("живая бронь Exely разбирается", parsed is not None)
+    check("даты берутся из stayDates",
+          parsed is not None and str(parsed.check_in) == "2025-07-15"
+          and str(parsed.check_out) == "2025-07-16")
+    check("сумма берётся из total.priceAfterTax",
+          parsed is not None and parsed.total_amount == 45000)
+    # Здесь полное имя намеренно: консьерж по нему сверяет бронь. Короткое
+    # обращение для сообщений собирает отдельная функция в lifecycle.py.
+    check("имя гостя из customer, полностью",
+          parsed is not None and parsed.guest_name == "Тестов Пётр",
+          parsed.guest_name if parsed else "None")
+
     # Самая дорогая ошибка этого раздела. Раньше статус считался так:
     # «действует», если строка ровно "booked", иначе «отменена». Локальная
     # шахматка присылает "booked", а Exely — "Confirmed", и гостю с

@@ -180,6 +180,15 @@ class ExelyApi:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.get(url, params=params or {}, headers=headers)
                 if response.status_code == 404:
+                    # Шлюз Exely отвечает так и на «брони нет», и на «такого
+                    # адреса нет вовсе». Различать обязательно: неверный
+                    # EXELY_API_BASE иначе выглядит как пустой отель, и на
+                    # этом я уже один раз ошибся, объявив API рабочим.
+                    if "no Route matched" in response.text:
+                        raise BookingSystemUnavailable(
+                            f"Exely не знает адреса {url} — проверь EXELY_API_BASE. "
+                            "Для Read Reservation API это /api/read-reservation."
+                        )
                     return None
                 response.raise_for_status()
                 return response.json()
@@ -315,7 +324,24 @@ class ExelyApi:
         check_out = _as_date(_first(row, "departureDate", "checkOutDate", "checkOut", "endDate"))
         if check_in is None or check_out is None:
             stays = row.get("roomStays")
+            # Настоящий Exely кладёт даты в roomStays[].stayDates двумя
+            # полями со временем: arrivalDateTime / departureDateTime.
+            # Проверено на живой броне 2026-08-29 — до этого разбор был
+            # написан по документации и не находил дат вовсе, из-за чего
+            # бронь молча пропадала.
             if isinstance(stays, list):
+                for stay in stays:
+                    if not isinstance(stay, dict):
+                        continue
+                    dates = stay.get("stayDates")
+                    if isinstance(dates, dict):
+                        got_in = _as_date(dates.get("arrivalDateTime"))
+                        got_out = _as_date(dates.get("departureDateTime"))
+                        if got_in and (check_in is None or got_in < check_in):
+                            check_in = got_in
+                        if got_out and (check_out is None or got_out > check_out):
+                            check_out = got_out
+            if isinstance(stays, list) and (check_in is None or check_out is None):
                 ins = [
                     d for stay in stays if isinstance(stay, dict)
                     for d in [_as_date(_first(stay, "arrivalDate", "checkInDate", "checkIn"))]
@@ -343,7 +369,10 @@ class ExelyApi:
 
         amount = _first(row, "totalAmount", "total", "amount", "totalPrice")
         if isinstance(amount, dict):
-            amount = _first(amount, "amount", "value", "gross")
+            # У живого Exely это total.priceAfterTax; остальные написания —
+            # запасные, для других версий API.
+            amount = _first(amount, "priceAfterTax", "priceBeforeTax",
+                            "amount", "value", "gross")
 
         return ExternalBooking(
             external_id=str(number),
