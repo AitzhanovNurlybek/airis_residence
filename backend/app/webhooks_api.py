@@ -267,9 +267,16 @@ async def whatsapp_webhook(
     # обработку из-за неотправленной фотографии — значит превратить мелкую
     # неудачу в молчание.
     sent_photos = 0
+    captioned: set[str] = set()
     for photo in reply.photos:
+        # Подпись — одна на категорию, у первого снимка. Три одинаковых
+        # «Comfort» под тремя фотографиями подряд ничего не добавляют и
+        # выглядят как сбой рассылки.
+        room = photo.get("room", "")
+        caption = "" if room in captioned else room
+        captioned.add(room)
         try:
-            await channel.send_file(message.chat_id, photo["url"], caption=photo.get("room", ""))
+            await channel.send_file(message.chat_id, photo["url"], caption=caption)
             sent_photos += 1
         except WhatsAppError as error:
             logger.warning("Вебхук WhatsApp: снимок не ушёл: %s", error)
