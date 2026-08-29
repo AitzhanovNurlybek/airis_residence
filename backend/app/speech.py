@@ -36,6 +36,45 @@ logger = logging.getLogger(__name__)
 #: в время жизни функции, поэтому запас умеренный.
 TIMEOUT = 40.0
 
+#: Как узнать формат записи по её первым байтам. Ключ — сигнатура, значение —
+#: расширение и тип содержимого.
+#:
+#: Зачем это вообще. Служба распознавания определяет формат ПО ИМЕНИ ФАЙЛА и
+#: отказывает, если расширение ей незнакомо. WhatsApp называет голосовые
+#: `.oga`, и живое сообщение гостя получило ровно это: «Unsupported file
+#: format oga» — при том что внутри обычный OGG, который служба принимает под
+#: именем `.ogg`. Гость в ответ увидел «голосовые пока не распознаю», хотя
+#: распознавание было включено и работало.
+#:
+#: Полагаться на имя, пришедшее от мессенджера, больше нельзя: оно описывает
+#: не формат, а привычку конкретного отправителя. Смотрим в сами байты.
+SIGNATURES: tuple[tuple[bytes, str, str], ...] = (
+    (b"OggS", "ogg", "audio/ogg"),
+    (b"RIFF", "wav", "audio/wav"),
+    (b"ID3", "mp3", "audio/mpeg"),
+    (b"fLaC", "flac", "audio/flac"),
+    (bytes([0x1A, 0x45, 0xDF, 0xA3]), "webm", "audio/webm"),
+)
+
+#: Чем назвать запись, если сигнатура незнакома. `.mp3` — самый вероятный
+#: формат из тех, что служба принимает, и осмысленнее, чем чужое `.oga`.
+FALLBACK_FORMAT = ("mp3", "audio/mpeg")
+
+
+def _format(audio: bytes) -> tuple[str, str]:
+    """Расширение и тип содержимого — по первым байтам записи."""
+    head = audio[:16]
+    for signature, extension, mime in SIGNATURES:
+        if head.startswith(signature):
+            return extension, mime
+    # MP3 без тега ID3 начинается с кадрового заголовка.
+    if head[:2] in (bytes([0xFF, 0xFB]), bytes([0xFF, 0xF3]), bytes([0xFF, 0xF2])):
+        return "mp3", "audio/mpeg"
+    # MP4 и M4A: сигнатура смещена на четыре байта.
+    if audio[4:8] == b"ftyp":
+        return "m4a", "audio/mp4"
+    return FALLBACK_FORMAT
+
 
 class SpeechUnavailable(RuntimeError):
     """Распознать не вышло. Гостю ответим текстом, а не молчанием."""
@@ -73,6 +112,12 @@ async def transcribe(settings: Any, audio: bytes, filename: str = "voice.oga") -
     model = getattr(settings, "speech_model", "") or "gpt-4o-mini-transcribe"
     language = getattr(settings, "speech_language", "") or "ru"
 
+    # Имя, под которым отправляем, собираем сами: пришедшее от мессенджера
+    # описывает его привычку, а не формат записи.
+    extension, mime = _format(audio)
+    stem = (filename or "voice").rsplit("/", 1)[-1].rsplit(".", 1)[0] or "voice"
+    send_as = f"{stem}.{extension}"
+
     data = {"model": model, "response_format": "json"}
     # Подсказка языка заметно поднимает точность на коротких записях: без неё
     # «два номера на завтра» распознаётся то как русский, то как казахский.
@@ -85,7 +130,7 @@ async def transcribe(settings: Any, audio: bytes, filename: str = "voice.oga") -
                 url,
                 headers={"Authorization": f"Bearer {settings.speech_api_key}"},
                 data=data,
-                files={"file": (filename, audio, "application/octet-stream")},
+                files={"file": (send_as, audio, mime)},
             )
             if response.status_code >= 400:
                 # Тело ошибки в лог, но без ключа: этот текст видят и логи, и
