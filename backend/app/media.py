@@ -14,7 +14,13 @@ import logging
 import uuid
 
 from fastapi import HTTPException, UploadFile, status
-from PIL import Image, ImageOps
+# PIL импортируется внутри функции, а не здесь.
+#
+# Он нужен ровно в одном месте — сжатии фотографии, которую загружают в
+# админке. Это происходит несколько раз в месяц. А импорт на уровне модуля
+# происходит при КАЖДОМ холодном старте, включая ответ гостю в WhatsApp,
+# где никаких картинок нет. На Vercel это прямо добавляется к времени
+# ответа: пока PIL грузится, гость ждёт.
 
 from .config import Settings
 from .storage import get_storage
@@ -48,6 +54,8 @@ async def save_room_image(settings: Settings, slug: str, upload: UploadFile) -> 
         )
 
     try:
+        from PIL import Image, ImageOps
+
         image = Image.open(io.BytesIO(raw))
         # Учитываем EXIF-поворот: иначе снятое телефоном фото ляжет боком.
         image = ImageOps.exif_transpose(image)
