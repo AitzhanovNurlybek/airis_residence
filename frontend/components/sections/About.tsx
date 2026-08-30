@@ -8,6 +8,7 @@ import { formatPrice, site } from "@/lib/site";
 import { useIsDesktop, usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
+import { rooms as roomsWord } from "@/lib/plural";
 
 const points = [
   {
@@ -71,7 +72,7 @@ export function About() {
           eyebrow="Об отеле"
           title={
             <>
-              {site.roomsCount} номеров, один принцип: <br className="hidden md:block" />
+              {site.roomsCount} {roomsWord(site.roomsCount)}, один принцип: <br className="hidden md:block" />
               <span className="text-sand-300">всё уже включено</span>
             </>
           }

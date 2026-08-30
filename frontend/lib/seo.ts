@@ -1,19 +1,10 @@
 import type { Metadata } from "next";
 import { rooms as fallbackRooms, site, type Room } from "./site";
+import { rooms as roomsWord } from "@/lib/plural";
 
 export const BASE_URL = site.url;
 
 /** Базовые метаданные страницы с каноникалом и OG. */
-/** «34 номера», а не «34 номеров»: описание уходит в выдачу поисковика. */
-function roomsWord(count: number): string {
-  const tail = count % 100;
-  if (tail >= 11 && tail <= 14) return "номеров";
-  const last = count % 10;
-  if (last === 1) return "номер";
-  if (last >= 2 && last <= 4) return "номера";
-  return "номеров";
-}
-
 export function pageMetadata({
   title,
   description,

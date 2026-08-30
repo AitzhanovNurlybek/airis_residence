@@ -13,6 +13,7 @@ import { buttonClass } from "@/components/ui/Button";
 import { IconPhone, IconPin } from "@/components/ui/Icons";
 import '../be-forms/be-style.css';
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
+import { rooms as roomsWord } from "@/lib/plural";
 
 // WebGL грузится только в браузере, только на десктопе и только после
 // основного контента: на телефоне это лишние ~500 КБ и нагрев батареи.
@@ -114,7 +115,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
-            {site.roomsCount} номеров в двух шагах от проспекта Абая. Завтрак включён,
+            {site.roomsCount} {roomsWord(site.roomsCount)} в двух шагах от проспекта Абая. Завтрак включён,
             стойка регистрации круглосуточно. От{" "}
             <span className="text-sand-200">{formatPrice(priceFrom)}</span> за ночь.
           </motion.p>

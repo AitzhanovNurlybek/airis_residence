@@ -9,6 +9,7 @@ import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
 import { TiltCard } from "@/components/ui/TiltCard";
 import { IconArrow } from "@/components/ui/Icons";
+import { types as typesWord } from "@/lib/plural";
 
 function RoomCard({ room, index }: { room: Room; index: number }) {
   // Первый номер — крупной карточкой: 5 карточек ложатся в сетку 3+3 без дыр.
@@ -87,7 +88,7 @@ export function Rooms({ rooms = fallbackRooms }: { rooms?: Room[] }) {
           eyebrow="Номера"
           title={
             <>
-              {rooms.length} тип{rooms.length === 1 ? "" : rooms.length < 5 ? "а" : "ов"} номеров —
+              {rooms.length} {typesWord(rooms.length)} номеров —
               <br className="hidden md:block" /> от компактного до люкса
             </>
           }
