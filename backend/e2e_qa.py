@@ -1768,6 +1768,59 @@ async def qa_followup() -> None:
               "ответ «да» или «нет»" in DECIDE_PROMPT)
         check("жалобу дожимать нельзя", "злится или жалуется" in DECIDE_PROMPT)
         check("отказавшегося не дожимают", "спасибо, не надо" in DECIDE_PROMPT)
+
+        # Ушедший дожим должен лечь в историю наравне с обычным ответом.
+        # Иначе получается разговор, где консьерж не помнит собственных слов:
+        # гость отвечает «на троих» на вопрос ИЗ ДОЖИМА, а в истории этого
+        # вопроса нет — и консьерж переспрашивает то, что сам же спросил час
+        # назад. Ровно это и увидел живой гость 2026-08-30.
+        import app.followup as _fu  # noqa: PLC0415
+        from app.config import Settings as _Settings  # noqa: PLC0415
+
+        sent_texts: list[str] = []
+
+        class _Stub:
+            def __init__(self, *a, **k) -> None:  # noqa: D107
+                pass
+
+            async def send(self, chat_id: str, text: str) -> str:
+                sent_texts.append(text)
+                return "stub"
+
+        await wipe_followup()
+        await say("user", "а есть Comfort на выходные?", 5)
+        await say("assistant", "Свободен Comfort, 45 000 ₸ за ночь", 4)
+
+        # Ночью рассылка отказывается работать — это правильно, но проверять
+        # запись в историю приходится в любой час.
+        real_channel, real_plan = _fu.WhatsAppChannel, _fu.plan
+        real_quiet = _fu.quiet_hours
+
+        async def _one_nudge(session, settings):  # noqa: ANN001
+            return [_fu.Nudge(chat_id=CHAT, text="Мы смотрели Comfort. Забронируем?",
+                              step=1, reason="проверка")]
+
+        _fu.WhatsAppChannel, _fu.plan = _Stub, _one_nudge
+        _fu.quiet_hours = lambda *a, **k: False
+        try:
+            async with SessionLocal() as ses:
+                result = await _fu.run(ses, _Settings(followup_since="2020-01-01"), dry_run=False)
+        finally:
+            _fu.WhatsAppChannel, _fu.plan = real_channel, real_plan
+            _fu.quiet_hours = real_quiet
+
+        check("дожим отправлен", result.get("sent") == 1, str(result))
+        check("текст ушёл гостю", sent_texts and "Забронируем?" in sent_texts[0])
+
+        after = await load_history(SessionLocal, "whatsapp", CHAT, depth=12)
+        check("дожим лёг в историю разговора",
+              any(m["role"] == "assistant" and "Забронируем?" in str(m["content"])
+                  for m in after),
+              f"реплик в истории: {len(after)}")
+        # Раз консьерж говорил последним, следующий дожим ждёт своей паузы, а
+        # не уходит вдогонку сразу.
+        async with SessionLocal() as ses:
+            check("сразу второй дожим не уходит", await _step_for(ses, CHAT) is None)
     finally:
         await wipe_followup()
 

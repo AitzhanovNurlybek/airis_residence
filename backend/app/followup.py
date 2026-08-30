@@ -397,5 +397,16 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
             logger.info("Дожим %s (шаг %d): %s", _who(nudge.chat_id), nudge.step, nudge.reason)
         except WhatsAppError as error:
             logger.warning("Дожим не ушёл: %s", error)
+            continue
+
+        # Записываем в историю разговора наравне с обычным ответом.
+        #
+        # Иначе получается разговор, где консьерж не помнит собственных слов:
+        # гость отвечает «на троих» на вопрос из дожима, а в истории этого
+        # вопроса нет — и консьерж переспрашивает то, что сам же спросил час
+        # назад. Для гостя это выглядит так, будто его не читают.
+        session.add(DialogMessage(channel=CHANNEL, chat_id=nudge.chat_id,
+                                  role="assistant", content=nudge.text))
+        await session.commit()
 
     return {"sent": sent, "planned": len(nudges)}
