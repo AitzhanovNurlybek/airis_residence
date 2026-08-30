@@ -1821,6 +1821,18 @@ async def qa_followup() -> None:
         # не уходит вдогонку сразу.
         async with SessionLocal() as ses:
             check("сразу второй дожим не уходит", await _step_for(ses, CHAT) is None)
+
+        # Тормошить гостя дольше, чем помнишь его, нельзя. Дожим возвращается
+        # к разговору до MAX_AGE_HOURS, а консьерж помнит разговор
+        # CONTINUES_FOR — если второе меньше первого, бот сам продолжает
+        # переписку и тут же переспрашивает даты, которые в ней уже названы.
+        # Ровно это увидела гостья 2026-08-30.
+        from app.dialogs import CONTINUES_FOR  # noqa: PLC0415
+
+        check("память консьержа не короче горизонта дожима",
+              CONTINUES_FOR.total_seconds() >= MAX_AGE_HOURS * 3600,
+              f"помним {CONTINUES_FOR.total_seconds() / 3600:.0f} ч, "
+              f"дожимаем до {MAX_AGE_HOURS} ч")
     finally:
         await wipe_followup()
 
