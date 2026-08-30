@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import check_credentials, create_token, require_admin
 from .config import Settings, get_settings
 from .db import Lead, Payment, Room, SessionLocal, get_session, init_db, utcnow
-from .notify import notify_telegram
+from .notify import notify_telegram, notify_whatsapp
 from .payments import PaymentError, get_provider, new_order_id
 from .corp_api import admin as corp_admin_router, corp as corp_router
 from .local_api import router as local_router
@@ -258,7 +258,11 @@ async def create_lead(
     await session.commit()
     await session.refresh(lead)
 
+    # Два канала, а не один: Telegram у отеля может быть не настроен, и
+    # тогда заявка молча оставалась только в базе. Каждый канал падает
+    # сам по себе и не мешает другому.
     background.add_task(notify_telegram, lead)
+    background.add_task(notify_whatsapp, lead)
     return {"ok": True, "id": lead.id}
 
 

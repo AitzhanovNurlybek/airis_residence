@@ -19,6 +19,73 @@ ROOM_NAMES = {
 }
 
 
+def lead_lines(lead: Lead) -> list[str]:
+    """Заявка в виде строк. Один текст на все каналы, чтобы не расходились."""
+    room = ROOM_NAMES.get(lead.room or "", lead.room or "не выбран")
+    lines = [
+        f"Заявка с сайта #{lead.id}",
+        "",
+        f"Имя: {lead.name}",
+        f"Телефон: {lead.phone}",
+    ]
+    if lead.email:
+        lines.append(f"Почта: {lead.email}")
+    lines += [
+        f"Номер: {room}",
+        f"Даты: {lead.check_in or '—'} → {lead.check_out or '—'}",
+        f"Гостей: {lead.adults or '—'}",
+    ]
+    if lead.comment:
+        lines += ["", f"Комментарий: {lead.comment}"]
+    lines += ["", "Перезвоните гостю — он ждёт ответа."]
+    return lines
+
+
+async def notify_whatsapp(lead: Lead) -> None:
+    """Шлёт заявку в WhatsApp отеля.
+
+    Заявки уходили только в Telegram, а он у отеля не настроен: шесть штук
+    пролежали в базе непрочитанными, у четырёх дата заезда успела пройти.
+    Гость заполнял форму и не получал звонка — самая дорогая из возможных
+    поломок, и при этом совершенно незаметная.
+
+    WhatsApp выбран потому, что он у отеля уже работает: тот же канал, что и
+    у консьержа, те же ключи, ничего настраивать не нужно. По умолчанию
+    заявка уходит на номер самого бота — в чат «Сообщение для себя», который
+    есть всегда и не зависит от того, кто сегодня на смене.
+    """
+    settings = get_settings()
+    try:
+        from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
+        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+    except Exception as error:  # noqa: BLE001 — канал не настроен, это не сбой заявки
+        logger.info("WhatsApp не настроен, заявка #%s только в базе: %s", lead.id, error)
+        return
+
+    phone = "".join(ch for ch in (settings.lead_notify_phone or "") if ch.isdigit())
+    if not phone:
+        # Свой номер узнаём у Green API: в настройках его нет, а зашивать
+        # цифрами нельзя — при смене номера отеля заявки уйдут в никуда.
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                answer = await client.get(
+                    f"https://api.green-api.com/waInstance{settings.green_api_id}"
+                    f"/getSettings/{settings.green_api_token}"
+                )
+                phone = str((answer.json() or {}).get("wid") or "").split("@")[0]
+        except Exception:  # noqa: BLE001
+            logger.warning("Не узнать свой номер, заявка #%s не отправлена", lead.id)
+            return
+    if not phone:
+        return
+
+    try:
+        await channel.send(f"{phone}@c.us", for_whatsapp("\n".join(lead_lines(lead))))
+        logger.info("Заявка #%s ушла в WhatsApp", lead.id)
+    except WhatsAppError as error:
+        logger.warning("Заявка #%s не ушла в WhatsApp: %s", lead.id, error)
+
+
 async def notify_telegram(lead: Lead) -> None:
     """Шлёт заявку в Telegram. Ошибка доставки не должна ронять запрос."""
     settings = get_settings()
