@@ -1179,6 +1179,49 @@ async def qa_channels() -> None:
         })
         check(f"«{kind}» распознан как голосовое", voice is not None and voice.is_voice)
 
+    # Гость нажал «ответить» на сообщение бота и написал «На троих».
+    # 2026-08-30, 19:51: WhatsApp прислал это типом `quotedMessage`, ветки для
+    # него не было, текст остался пустым, вебхук отчитался «пустое сообщение»,
+    # и человек прождал ответа три часа.
+    #
+    # Разбор «по типу сообщения» терял гостя уже второй раз — до этого на
+    # голосовых. Список типов у мессенджера открытый, поэтому проверяем не
+    # конкретный тип, а то, что текст находится в любом из контейнеров.
+    def _incoming(kind: str, **md):
+        return _parse({"typeWebhook": "incomingMessageReceived", "idMessage": "Q1",
+                       "senderData": {"chatId": "77019300370@c.us", "senderName": "Гость"},
+                       "messageData": {"typeMessage": kind, **md}})
+
+    quoted = _incoming("quotedMessage",
+                       extendedTextMessageData={"text": "На троих"},
+                       quotedMessage={"typeMessage": "extendedTextMessage"})
+    check("ответ с цитатой не теряется", quoted is not None and quoted.text == "На троих",
+          repr(quoted.text if quoted else None))
+    check("ответ с цитатой не считается файлом", quoted is not None and not quoted.has_file)
+
+    unknown = _incoming("reactionMessage",
+                        extendedTextMessageData={"text": "а можно раньше заехать?"})
+    check("незнакомый тип с текстом не теряется",
+          unknown is not None and unknown.text == "а можно раньше заехать?",
+          repr(unknown.text if unknown else None))
+
+    # Голосовое под незнакомым именем типа опознаётся по содержимому: сегодня
+    # это audioMessage, завтра мессенджер назовёт его иначе.
+    by_mime = _incoming("audioMessageNew",
+                        fileMessageData={"downloadUrl": "https://x/v.opus",
+                                         "mimeType": "audio/opus"})
+    check("голосовое опознаётся по типу содержимого",
+          by_mime is not None and by_mime.is_voice)
+    check("у такого голосового есть имя для распознавания",
+          by_mime is not None and by_mime.file_name.endswith(".oga"))
+
+    with_caption = _incoming("imageMessage",
+                             fileMessageData={"downloadUrl": "https://x/1.jpg",
+                                              "fileName": "1.jpg", "caption": "это чек"})
+    check("подпись к файлу по-прежнему читается",
+          with_caption is not None and with_caption.text == "это чек")
+    check("файл по-прежнему виден", with_caption is not None and with_caption.has_file)
+
     # Ссылка на файл у голосового есть — она понадобится, когда появится
     # расшифровка речи. Защита не в её отсутствии, а в порядке проверок:
     # reply_for смотрит is_voice ПЕРВЫМ. Иначе голосовое ушло бы в разбор

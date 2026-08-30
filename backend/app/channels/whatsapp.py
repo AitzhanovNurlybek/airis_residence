@@ -222,25 +222,41 @@ def _parse(body: dict[str, Any]) -> Incoming | None:
     is_voice = False
 
     kind = str(data.get("typeMessage") or "")
-    if kind == "textMessage":
-        text = str((data.get("textMessageData") or {}).get("textMessage") or "")
-    elif kind == "extendedTextMessage":
-        text = str((data.get("extendedTextMessageData") or {}).get("text") or "")
-    elif kind in ("imageMessage", "documentMessage", "videoMessage"):
-        payload = data.get("fileMessageData") or {}
+
+    # Текст ищем во всех известных местах, а не по типу сообщения.
+    #
+    # Разбор «по типу» уже дважды терял гостя молча. Сначала на голосовых, а
+    # 2026-08-30 — на ответе с цитатой: гость нажал «ответить» на сообщение
+    # бота и написал «На троих». WhatsApp прислал это типом `quotedMessage`,
+    # ветки для него не было, текст остался пустым, и вебхук отчитался
+    # «пустое сообщение». Гость прождал три часа.
+    #
+    # Список типов у мессенджера открытый и пополняется без предупреждения,
+    # поэтому неизвестный тип не должен означать потерянное сообщение.
+    # Смотрим в контейнеры: если текст где-то есть — он и есть сообщение.
+    for holder, field in (
+        ("textMessageData", "textMessage"),
+        ("extendedTextMessageData", "text"),
+        ("fileMessageData", "caption"),
+    ):
+        found = (data.get(holder) or {}).get(field)
+        if found:
+            text = str(found)
+            break
+
+    payload = data.get("fileMessageData") or {}
+    if payload.get("downloadUrl"):
         file_url = str(payload.get("downloadUrl") or "")
         file_name = str(payload.get("fileName") or "")
-        text = str(payload.get("caption") or "")
-    elif kind in ("audioMessage", "pttMessage", "voiceMessage"):
-        # Голосовое. Расшифровывать мы его пока не умеем, но и молчать
-        # нельзя: до этой ветки голосовое не распознавалось вовсе, выходило
-        # пустым, и вебхук отвечал «пустое сообщение». Гость отправлял
-        # голосовое и не получал НИЧЕГО — ни ответа, ни отказа. Тишина хуже
-        # любого ответа: человек решает, что отель его игнорирует.
-        payload = data.get("fileMessageData") or {}
-        file_url = str(payload.get("downloadUrl") or "")
-        file_name = str(payload.get("fileName") or "voice.oga")
+
+    # Голосовое: по типу либо по содержимому. Расшифровка включается ключом;
+    # без неё гость получает просьбу написать текстом. Молчать нельзя ни при
+    # каком раскладе — человек решит, что отель его игнорирует.
+    mime = str(payload.get("mimeType") or "")
+    if kind in ("audioMessage", "pttMessage", "voiceMessage") or mime.startswith("audio/"):
         is_voice = True
+        if not file_name:
+            file_name = "voice.oga"
 
     return Incoming(
         message_id=str(body.get("idMessage") or ""),
