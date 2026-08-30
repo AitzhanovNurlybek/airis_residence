@@ -39,6 +39,16 @@ BASE_URL = "https://api.green-api.com/waInstance{id}/{method}/{token}"
 #: доставки, изменения в группах — пропускаем.
 INCOMING = {"incomingMessageReceived"}
 
+#: Типы, на которые молчим сознательно: это не обращения к отелю.
+IGNORED_KINDS = {
+    "reactionMessage",       # «палец вверх» на нашу реплику
+    "pollMessage",
+    "pollUpdateMessage",
+    "editedMessage",
+    "deletedMessage",
+    "groupInviteMessage",
+}
+
 
 class WhatsAppError(RuntimeError):
     pass
@@ -59,6 +69,9 @@ class Incoming:
     #: Голосовое сообщение. Отличается от обычного файла: разбирать его как
     #: платёжку бессмысленно, а молчать в ответ нельзя.
     is_voice: bool = False
+    #: Как назвал сообщение мессенджер. Нужен снаружи ровно для одного
+    #: решения: если прочитать содержимое не вышло, промолчать или ответить.
+    kind: str = ""
 
     @property
     def is_group(self) -> bool:
@@ -67,6 +80,26 @@ class Incoming:
     @property
     def has_file(self) -> bool:
         return bool(self.file_url)
+
+    @property
+    def readable(self) -> bool:
+        """Есть ли что обрабатывать."""
+        return bool(self.text or self.file_url or self.is_voice)
+
+    @property
+    def is_noise(self) -> bool:
+        """Сообщение, на которое отвечать не надо.
+
+        Реакция «палец вверх» на реплику консьержа — не вопрос, и ответ на
+        неё выглядит навязчивостью. То же с опросами и служебными событиями
+        вроде правки или удаления сообщения.
+
+        Список нарочно короткий и закрытый: всё, чего в нём нет и что не
+        удалось прочитать, получает ответ. Молчание должно быть решением, а
+        не следствием незнакомого типа — именно так уже терялись голосовые и
+        ответы с цитатой.
+        """
+        return self.kind in IGNORED_KINDS
 
 
 class WhatsAppChannel:
@@ -267,6 +300,7 @@ def _parse(body: dict[str, Any]) -> Incoming | None:
         file_url=file_url,
         file_name=file_name,
         is_voice=is_voice,
+        kind=kind,
     )
 
 

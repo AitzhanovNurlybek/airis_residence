@@ -50,6 +50,7 @@ from app.concierge import (  # noqa: E402
     _tool_find,
 )
 from app.channels.whatsapp import Incoming, WhatsAppChannel, _parse, _phone, for_whatsapp  # noqa: E402
+from app.webhooks_api import UNREADABLE  # noqa: E402
 from app.channels.flow import reply_for  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.dialogs import load_history, save_turn, seen_before  # noqa: E402
@@ -1221,6 +1222,43 @@ async def qa_channels() -> None:
     check("подпись к файлу по-прежнему читается",
           with_caption is not None and with_caption.text == "это чек")
     check("файл по-прежнему виден", with_caption is not None and with_caption.has_file)
+
+    # Молчание должно быть решением, а не следствием незнакомого типа.
+    # Реакция «палец вверх» на реплику консьержа — не вопрос, отвечать на неё
+    # навязчиво. А геопозиция, визитка или тип, которого у мессенджера вчера
+    # ещё не было, — это обращение, и оставлять его без ответа нельзя.
+    reaction = _incoming("reactionMessage")
+    check("реакция не читается и ответа не требует",
+          reaction is not None and not reaction.readable and reaction.is_noise)
+    for quiet in ("pollMessage", "pollUpdateMessage", "editedMessage", "deletedMessage"):
+        item = _incoming(quiet)
+        check(f"«{quiet}» — сознательное молчание", item is not None and item.is_noise)
+
+    for speak in ("locationMessage", "contactMessage", "stickerMessage", "чегоНетВСписке"):
+        item = _incoming(speak)
+        check(f"«{speak}» без содержимого получит ответ, а не тишину",
+              item is not None and not item.readable and not item.is_noise)
+
+    check("тип сообщения доезжает до вебхука",
+          _incoming("locationMessage").kind == "locationMessage")
+
+    # Отель может писать заметки самому себе — WhatsApp это разрешает, и такие
+    # заметки приходят обычным входящим. Отвечать на них значит засорять
+    # личный блокнот владельца.
+    own = "77066826635@c.us"
+    self_note = _parse({
+        "typeWebhook": "incomingMessageReceived", "idMessage": "S1",
+        "instanceData": {"wid": own},
+        "senderData": {"chatId": own, "senderName": "Отель"},
+        "messageData": {"typeMessage": "textMessage",
+                        "textMessageData": {"textMessage": "не забыть заказать полотенца"}},
+    })
+    check("заметка самому себе разбирается как обычное сообщение",
+          self_note is not None and self_note.chat_id == own)
+    check("текст ответа на нечитаемое зовёт написать текстом",
+          "текстом" in UNREADABLE.lower())
+    check("текст ответа говорит, чем можно помочь",
+          "свободные номера" in UNREADABLE)
 
     # Ссылка на файл у голосового есть — она понадобится, когда появится
     # расшифровка речи. Защита не в её отсутствии, а в порядке проверок:
