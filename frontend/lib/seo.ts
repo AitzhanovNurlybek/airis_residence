@@ -4,6 +4,16 @@ import { rooms as fallbackRooms, site, type Room } from "./site";
 export const BASE_URL = site.url;
 
 /** Базовые метаданные страницы с каноникалом и OG. */
+/** «34 номера», а не «34 номеров»: описание уходит в выдачу поисковика. */
+function roomsWord(count: number): string {
+  const tail = count % 100;
+  if (tail >= 11 && tail <= 14) return "номеров";
+  const last = count % 10;
+  if (last === 1) return "номер";
+  if (last >= 2 && last <= 4) return "номера";
+  return "номеров";
+}
+
 export function pageMetadata({
   title,
   description,
@@ -69,7 +79,11 @@ export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
     legalName: site.legalName,
     url: BASE_URL,
     image: [abs("/images/hotel/lobby.jpg"), abs("/images/rooms/standart/01.jpg")],
-    description: `Отель ${site.name} в центре Алматы: ${site.roomsCount} номеров, завтрак включён, круглосуточная стойка регистрации. ${site.address.street}.`,
+    // «34 номеров» — ошибка склонения, а описание из разметки читают и
+    // поисковики, и ИИ-помощники, и оно же попадает в выдачу. Число здесь
+    // всегда двузначное, поэтому правило простое: 2–4 в конце — «номера»,
+    // кроме 12–14, где всегда «номеров».
+    description: `Отель ${site.name} в центре Алматы: ${site.roomsCount} ${roomsWord(site.roomsCount)}, завтрак включён, круглосуточная стойка регистрации. ${site.address.street}.`,
     telephone: site.contacts.phonePrimaryRaw,
     email: site.contacts.email,
     priceRange: "₸₸",
