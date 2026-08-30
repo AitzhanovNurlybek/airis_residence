@@ -18,13 +18,14 @@ import { JsonLd } from "@/components/JsonLd";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 import { faqItems } from "@/lib/faq";
 import { getPriceFrom, getRooms } from "@/lib/rooms";
+import { rooms as roomsWord } from "@/lib/plural";
 
 // Цену берём из базы, а не из запасного списка в коде: её меняют
 // в админке, и описание в выдаче Google обязано совпадать с сайтом.
 export async function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
     title: "Airis Residence, Алматы - Официальный сайт",
-    description: `${site.roomsCount} номера в центре Алматы, ${site.address.street}. Завтрак включён, стойка регистрации 24/7. От ${formatPrice(await getPriceFrom())} за ночь — напрямую, без комиссии агрегаторов.`,
+    description: `${site.roomsCount} ${roomsWord(site.roomsCount)} в центре Алматы, ${site.address.street}. Завтрак включён, стойка регистрации 24/7. От ${formatPrice(await getPriceFrom())} за ночь — напрямую, без комиссии агрегаторов.`,
     path: "/",
   });
 }

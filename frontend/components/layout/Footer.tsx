@@ -4,6 +4,7 @@ import { site, type Room } from "@/lib/site";
 import { rooms as fallbackRooms } from "@/lib/site";
 import { Logo } from "@/components/ui/Logo";
 import { IconClock, IconMail, IconPhone, IconPin, IconTelegram, IconWhatsApp } from "@/components/ui/Icons";
+import { rooms as roomsWord } from "@/lib/plural";
 
 const legalLinks = [
   { href: "/o-kompanii", label: "О компании" },
@@ -24,7 +25,7 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
           <div className="sm:col-span-2 lg:col-span-1">
             <Logo className="h-11 w-auto" />
             <p className="mt-5 max-w-xs text-sm leading-relaxed text-muted">
-              Отель на {site.roomsCount} номеров в центре Алматы. Завтрак включён, стойка
+              Отель на {site.roomsCount} {roomsWord(site.roomsCount)} в центре Алматы. Завтрак включён, стойка
               регистрации работает круглосуточно.
             </p>
             <div className="mt-6 flex gap-3 be-socials">

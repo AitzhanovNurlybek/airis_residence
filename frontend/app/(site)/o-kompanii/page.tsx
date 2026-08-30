@@ -8,11 +8,12 @@ import { site, formatPrice } from "@/lib/site";
 import { getRooms } from "@/lib/rooms";
 import { buttonClass } from "@/components/ui/Button";
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
+import { rooms as roomsWord } from "@/lib/plural";
 
 export const metadata: Metadata = pageMetadata({
   title: "О компании — ТОО INCOME HOUSE, отель Airis Residence",
   description:
-    `Airis Residence — городской отель на ${site.roomsCount} номеров в центре Алматы под управлением ТОО INCOME HOUSE. Реквизиты, контакты и информация о компании.`,
+    `Airis Residence — городской отель на ${site.roomsCount} ${roomsWord(site.roomsCount)} в центре Алматы под управлением ТОО INCOME HOUSE. Реквизиты, контакты и информация о компании.`,
   path: "/o-kompanii",
 });
 
@@ -36,14 +37,14 @@ export default async function AboutCompanyPage() {
         <PageHeader
           eyebrow="О компании"
           title="Airis Residence"
-          description={`Городской отель на ${site.roomsCount} номеров в центре Алматы под управлением ${site.legalName}.`}
+          description={`Городской отель на ${site.roomsCount} ${roomsWord(site.roomsCount)} в центре Алматы под управлением ${site.legalName}.`}
         />
 
         <Prose className="mt-12">
           <h2>Об отеле</h2>
           <p>
             Airis Residence — небольшой отель в Алмалинском районе Алматы, на улице Наурызбай
-            батыра 134/2. Мы работаем в формате городского отеля: {site.roomsCount} номеров
+            батыра 134/2. Мы работаем в формате городского отеля: {site.roomsCount} {roomsWord(site.roomsCount)}
             пяти категорий, круглосуточная стойка регистрации, включённый завтрак и
             расположение в пешей доступности от делового и культурного центра города.
           </p>
