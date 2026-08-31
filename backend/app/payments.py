@@ -25,10 +25,13 @@ import hashlib
 import logging
 import secrets
 import uuid
+from datetime import timedelta
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
+
+from .almaty import today as hotel_today
 
 from .config import Settings
 
@@ -254,6 +257,93 @@ class FreedomPayProvider(PaymentProvider):
             if значение:
                 out[поле] = значение
         return out
+
+    async def find_payment(self, *, needle: str, days: int = 400) -> dict[str, str]:
+        """Найти платёж по тексту в описании заказа.
+
+        Нужно потому, что платёж создаём не мы: гостя на страницу банка
+        отправляет модуль Exely, и его номер заказа (PG1798) нам неизвестен.
+        Зато в описании платежа Exely пишет номер брони целиком — по нему и
+        ищем. Другого способа связать бронь с платежом нет: в данных брони
+        Exely отдаёт сумму предоплаты и способ оплаты, но не идентификатор
+        транзакции.
+        """
+        script = "get_transactions_list.php"
+        # Время отеля, а не машины: сервер живёт в UTC, и в первые пять
+        # часов суток по Алматы «сегодня» разъезжается на день.
+        today = hotel_today()
+        fields: dict[str, Any] = {
+            "pg_merchant_id": self.settings.payment_terminal_id,
+            "pg_date_from": (today - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00"),
+            "pg_date_to": (today + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+            "pg_salt": secrets.token_hex(8),
+        }
+        fields["pg_sig"] = self._sign(script, fields)
+
+        try:
+            async with httpx.AsyncClient(timeout=40.0) as client:
+                response = await client.post(f"{self.BASE}/{script}", data=fields)
+                response.raise_for_status()
+                body = response.text
+        except Exception as error:  # noqa: BLE001
+            raise PaymentError(f"FreedomPay недоступен: {error}") from error
+
+        if _tag(body, "pg_error_description"):
+            raise PaymentError(f"FreedomPay отказал: {_tag(body, 'pg_error_description')}")
+
+        # Ответ — список <transaction>…</transaction>. Разбираем построчно:
+        # тащить XML-парсер ради нескольких полей незачем, формат стабилен.
+        for chunk in body.split("<transaction>")[1:]:
+            block = chunk.split("</transaction>")[0]
+            if needle not in block:
+                continue
+            found: dict[str, str] = {}
+            for поле in ("pg_payment_id", "pg_order_id", "pg_amount", "pg_currency",
+                         "pg_status", "pg_payment_status", "pg_description",
+                         "pg_card_pan", "pg_create_date", "pg_captured",
+                         "pg_refund_amount", "pg_revoked_amount"):
+                значение = _tag(block, поле)
+                if значение:
+                    found[поле] = значение
+            if found:
+                return found
+        return {}
+
+    async def refund(self, *, payment_id: str, amount_tenge: int = 0) -> dict[str, str]:
+        """Вернуть деньги по платежу. Нулевая сумма — возврат целиком.
+
+        Настоящее движение денег. Метод ничего не решает и ничего не считает:
+        сумму и право на возврат определяет вызывающий, и решение к этому
+        моменту должно быть уже записано.
+        """
+        script = "revoke.php"
+        fields: dict[str, Any] = {
+            "pg_merchant_id": self.settings.payment_terminal_id,
+            "pg_payment_id": str(payment_id),
+            "pg_salt": secrets.token_hex(8),
+        }
+        if amount_tenge > 0:
+            fields["pg_refund_amount"] = str(amount_tenge)
+        fields["pg_sig"] = self._sign(script, fields)
+
+        try:
+            async with httpx.AsyncClient(timeout=40.0) as client:
+                response = await client.post(f"{self.BASE}/{script}", data=fields)
+                response.raise_for_status()
+                body = response.text
+        except Exception as error:  # noqa: BLE001
+            raise PaymentError(f"FreedomPay недоступен: {error}") from error
+
+        if _tag(body, "pg_status") != "ok":
+            code = _tag(body, "pg_error_code")
+            message = _tag(body, "pg_error_description") or "без описания"
+            raise PaymentError(f"Возврат не прошёл ({code}): {message}")
+        return {
+            "payment_id": str(payment_id),
+            "amount": str(amount_tenge or ""),
+            "message": _tag(body, "pg_status_description") or "принят",
+        }
+
 
     async def create_payment(
         self,

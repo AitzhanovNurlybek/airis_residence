@@ -123,6 +123,7 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
         return
 
     подробности: list[str] = []
+    booking: dict = {}
     try:
         from .booking_system.exely_api import ExelyApi
 
@@ -166,6 +167,20 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
             подробности.append(f"Статус в Exely: {статус}")
     except Exception as error:  # noqa: BLE001 — без подробностей уведомление всё равно нужно
         logger.warning("Подробности брони %s не прочитались: %s", number, error)
+
+    # Отмена — это ещё и деньги. Считаем возврат по данным самой брони и
+    # прикладываем к уведомлению: иначе бухгалтерия ищет транзакцию в
+    # кабинете банка среди сотен и считает штраф вручную.
+    if "cancel" in kind.lower() and booking:
+        try:
+            from .refunds import describe, execute, refund_for_booking
+
+            plan = await refund_for_booking(settings, booking)
+            done, note = await execute(settings, plan)
+            await _tell_hotel("\n".join(describe(plan, done, note)),
+                              f"возврат по броне {number}")
+        except Exception as error:  # noqa: BLE001 — расчёт не должен ронять уведомление
+            logger.warning("Возврат по броне %s не посчитан: %s", number, error)
 
     заголовок = ("Новая бронь с сайта" if "cancel" not in kind.lower()
                  else "Бронь отменена")
