@@ -2168,7 +2168,7 @@ async def qa_refunds() -> None:
 
     def бронь(**поля):
         основа = {
-            "number": "20260917-509506-1262598144",
+            "number": "QA-BRON-NE-SUSHESTVUET",
             "status": "Cancelled",
             "guaranteeInfo": {"totalPrepaid": 50000.0},
             "cancellation": {"penaltyAmount": 0.0},
@@ -2243,6 +2243,38 @@ async def qa_refunds() -> None:
     done, note = await execute(_S(refund_auto=True), нечего)
     check("пустой план не отправляется", not done, note)
 
+    # Отмена — не окончательное состояние. Из инструкции Exely (kb282396):
+    # «Если в полученном письме гость подтвердит проживание, бронирование
+    # будет автоматически восстановлено». Между расчётом и отправкой бронь
+    # успевает ожить, а деньги обратно не позовёшь — поэтому статус
+    # перечитывается перед самой отправкой.
+    import app.refunds as _ref  # noqa: PLC0415
+
+    настоящая = _ref._still_cancelled
+
+    async def _ожила(settings, number):  # noqa: ANN001
+        return False
+
+    async def _не_проверить(settings, number):  # noqa: ANN001
+        return None
+
+    _ref._still_cancelled = _ожила
+    try:
+        done, note = await execute(_S(refund_auto=True, refund_max=0), готовый)
+    finally:
+        _ref._still_cancelled = настоящая
+    check("по восстановленной броне деньги не уходят", not done, note)
+    check("причина названа прямо", "восстановлена" in note, note)
+
+    # Не удалось проверить — не повод считать, что всё в порядке, но и не
+    # повод падать: дальше сработают остальные предохранители.
+    _ref._still_cancelled = _не_проверить
+    try:
+        done, note = await execute(_S(refund_auto=True, refund_max=0), готовый)
+    finally:
+        _ref._still_cancelled = настоящая
+    check("непроверенный статус не роняет отправку", isinstance(note, str), note)
+
     # Без ключей банка отправлять некуда, но и падать нельзя.
     done, note = await execute(_S(refund_auto=True, refund_max=0), готовый)
     check("без доступа к банку возврат не уходит", not done, note)
@@ -2250,7 +2282,7 @@ async def qa_refunds() -> None:
 
     # ── Что видит отель ────────────────────────────────────────────────
     текст = "\n".join(describe(готовый, False, "автоматический возврат выключен"))
-    for нужно in ("20260917-509506-1262598144", "50000", "1841766142"):
+    for нужно in ("QA-BRON-NE-SUSHESTVUET", "50000", "1841766142"):
         check(f"в сообщении есть «{нужно}»", нужно in текст)
     check("сказано, что делать руками", "кабинете FreedomPay" in текст)
 
