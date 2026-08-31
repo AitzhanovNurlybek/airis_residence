@@ -1348,6 +1348,19 @@ async def qa_channels() -> None:
     check("тип без приставки не ломается",
           _kind({"eventType": "bookingCreated"}, _Req()) == "bookingCreated")
 
+    # Типы, которыми Exely называет события на самом деле. Пересчёт прошлых
+    # уведомлений 2026-08-31 показал ровно четыре: create_booking (50),
+    # cancel_booking (21), check_in (55), check_out (61).
+    from app.guest_messages import EVENT_MESSAGES  # noqa: PLC0415
+
+    check("создание брони сопоставлено с сообщением",
+          bool(EVENT_MESSAGES.get("create_booking")))
+    check("отмена брони сопоставлена с сообщением",
+          bool(EVENT_MESSAGES.get("cancel_booking")))
+    # Заезд и выезд гостю не пишем: он в этот момент стоит на стойке.
+    check("на заезд и выезд сообщений нет",
+          not EVENT_MESSAGES.get("check_in") and not EVENT_MESSAGES.get("check_out"))
+
     # Ссылка на файл у голосового есть — она понадобится, когда появится
     # расшифровка речи. Защита не в её отсутствии, а в порядке проверок:
     # reply_for смотрит is_voice ПЕРВЫМ. Иначе голосовое ушло бы в разбор

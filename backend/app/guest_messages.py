@@ -104,6 +104,11 @@ VOICE_NOT_SUPPORTED = (
 #: здесь нет, то просто не вызывает сообщения — молчание безопаснее
 #: случайного текста не по адресу.
 EVENT_MESSAGES: dict[str, str] = {
+    # Так называет события сам Exely (приставку «webpms:» разбор снимает).
+    # Проверено на живом уведомлении 2026-08-31.
+    "create_booking": BOOKING_CREATED,
+    "cancel_booking": BOOKING_CANCELLED,
+    "modify_booking": "",
     "bookingcreated": BOOKING_CREATED,
     "reservationcreated": BOOKING_CREATED,
     "created": BOOKING_CREATED,
