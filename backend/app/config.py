@@ -282,7 +282,22 @@ class Settings(BaseSettings):
 
     @property
     def payment_configured(self) -> bool:
-        return bool(self.payment_provider and self.payment_base_url and self.payment_client_id)
+        """Хватает ли данных, чтобы обратиться к банку.
+
+        У разных банков разный набор. Halyk и Forte работают по OAuth: им
+        нужен адрес API и client_id. FreedomPay устроен иначе — там номер
+        магазина и секретное слово, а адрес зашит в самом клиенте.
+
+        Раньше проверка требовала адрес и client_id от всех подряд. Для
+        FreedomPay это означало, что вписанные номер магазина и ключ ничего
+        не включают: признак остаётся ложным, поставщик не создаётся, и
+        причину видно только в коде.
+        """
+        if not self.payment_provider:
+            return False
+        if self.payment_provider == "freedompay":
+            return bool(self.payment_terminal_id and self.payment_client_secret)
+        return bool(self.payment_base_url and self.payment_client_id)
 
     @property
     def admin_configured(self) -> bool:

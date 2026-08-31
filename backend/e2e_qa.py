@@ -2162,6 +2162,7 @@ async def qa_refunds() -> None:
 
     from app.config import Settings as _S  # noqa: PLC0415
     from app.refunds import RefundPlan, describe, execute, plan_refund  # noqa: PLC0415
+    from app.payments import get_provider as _get_provider  # noqa: PLC0415
 
     оплачен = {"pg_payment_id": "1841766142", "pg_amount": "50000",
                "pg_card_pan": "555555******4444"}
@@ -2279,6 +2280,33 @@ async def qa_refunds() -> None:
     done, note = await execute(_S(refund_auto=True, refund_max=0), готовый)
     check("без доступа к банку возврат не уходит", not done, note)
     check("причина понятна", "не настроен" in note, note)
+
+    # ── Ключи банка действительно включают возврат ─────────────────────
+    # Признак «платежи настроены» требовал адрес API и client_id — они есть у
+    # Halyk и Forte, но не у FreedomPay, где номер магазина и секретное
+    # слово, а адрес зашит в клиенте. Отель вписал бы выданные ему значения,
+    # и ничего бы не включилось: поставщик не создаётся, причина видна только
+    # в коде.
+    живой = _S(payment_provider="freedompay", payment_terminal_id="570767",
+               payment_client_secret="секрет")
+    check("номера магазина и ключа достаточно для FreedomPay",
+          живой.payment_configured)
+    провайдер = _get_provider(живой)
+    check("поставщик создаётся", getattr(провайдер, "name", "") == "freedompay")
+    check("он умеет искать платёж", hasattr(провайдер, "find_payment"))
+    check("он умеет возвращать", hasattr(провайдер, "refund"))
+
+    check("без секретного ключа не считается настроенным",
+          not _S(payment_provider="freedompay",
+                 payment_terminal_id="570767").payment_configured)
+    check("без номера магазина не считается настроенным",
+          not _S(payment_provider="freedompay",
+                 payment_client_secret="секрет").payment_configured)
+    # Старые банки проверяются по-прежнему: правка не должна их сломать.
+    check("Halyk по-прежнему проверяется по адресу и client_id",
+          _S(payment_provider="epay_halyk", payment_base_url="https://x",
+             payment_client_id="id").payment_configured)
+    check("пустые настройки — платежи не настроены", not _S().payment_configured)
 
     # ── Что видит отель ────────────────────────────────────────────────
     текст = "\n".join(describe(готовый, False, "автоматический возврат выключен"))
