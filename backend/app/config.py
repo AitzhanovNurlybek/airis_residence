@@ -225,6 +225,24 @@ class Settings(BaseSettings):
     # заезда успела пройти.
     lead_notify_phone: str = ""
 
+    @property
+    def lead_notify_numbers(self) -> list[str]:
+        """Кому слать заявки и брони. Пусто — значит на номер самого бота.
+
+        Список, а не один номер: уведомления нужны и владельцу, и менеджеру
+        на смене, и добавлять второго получателя правкой кода неправильно.
+        Разделитель — запятая, лишние символы в номере не мешают.
+        """
+        raw = (self.lead_notify_phone or "").replace(";", ",")
+        out: list[str] = []
+        for item in raw.split(","):
+            digits = "".join(ch for ch in item if ch.isdigit())
+            # Казахстанский номер — 11 цифр. Короче — это опечатка, и слать
+            # туда нельзя: попадём в чужой чат.
+            if len(digits) >= 10 and digits not in out:
+                out.append(digits)
+        return out
+
     followup_after_hours: int = 2
     followup_final_hours: int = 24
 

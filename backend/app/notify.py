@@ -54,36 +54,52 @@ async def notify_whatsapp(lead: Lead) -> None:
     заявка уходит на номер самого бота — в чат «Сообщение для себя», который
     есть всегда и не зависит от того, кто сегодня на смене.
     """
+    await _tell_hotel("\n".join(lead_lines(lead)), f"заявка #{lead.id}")
+
+
+async def _tell_hotel(text: str, что: str) -> int:
+    """Отправить сообщение отелю в WhatsApp. Возвращает, скольким ушло.
+
+    Получателей может быть несколько — владелец и менеджер на смене. Если не
+    задан ни один, пишем на номер самого бота: чат «Сообщение для себя» есть
+    всегда и не зависит от того, кто сегодня работает.
+    """
     settings = get_settings()
     try:
         from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
         channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
     except Exception as error:  # noqa: BLE001 — канал не настроен, это не сбой заявки
-        logger.info("WhatsApp не настроен, заявка #%s только в базе: %s", lead.id, error)
-        return
+        logger.info("WhatsApp не настроен, %s без уведомления: %s", что, error)
+        return 0
 
-    phone = "".join(ch for ch in (settings.lead_notify_phone or "") if ch.isdigit())
-    if not phone:
-        # Свой номер узнаём у Green API: в настройках его нет, а зашивать
-        # цифрами нельзя — при смене номера отеля заявки уйдут в никуда.
+    numbers = settings.lead_notify_numbers
+    if not numbers:
+        # Свой номер спрашиваем у Green API: зашивать его цифрами нельзя —
+        # при переносе бота на номер отеля уведомления ушли бы в никуда.
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 answer = await client.get(
                     f"https://api.green-api.com/waInstance{settings.green_api_id}"
                     f"/getSettings/{settings.green_api_token}"
                 )
-                phone = str((answer.json() or {}).get("wid") or "").split("@")[0]
+                own = str((answer.json() or {}).get("wid") or "").split("@")[0]
         except Exception:  # noqa: BLE001
-            logger.warning("Не узнать свой номер, заявка #%s не отправлена", lead.id)
-            return
-    if not phone:
-        return
+            logger.warning("Не узнать свой номер, %s без уведомления", что)
+            return 0
+        numbers = [own] if own else []
 
-    try:
-        await channel.send(f"{phone}@c.us", for_whatsapp("\n".join(lead_lines(lead))))
-        logger.info("Заявка #%s ушла в WhatsApp", lead.id)
-    except WhatsAppError as error:
-        logger.warning("Заявка #%s не ушла в WhatsApp: %s", lead.id, error)
+    sent = 0
+    for phone in numbers:
+        try:
+            await channel.send(f"{phone}@c.us", for_whatsapp(text))
+            sent += 1
+        except WhatsAppError as error:
+            # Один недоступный получатель не должен лишать уведомления
+            # остальных: у менеджера мог смениться номер.
+            logger.warning("Уведомление (%s) не ушло на …%s: %s", что, phone[-4:], error)
+    if sent:
+        logger.info("Уведомление (%s) ушло получателям: %d", что, sent)
+    return sent
 
 
 async def notify_hotel_booking(number: str, kind: str) -> None:
@@ -156,33 +172,7 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
     lines = [f"{заголовок}: {number}", ""] + подробности
     lines += ["", "Проверить оплату и детали — в кабинете Exely."]
 
-    try:
-        from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
-        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
-    except Exception as error:  # noqa: BLE001
-        logger.info("WhatsApp не настроен, бронь %s без уведомления: %s", number, error)
-        return
-
-    phone = "".join(ch for ch in (settings.lead_notify_phone or "") if ch.isdigit())
-    if not phone:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                answer = await client.get(
-                    f"https://api.green-api.com/waInstance{settings.green_api_id}"
-                    f"/getSettings/{settings.green_api_token}"
-                )
-                phone = str((answer.json() or {}).get("wid") or "").split("@")[0]
-        except Exception:  # noqa: BLE001
-            logger.warning("Не узнать свой номер, бронь %s без уведомления", number)
-            return
-    if not phone:
-        return
-
-    try:
-        await channel.send(f"{phone}@c.us", for_whatsapp("\n".join(lines)))
-        logger.info("Бронь %s (%s) — отель уведомлён", number, kind)
-    except WhatsAppError as error:
-        logger.warning("Уведомление о брони %s не ушло: %s", number, error)
+    await _tell_hotel("\n".join(lines), f"бронь {number}")
 
 
 async def notify_telegram(lead: Lead) -> None:
