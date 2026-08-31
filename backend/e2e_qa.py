@@ -772,6 +772,18 @@ def qa_webhooks() -> None:
     _gs.cache_clear()
     try:
         import app.main as _main
+        import app.webhooks_api as _wh
+
+        # Приём уведомления теперь шлёт отелю сообщение в WhatsApp. Ключи в
+        # .env боевые, и первый же прогон отправил три настоящих сообщения —
+        # проверка не должна выходить наружу ни при каких обстоятельствах.
+        отправлено_отелю: list[tuple[str, str]] = []
+
+        async def _не_шлём(number: str, kind: str) -> None:
+            отправлено_отелю.append((number, kind))
+
+        настоящий = _wh.notify_hotel_booking
+        _wh.notify_hotel_booking = _не_шлём
 
         client = TestClient(_main.app)
         # Номер свой на каждый прогон. События копятся в базе, и с постоянным
@@ -855,7 +867,21 @@ def qa_webhooks() -> None:
         check("без настроенного секрета точка выключена",
               client.post("/api/webhooks/exely", json=body,
                           headers={"X-Api-Key": KEY}).status_code == 503)
+        # Отель узнаёт о новой броне только отсюда: платёж идёт между Exely
+        # и банком, мимо нас. Если уведомление перестанет вызываться, никто
+        # этого не заметит — заказчица просто снова спросит, как узнать об
+        # оплате.
+        check("о разобранной броне отель уведомляется",
+              any(n.startswith(ref) for n, _ in отправлено_отелю),
+              str(отправлено_отелю)[:120])
+        check("на отмену тоже уведомляем",
+              any("cancel" in k for _, k in отправлено_отелю),
+              str([k for _, k in отправлено_отелю])[:120])
     finally:
+        try:
+            _wh.notify_hotel_booking = настоящий
+        except NameError:
+            pass
         if was is None:
             _os.environ.pop("EXELY_WEBHOOK_SECRET", None)
         else:
