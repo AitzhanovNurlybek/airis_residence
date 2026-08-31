@@ -175,6 +175,39 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
     await _tell_hotel("\n".join(lines), f"бронь {number}")
 
 
+async def notify_cancel_request(*, ref: str = "", guest: str = "", phone: str = "",
+                                dates: str = "", reason: str = "") -> int:
+    """Просьба гостя отменить бронь — отелю, немедленно.
+
+    Отменить бронь консьерж не может: в Exely нет метода записи. Раньше он
+    говорил «позвоните на стойку», и на этом всё заканчивалось — гость,
+    написавший ночью, либо звонил утром сам, либо просто не приезжал, а отель
+    узнавал о пустом номере в день заезда.
+
+    Здесь просьба доставляется сразу, в любое время суток. Ночью её никто не
+    прочитает, но утром она будет лежать первой, а не потеряется в переписке.
+    """
+    lines = ["Гость просит отменить бронь", ""]
+    if ref:
+        lines.append(f"Бронь: {ref}")
+    if guest:
+        lines.append(f"Гость: {guest}")
+    if phone:
+        lines.append(f"Телефон: {phone}")
+    if dates:
+        lines.append(f"Даты: {dates}")
+    if reason:
+        lines.append(f"Причина: {reason}")
+    if not ref:
+        # Без номера отмену не оформить, и отель должен знать это сразу, а не
+        # выяснять, открыв Extranet.
+        lines.append("")
+        lines.append("Номер брони гость не назвал — уточните у него.")
+    lines += ["", "Отменить нужно в Exely: консьерж этого не умеет."]
+
+    return await _tell_hotel("\n".join(lines), "просьба об отмене")
+
+
 async def notify_telegram(lead: Lead) -> None:
     """Шлёт заявку в Telegram. Ошибка доставки не должна ронять запрос."""
     settings = get_settings()

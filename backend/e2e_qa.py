@@ -40,6 +40,7 @@ from app.concierge import (  # noqa: E402
     FIND_TOOL,
     FULL_TOOLS,
     FIRST_ACTION,
+    READ_ONLY_TOOLS,
     ROOM_PAGE_TOOL,
     _tool_room_page,
     _sane_price,
@@ -434,6 +435,19 @@ def qa_tools() -> None:
     # отвечать на него уточняющим вопросом нельзя. Сроки подтверждены
     # поддержкой платёжной системы 2026-08-31.
     check("срок возврата называется сразу", "1–7 рабочих дней" in live_mode)
+
+    # Отменить бронь консьерж не может — в Exely нет метода записи. Раньше он
+    # говорил «позвоните на стойку», и просьба на этом умирала: гость,
+    # написавший ночью, либо звонил утром сам, либо просто не приезжал, а
+    # отель узнавал о пустом номере в день заезда.
+    from app.concierge import CANCEL_REQUEST_TOOL  # noqa: PLC0415
+
+    check("просьбу об отмене есть чем передать",
+          CANCEL_REQUEST_TOOL in READ_ONLY_TOOLS)
+    check("передавать просьбу можно и без номера брони",
+          not CANCEL_REQUEST_TOOL["input_schema"].get("required"))
+    check("инструмент не выдаёт себя за отмену",
+          "только передаёт просьбу" in CANCEL_REQUEST_TOOL["description"])
     check("сказано, что задержка не на стороне отеля",
           "зависит от банка гостя" in live_mode)
     # Платежи идут мимо нас: доступа к ним нет, и обещать проверку возврата

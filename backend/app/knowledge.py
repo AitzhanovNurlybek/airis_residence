@@ -104,6 +104,12 @@ def render_brief(facts: dict[str, Any]) -> str:
     add(f"- Дети: {policy.get('children')}.")
     add(f"- С животными: {'можно' if policy.get('pets') else 'нельзя'}.")
     add(f"- Курение в номерах: {'разрешено' if policy.get('smoking') else 'запрещено'}.")
+    # Отмена и возврат — самая частая причина нервного разговора. Без них в
+    # справке консьерж либо молчал, либо выдумывал сроки.
+    if policy.get("cancellation"):
+        add(f"- Отмена: {policy['cancellation']}.")
+    if policy.get("refund"):
+        add(f"- {policy['refund']}.")
     payment = policy.get("payment") or []
     add(f"- Оплата: {', '.join(payment)}.")
 

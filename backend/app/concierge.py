@@ -295,6 +295,36 @@ CHANGE_TOOL = {
     },
 }
 
+#: Просьба гостя отменить бронь — отелю, а не в пустоту.
+#:
+#: Отменить бронь консьерж не может: в Exely нет метода записи, и это не
+#: обойти. Раньше он честно говорил «позвоните на стойку» — и на этом всё
+#: заканчивалось. Гость, написавший об отмене ночью, либо звонил утром сам,
+#: либо просто не приезжал, а отель узнавал о пустом номере в день заезда.
+#:
+#: Инструмент закрывает этот разрыв: отель получает просьбу сразу, в том
+#: числе ночью, и утром её обрабатывает. Ничего не отменяет — только
+#: передаёт.
+CANCEL_REQUEST_TOOL = {
+    "name": "cancel_request",
+    "description": (
+        "Передать отелю просьбу гостя отменить бронь. Вызывай, когда гость "
+        "сказал, что хочет отменить, — даже если номер брони он не назвал. "
+        "Сама отмена делается стойкой, инструмент только передаёт просьбу."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Номер брони, если гость его назвал"},
+            "guest": {"type": "string", "description": "Имя или фамилия гостя, если известны"},
+            "dates": {"type": "string", "description": "Даты заезда и выезда, если известны"},
+            "reason": {"type": "string", "description": "Причина отмены, если гость назвал"},
+        },
+        "required": [],
+    },
+}
+
+
 CANCEL_TOOL = {
     "name": "cancel_booking",
     "description": "Отменить бронь. Вызывай только после явного подтверждения гостя.",
@@ -375,7 +405,9 @@ BOOKING_LINK_TOOL = {
 }
 
 
-READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL]
+# Передать просьбу об отмене можно всегда: это сообщение отелю, а не
+# запись в систему бронирования.
+READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL, CANCEL_REQUEST_TOOL]
 FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
 
 
@@ -540,6 +572,35 @@ def _tool_room_page(facts: dict[str, Any], args: dict[str, Any],
             )
     codes = ", ".join(sorted(str(r.get("slug")) for r in facts.get("rooms", [])))
     return f"Категории «{slug}» нет. Известные: {codes}"
+
+
+async def _tool_cancel_request(settings: Any, guest: dict[str, Any] | None,
+                               args: dict[str, Any]) -> str:
+    """Передать отелю просьбу отменить бронь.
+
+    Отменяет не консьерж и не этот вызов: в Exely нет метода записи. Здесь
+    только доставка просьбы — чтобы она не осталась в переписке, которую
+    ночью никто не читает.
+    """
+    from .notify import notify_cancel_request  # локально: notify тянет каналы
+
+    who = dict(guest or {})
+    ушло = await notify_cancel_request(
+        ref=str(args.get("ref") or ""),
+        guest=str(args.get("guest") or who.get("name") or ""),
+        phone=str(who.get("phone") or ""),
+        dates=str(args.get("dates") or ""),
+        reason=str(args.get("reason") or ""),
+    )
+    if ушло:
+        # Форму подсказываем прямо здесь: на этом месте модель охотно пишет
+        # «передал», и в переписке всплывает род, которого у консьержа нет.
+        return ("Просьба передана отелю. Гостю скажи так и есть — «просьба "
+                "передана», а не «я передал». Дальше: стойка свяжется с ним; "
+                "назови условия отмены и срок возврата из справки.")
+    # Не ушло — значит гостю нужно звонить самому, и молчать об этом нельзя.
+    return ("Передать не удалось. Скажи гостю, что отмену нужно подтвердить "
+            "звонком на стойку, и дай телефон.")
 
 
 def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any]) -> str:
@@ -1040,7 +1101,9 @@ async def answer(
                 args = block.get("input") or {}
                 tool_calls.append({"name": name, "input": args})
 
-                if name == "room_page":
+                if name == "cancel_request":
+                    output = await _tool_cancel_request(settings, guest, args)
+                elif name == "room_page":
                     output = _tool_room_page(facts, args, photos)
                 elif name == "booking_link":
                     output = _tool_link(settings, facts, args)
