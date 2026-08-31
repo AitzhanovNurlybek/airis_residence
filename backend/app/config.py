@@ -88,14 +88,15 @@ class Settings(BaseSettings):
     payment_provider: str = ""          # epay_halyk | fortebank | none
     payment_terminal_id: str = ""
     payment_client_id: str = ""
-    payment_client_secret: str = ""
     payment_base_url: str = ""          # адрес API банка
     payment_success_url: str = "https://airisresidence.kz/oplata/uspeh"
     payment_failure_url: str = "https://airisresidence.kz/oplata/oshibka"
     payment_webhook_secret: str = ""
 
     #: Секретное слово мерчанта. У FreedomPay им подписывается каждый запрос
-    #: и каждое уведомление — отдельного токена там нет.
+    #: и каждое уведомление — отдельного токена там нет. Было объявлено
+    #: дважды: второе объявление молча перекрывало первое, и правка «не в том»
+    #: месте не дала бы никакого эффекта.
     payment_client_secret: str = ""
     #: Куда банк присылает результат. Отличается от success_url: тот для
     #: браузера гостя, этот — для сервера, и гость его не видит.

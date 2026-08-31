@@ -198,6 +198,63 @@ class FreedomPayProvider(PaymentProvider):
         ] + [self.settings.payment_client_secret]
         return hashlib.md5(";".join(parts).encode("utf-8")).hexdigest()
 
+    async def get_status(self, *, payment_id: str = "", order_id: str = "") -> dict[str, str]:
+        """Что стало с платежом: списан, ждёт, отменён, возвращён.
+
+        Нужно ровно для одного вопроса, который задают чаще всех: «страница
+        показала успешную оплату, а денег на счёте нет — где они?». Ответ
+        обычно в статусе: авторизация (холд) списанием не является, а
+        возврат по отменённой броне мог уже уйти и просто ещё не дошёл до
+        карты — банки возвращают деньги днями, а не минутами.
+
+        Спрашивать у поддержки то, что отдаёт их же API, — терять сутки на
+        каждый вопрос.
+
+        Достаточно одного из двух: номера платежа или номера заказа.
+        """
+        script = "get_status3.php"
+        fields: dict[str, Any] = {
+            "pg_merchant_id": self.settings.payment_terminal_id,
+            "pg_salt": secrets.token_hex(8),
+        }
+        if payment_id:
+            fields["pg_payment_id"] = str(payment_id)
+        if order_id:
+            fields["pg_order_id"] = str(order_id)
+        if not payment_id and not order_id:
+            raise PaymentError("Нужен номер платежа или номер заказа")
+        fields["pg_sig"] = self._sign(script, fields)
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(f"{self.BASE}/{script}", data=fields)
+                response.raise_for_status()
+                body = response.text
+        except Exception as error:  # noqa: BLE001
+            logger.warning("FreedomPay не ответил на запрос статуса: %s", error)
+            raise PaymentError(f"FreedomPay недоступен: {error}") from error
+
+        if _tag(body, "pg_status") != "ok":
+            code = _tag(body, "pg_error_code")
+            message = _tag(body, "pg_error_description") or "без описания"
+            raise PaymentError(f"FreedomPay отказал ({code}): {message}")
+
+        # Забираем всё, что пришло: набор полей у разных статусов разный, и
+        # выбирать заранее значит однажды не увидеть главного.
+        out: dict[str, str] = {}
+        for поле in (
+            "pg_payment_id", "pg_order_id", "pg_transaction_status",
+            "pg_payment_status", "pg_amount", "pg_currency", "pg_net_amount",
+            "pg_ps_amount", "pg_ps_currency", "pg_captured", "pg_refund_amount",
+            "pg_revoked_amount", "pg_card_pan", "pg_create_date",
+            "pg_payment_date", "pg_capture_date", "pg_refund_date",
+            "pg_failure_code", "pg_failure_description", "pg_card_brand",
+        ):
+            значение = _tag(body, поле)
+            if значение:
+                out[поле] = значение
+        return out
+
     async def create_payment(
         self,
         *,
