@@ -28,7 +28,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,7 @@ from .channels.whatsapp import _parse, for_whatsapp
 from .config import Settings, get_settings
 from .concierge import FALLBACK
 from .db import ExelyEvent, SessionLocal, get_session
+from .notify import notify_hotel_booking
 from .dialogs import answered_same_recently, save_turn, seen_before
 
 logger = logging.getLogger(__name__)
@@ -113,21 +114,60 @@ def _phone(payload: dict[str, Any]) -> str:
 
 
 def _number(payload: dict[str, Any]) -> str:
-    for key in ("number", "reservationNumber", "bookingNumber", "id"):
+    # BookingNumber с большой буквы — так его называет Exely во вложенном
+    # payload. Из-за отсутствия этого написания номер не находился ни у
+    # одного из 190 уведомлений, накопившихся за месяц.
+    for key in ("BookingNumber", "number", "reservationNumber", "bookingNumber", "id"):
         value = payload.get(key)
         if value:
             return str(value)
-    booking = payload.get("booking") or payload.get("reservation")
-    if isinstance(booking, dict):
-        return _number(booking)
+    for holder in ("payload", "booking", "reservation", "data"):
+        nested = payload.get(holder)
+        if isinstance(nested, dict):
+            found = _number(nested)
+            if found:
+                return found
     return ""
+
+
+def _events(body: Any) -> list[dict[str, Any]]:
+    """Разложить тело уведомления на отдельные события.
+
+    Exely присылает СПИСОК событий, а не одно:
+
+        [{"eventId": "...", "eventType": "webpms:create_booking",
+          "payload": {"BookingNumber": "20260901-...", "PropertyId": "509506"}}]
+
+    Прежний разбор ждал объект и на список отвечал единственной записью с
+    типом «unknown» и пустым номером брони. За месяц так накопилось 190
+    уведомлений, из которых не извлечено ничего: гости не получили ни
+    подтверждений брони, ни сообщений об отмене, а отель не узнал ни об
+    одной новой брони с сайта.
+
+    Здесь тело приводится к списку словарей — и одиночный объект, и список,
+    и объект со списком внутри. Разбирать по одному событию за раз важно:
+    в одном запросе их может прийти несколько, и потерять второе так же
+    легко, как раньше терялись все.
+    """
+    if isinstance(body, list):
+        return [item for item in body if isinstance(item, dict)]
+    if not isinstance(body, dict):
+        return []
+    for holder in ("events", "notifications", "items", "data"):
+        nested = body.get(holder)
+        if isinstance(nested, list):
+            return [item for item in nested if isinstance(item, dict)]
+    return [body]
 
 
 def _kind(payload: dict[str, Any], request: Request) -> str:
     for key in ("eventType", "event", "type", "action", "name"):
         value = payload.get(key)
         if isinstance(value, str) and value:
-            return value[:60]
+            # Exely называет события «webpms:create_booking». Приставка
+            # ничего не различает — все уведомления приходят с ней, — а
+            # сопоставление с шаблонами сообщений идёт по «create_booking».
+            return value.split(":")[-1][:60] if ":" in value else value[:60]
     # Иные отправители кладут тип события в заголовок, а не в тело.
     return (request.headers.get("x-event-type") or "unknown")[:60]
 
@@ -136,6 +176,7 @@ def _kind(payload: dict[str, Any], request: Request) -> str:
 async def exely_webhook(
     request: Request,
     response: Response,
+    background: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -160,37 +201,50 @@ async def exely_webhook(
         # Тело сохраняем даже нечитаемое: разбираться проще по факту, чем по
         # строчке в логе «пришло что-то не то».
         payload = {}
-    if not isinstance(payload, dict):
-        payload = {"payload": payload}
+    # Одно уведомление может нести несколько событий, и записать надо каждое.
+    body = payload if isinstance(payload, (dict, list)) else {"payload": payload}
+    events = _events(body) or [{}]
 
-    kind = _kind(payload, request)
-    number = _number(payload)
-    phone = _phone(payload)
+    saved: list[int] = []
+    duplicates = 0
+    for item in events:
+        kind = _kind(item, request)
+        number = _number(item)
+        phone = _phone(item)
 
-    # Ключ повтора: тип события и номер брони. Номера нет — берём тело
-    # целиком, иначе два разных уведомления схлопнутся в одно.
-    key = f"{kind}:{number}" if number else f"{kind}:{hash(raw)}"
+        # Ключ повтора: тип события и номер брони. У Exely на одну бронь
+        # приходит и создание, и отмена, поэтому одного номера мало. Номера
+        # нет — берём собственный идентификатор события, а его нет — тело
+        # целиком, иначе два разных уведомления схлопнутся в одно.
+        own = str(item.get("eventId") or "")
+        key = f"{kind}:{number}" if number else f"{kind}:{own or hash(raw)}"
 
-    event = ExelyEvent(
-        event_key=key[:120],
-        kind=kind,
-        booking_number=number[:60],
-        guest_phone=phone[:40],
-        payload=(raw or b"").decode("utf-8", "replace")[:20000],
-    )
-    session.add(event)
-    try:
-        await session.commit()
-    except IntegrityError:
-        await session.rollback()
-        existing = (
-            await session.execute(select(ExelyEvent).where(ExelyEvent.event_key == key[:120]))
-        ).scalar_one_or_none()
-        logger.info("Вебхук Exely: повтор события %s", key)
-        return {"ok": True, "duplicate": True, "id": existing.id if existing else None}
+        event = ExelyEvent(
+            event_key=key[:120],
+            kind=kind,
+            booking_number=number[:60],
+            guest_phone=phone[:40],
+            payload=json.dumps(item, ensure_ascii=False)[:20000],
+        )
+        session.add(event)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            duplicates += 1
+            logger.info("Вебхук Exely: повтор события %s", key)
+            continue
+        saved.append(event.id)
+        logger.info("Вебхук Exely: %s по брони %s", kind, number or "без номера")
 
-    logger.info("Вебхук Exely: %s по брони %s", kind, number or "без номера")
-    return {"ok": True, "id": event.id, "kind": kind, "booking": number}
+        # Отель узнаёт о брони отсюда, и только отсюда: платёж проходит между
+        # Exely и банком, мимо нас. Отправляем в фоне — уведомление не должно
+        # задерживать ответ Exely, иначе он посчитает доставку неудачной и
+        # начнёт слать повторы.
+        if number and any(w in kind.lower() for w in ("book", "reserv")):
+            background.add_task(notify_hotel_booking, number, kind)
+
+    return {"ok": True, "saved": saved, "duplicates": duplicates, "events": len(events)}
 
 
 @router.post("/whatsapp")

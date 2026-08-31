@@ -790,14 +790,36 @@ def qa_webhooks() -> None:
 
         first = client.post("/api/webhooks/exely", json=body, headers={"X-Api-Key": KEY})
         check("с верным ключом принимает", first.status_code == 200)
-        check("событие разобрано", first.json().get("booking") == ref, first.text[:80])
+        check("событие разобрано и записано",
+              len(first.json().get("saved") or []) == 1, first.text[:100])
 
         # Exely присылает уведомление снова, если мы ответили медленно.
         # Второй раз заводить бронь нельзя.
         again = client.post("/api/webhooks/exely", json=body, headers={"X-Api-Key": KEY})
-        check("повтор не заводит второе событие", again.json().get("duplicate") is True)
-        check("повтор указывает на ту же запись",
-              again.json().get("id") == first.json().get("id"))
+        check("повтор не заводит второе событие", again.json().get("duplicates") == 1,
+              again.text[:100])
+        check("на повторе ничего не сохранено", not (again.json().get("saved") or []))
+
+        # Настоящее тело Exely: список, тип с приставкой, номер во вложенном
+        # payload. Именно на такой форме разбор молчал целый месяц.
+        живое = [{"eventId": f"{ref}-live", "eventType": "webpms:create_booking",
+                  "payload": {"BookingNumber": f"{ref}-L", "PropertyId": "509506"}}]
+        как_у_exely = client.post("/api/webhooks/exely", json=живое,
+                                  headers={"X-Api-Key": KEY})
+        check("настоящее тело Exely принимается", как_у_exely.status_code == 200)
+        check("из настоящего тела событие извлекается",
+              len(как_у_exely.json().get("saved") or []) == 1, как_у_exely.text[:100])
+
+        # Два события в одном запросе — обычное дело; потерять второе так же
+        # легко, как раньше терялись все.
+        пара = client.post("/api/webhooks/exely", headers={"X-Api-Key": KEY},
+                           json=живое + [{"eventId": f"{ref}-2",
+                                          "eventType": "webpms:cancel_booking",
+                                          "payload": {"BookingNumber": f"{ref}-L"}}])
+        check("второе событие в том же запросе не теряется",
+              пара.json().get("events") == 2, пара.text[:100])
+        check("создание и отмена одной брони — разные события",
+              len(пара.json().get("saved") or []) == 1, пара.text[:100])
 
         # В кабинете Exely имя заголовка задаётся вручную полем «Имя ключа»,
         # и там стоит EXELY_WEBHOOK_SECRET — то же имя, что у переменной
@@ -1285,6 +1307,46 @@ async def qa_channels() -> None:
     bare = "\n".join(lead_lines(_Lead(id=8, name="Аноним", phone="+77010000001")))
     check("пустые поля заявки не показываются как None", "None" not in bare, bare[:80])
     check("незаполненная категория названа словами", "не выбран" in bare)
+
+    # Exely присылает СПИСОК событий, а номер брони лежит во вложенном
+    # payload под именем BookingNumber с большой буквы. Разбор ждал объект и
+    # другие имена, поэтому за месяц накопилось 190 уведомлений, из которых
+    # не извлечено НИЧЕГО: все с типом «unknown» и пустым номером. Гости не
+    # получили ни подтверждений брони, ни сообщений об отмене, а отель не
+    # узнал ни об одной новой броне.
+    from app.webhooks_api import _events, _number  # noqa: PLC0415
+
+    живое = [{"eventId": "f1a19d5a", "eventType": "webpms:create_booking",
+              "creationTime": "2026-08-31T06:38:24.343Z",
+              "payload": {"BookingNumber": "20260901-509506-1262595670",
+                          "PropertyId": "509506"}}]
+    события = _events(живое)
+    check("список событий Exely разбирается", len(события) == 1, str(len(события)))
+    check("номер брони достаётся из вложенного payload",
+          _number(события[0]) == "20260901-509506-1262595670", _number(события[0]))
+
+    # В одном запросе событий может быть несколько, и потерять второе так же
+    # легко, как раньше терялись все.
+    двойное = _events(живое + [{"eventId": "b2", "eventType": "webpms:cancel_booking",
+                                "payload": {"BookingNumber": "X-2"}}])
+    check("несколько событий в одном запросе не теряются", len(двойное) == 2)
+    check("номер второго события тоже читается", _number(двойное[1]) == "X-2")
+
+    # Одиночный объект и обёртка со списком внутри — тоже рабочие формы.
+    check("одиночное событие разбирается", len(_events(живое[0])) == 1)
+    check("обёртка со списком разбирается", len(_events({"events": живое})) == 1)
+    check("мусор не роняет разбор", _events("не json") == [])
+
+    # Приставка «webpms:» ничего не различает — все события приходят с ней, а
+    # сопоставление с шаблонами сообщений идёт по «create_booking».
+    class _Req:
+        headers: dict = {}
+
+    from app.webhooks_api import _kind  # noqa: PLC0415
+    check("приставка Exely отбрасывается",
+          _kind(события[0], _Req()) == "create_booking", _kind(события[0], _Req()))
+    check("тип без приставки не ломается",
+          _kind({"eventType": "bookingCreated"}, _Req()) == "bookingCreated")
 
     # Ссылка на файл у голосового есть — она понадобится, когда появится
     # расшифровка речи. Защита не в её отсутствии, а в порядке проверок:

@@ -86,6 +86,105 @@ async def notify_whatsapp(lead: Lead) -> None:
         logger.warning("Заявка #%s не ушла в WhatsApp: %s", lead.id, error)
 
 
+async def notify_hotel_booking(number: str, kind: str) -> None:
+    """Сообщить отелю о новой или отменённой брони.
+
+    Заказчица спросила прямо: «оплата прошла, а мне никакое уведомление не
+    пришло — как я узнаю?» Никак: платёж проходит между Exely и банком, наша
+    система в этой цепочке не участвует и узнать о нём может только от Exely.
+
+    Уведомление о самой броне Exely присылает, и вот его-то мы теперь и
+    превращаем в сообщение отелю. Гостю написать по нему нельзя: в брони есть
+    имя и фамилия, но нет ни телефона, ни почты — проверено на живой броне.
+    А отелю есть что сказать: пришла бронь, вот кто, вот когда, вот на
+    сколько.
+
+    Подробности тянем из Exely по номеру: в самом уведомлении лежат только
+    номер брони и код объекта.
+    """
+    settings = get_settings()
+    if not number:
+        return
+
+    подробности: list[str] = []
+    try:
+        from .booking_system.exely_api import ExelyApi
+
+        api = ExelyApi(settings.exely_client_id, settings.exely_client_secret,
+                       settings.exely_property_id, auth_url=settings.exely_auth_url,
+                       api_base=settings.exely_api_base)
+        data = await api._get(
+            f"/v1/properties/{settings.exely_property_id}/bookings/{number}")
+        booking = (data or {}).get("booking") or {}
+        who = booking.get("customer") or {}
+        имя = " ".join(str(who.get(k) or "").strip()
+                       for k in ("lastName", "firstName")).strip()
+        stays = booking.get("roomStays") or []
+        даты = комната = ""
+        if stays and isinstance(stays[0], dict):
+            сроки = stays[0].get("stayDates") or {}
+            заезд = str(сроки.get("arrivalDateTime") or "")[:10]
+            выезд = str(сроки.get("departureDateTime") or "")[:10]
+            даты = f"{заезд} → {выезд}" if заезд else ""
+            тип = stays[0].get("roomType") or {}
+            комната = str(тип.get("name") or "")
+        сумма = (booking.get("total") or {}).get("priceAfterTax")
+
+        if имя:
+            подробности.append(f"Гость: {имя}")
+        if комната:
+            подробности.append(f"Номер: {комната}")
+        if даты:
+            подробности.append(f"Даты: {даты}")
+        if сумма:
+            # Exely отдаёт сумму дробной («475.0»), а в счёте у отеля тенге
+            # целые. Дробная часть тут только мешает читать.
+            try:
+                округлённая = f"{int(round(float(сумма))):,}".replace(",", " ")
+            except (TypeError, ValueError):
+                округлённая = str(сумма)
+            подробности.append(
+                f"Сумма: {округлённая} {booking.get('currencyCode') or ''}".strip())
+        статус = str(booking.get("status") or "")
+        if статус:
+            подробности.append(f"Статус в Exely: {статус}")
+    except Exception as error:  # noqa: BLE001 — без подробностей уведомление всё равно нужно
+        logger.warning("Подробности брони %s не прочитались: %s", number, error)
+
+    заголовок = ("Новая бронь с сайта" if "cancel" not in kind.lower()
+                 else "Бронь отменена")
+    lines = [f"{заголовок}: {number}", ""] + подробности
+    lines += ["", "Проверить оплату и детали — в кабинете Exely."]
+
+    try:
+        from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
+        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+    except Exception as error:  # noqa: BLE001
+        logger.info("WhatsApp не настроен, бронь %s без уведомления: %s", number, error)
+        return
+
+    phone = "".join(ch for ch in (settings.lead_notify_phone or "") if ch.isdigit())
+    if not phone:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                answer = await client.get(
+                    f"https://api.green-api.com/waInstance{settings.green_api_id}"
+                    f"/getSettings/{settings.green_api_token}"
+                )
+                phone = str((answer.json() or {}).get("wid") or "").split("@")[0]
+        except Exception:  # noqa: BLE001
+            logger.warning("Не узнать свой номер, бронь %s без уведомления", number)
+            return
+    if not phone:
+        return
+
+    try:
+        await channel.send(f"{phone}@c.us", for_whatsapp("\n".join(lines)))
+        logger.info("Бронь %s (%s) — отель уведомлён", number, kind)
+    except WhatsAppError as error:
+        logger.warning("Уведомление о брони %s не ушло: %s", number, error)
+
+
 async def notify_telegram(lead: Lead) -> None:
     """Шлёт заявку в Telegram. Ошибка доставки не должна ронять запрос."""
     settings = get_settings()
