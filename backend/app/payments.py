@@ -267,6 +267,22 @@ class FreedomPayProvider(PaymentProvider):
         ищем. Другого способа связать бронь с платежом нет: в данных брони
         Exely отдаёт сумму предоплаты и способ оплаты, но не идентификатор
         транзакции.
+
+        ⚠️ ЭТОТ МЕТОД НЕ ПОДТВЕРЖДЁН ДОКУМЕНТАЦИЕЙ.
+
+        В открытой документации FreedomPay (раздел «После платежа») описаны
+        только `get_status3.php`, `do_capture.php`, `cancel.php` и
+        `revoke.php`. Метода для выборки транзакций за период там нет —
+        имя `get_transactions_list.php` взято по аналогии с другими
+        шлюзами на этом же движке и может не существовать.
+
+        Поэтому отказ здесь — ожидаемый исход, а не поломка: он честно
+        превращается в «платёж не найден», и отель ищет транзакцию в
+        кабинете сам. Всё остальное — расчёт суммы, проверки, уведомление —
+        работает и без этого метода.
+
+        Что спросить у поддержки, чтобы закрыть вопрос: есть ли метод поиска
+        платежа по описанию заказа или выборки транзакций за период.
         """
         script = "get_transactions_list.php"
         # Время отеля, а не машины: сервер живёт в UTC, и в первые пять
@@ -289,7 +305,9 @@ class FreedomPayProvider(PaymentProvider):
             raise PaymentError(f"FreedomPay недоступен: {error}") from error
 
         if _tag(body, "pg_error_description"):
-            raise PaymentError(f"FreedomPay отказал: {_tag(body, 'pg_error_description')}")
+            # Скорее всего метода просто нет — см. предупреждение выше.
+            raise PaymentError(
+                f"поиск платежей недоступен: {_tag(body, 'pg_error_description')}")
 
         # Ответ — список <transaction>…</transaction>. Разбираем построчно:
         # тащить XML-парсер ради нескольких полей незачем, формат стабилен.
@@ -309,12 +327,20 @@ class FreedomPayProvider(PaymentProvider):
                 return found
         return {}
 
-    async def refund(self, *, payment_id: str, amount_tenge: int = 0) -> dict[str, str]:
+    async def refund(self, *, payment_id: str, amount_tenge: int = 0,
+                     idempotency: str = "") -> dict[str, str]:
         """Вернуть деньги по платежу. Нулевая сумма — возврат целиком.
 
         Настоящее движение денег. Метод ничего не решает и ничего не считает:
         сумму и право на возврат определяет вызывающий, и решение к этому
         моменту должно быть уже записано.
+
+        `idempotency` — ключ повтора (`pg_idempotency_key` в документации
+        FreedomPay). С ним банк сам отклонит второй такой же возврат, даже
+        если наш код отправит его дважды: при обрыве связи, при повторном
+        уведомлении об отмене, при ручном запуске поверх автоматического.
+        Собственная защита от повтора у нас есть, но она смотрит на данные,
+        которые могли устареть, а эта — на стороне банка и надёжнее.
         """
         script = "revoke.php"
         fields: dict[str, Any] = {
@@ -324,6 +350,8 @@ class FreedomPayProvider(PaymentProvider):
         }
         if amount_tenge > 0:
             fields["pg_refund_amount"] = str(amount_tenge)
+        if idempotency:
+            fields["pg_idempotency_key"] = str(idempotency)[:120]
         fields["pg_sig"] = self._sign(script, fields)
 
         try:

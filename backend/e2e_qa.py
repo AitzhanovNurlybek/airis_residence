@@ -2288,6 +2288,50 @@ async def qa_refunds() -> None:
     check("без доступа к банку возврат не уходит", not done, note)
     check("причина понятна", "не настроен" in note, note)
 
+    # ── Ключ повтора: защита от двойного возврата на стороне банка ─────
+    # Сверено с документацией FreedomPay: у revoke.php есть необязательный
+    # pg_idempotency_key. С ним банк сам отклонит второй такой же возврат,
+    # даже если мы отправим его дважды — при обрыве связи, при повторном
+    # уведомлении об отмене, при ручном запуске поверх автоматического. Своя
+    # защита смотрит на данные, которые могли устареть; эта надёжнее.
+    отправлено: dict = {}
+
+    class _Банк:
+        name = "freedompay"
+
+        async def refund(self, **kw):  # noqa: ANN003
+            отправлено.update(kw)
+            return {"message": "принят"}
+
+    настоящий_провайдер = _ref.get_provider
+    настоящая_проверка = _ref._still_cancelled
+
+    async def _отменена(settings, number):  # noqa: ANN001
+        return True
+
+    _ref.get_provider = lambda s: _Банк()
+    _ref._still_cancelled = _отменена
+    try:
+        план = RefundPlan(booking="QA-IDEMP-1", prepaid=50000, penalty=20000,
+                          amount=30000, payment_id="1841766142")
+        done, note = await execute(_S(refund_auto=True, refund_max=0), план)
+    finally:
+        _ref.get_provider = настоящий_провайдер
+        _ref._still_cancelled = настоящая_проверка
+
+    check("возврат уходит в банк", done, note)
+    check("сумма передана верно", отправлено.get("amount_tenge") == 30000,
+          str(отправлено.get("amount_tenge")))
+    check("ключ повтора передан", bool(отправлено.get("idempotency")))
+    check("ключ повтора привязан к броне",
+          "QA-IDEMP-1" in str(отправлено.get("idempotency")),
+          str(отправлено.get("idempotency")))
+    # Сумма в ключе тоже нужна: частичный возврат поверх полного — другая
+    # операция, и блокировать её этим ключом нельзя.
+    check("ключ повтора учитывает сумму",
+          "30000" in str(отправлено.get("idempotency")),
+          str(отправлено.get("idempotency")))
+
     # ── Ключи банка действительно включают возврат ─────────────────────
     # Признак «платежи настроены» требовал адрес API и client_id — они есть у
     # Halyk и Forte, но не у FreedomPay, где номер магазина и секретное

@@ -243,7 +243,16 @@ async def execute(settings: Any, plan: RefundPlan) -> tuple[bool, str]:
     if provider is None or not hasattr(provider, "refund"):
         return False, "доступ к банку не настроен"
     try:
-        result = await provider.refund(payment_id=plan.payment_id, amount_tenge=plan.amount)
+        # Ключ повтора привязан к броне и сумме: банк сам отклонит второй
+        # такой же возврат, даже если мы отправим его дважды — при обрыве
+        # связи, при повторном уведомлении об отмене или при ручном запуске
+        # поверх автоматического. Своя защита у нас есть, но она смотрит на
+        # данные, которые могли устареть, а эта — на стороне банка.
+        result = await provider.refund(
+            payment_id=plan.payment_id,
+            amount_tenge=plan.amount,
+            idempotency=f"{plan.booking}:{plan.amount}",
+        )
     except PaymentError as error:
         logger.warning("Возврат по броне %s не прошёл: %s", plan.booking, error)
         return False, f"банк отказал: {error}"
