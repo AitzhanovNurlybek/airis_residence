@@ -23,6 +23,15 @@ jobs:
   send:
     runs-on: ubuntu-latest
     steps:
+      # Брони без предоплаты: раз в сутки, вместе с остальными
+      # календарными поводами. Чаще незачем — бронь проверяется один раз, а
+      # каждый запрос к Exely занимает почти секунду.
+      - name: Проверить брони без предоплаты
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o unpaid.json -w "%{http_code}" --max-time 240             -X POST "https://airisresidence.kz/api/backend/api/webhooks/unpaid"             -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "HTTP $code"; cat unpaid.json; echo
+
       - name: Перенести брони для поиска по имени
         run: |
           # Порция за раз; первый полный обход займёт несколько дней запусков,

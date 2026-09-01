@@ -2576,6 +2576,110 @@ async def qa_payment_callback() -> None:
         _gs.cache_clear()
 
 
+async def qa_unpaid() -> None:
+    """Брони без предоплаты: сводка отелю через сутки после бронирования.
+
+    Ценность такой сводки держится ровно до первого лишнего пункта. Стоит
+    ей набрать чужих броней — её перестанут читать, и вместе с ними
+    перестанут замечать настоящие. Поэтому проверяется прежде всего то,
+    что в неё НЕ должно попадать.
+
+    Сеть не задействована: разбор ответа Exely вынесен отдельно от запроса
+    именно ради этого.
+    """
+    head("Брони без предоплаты")
+
+    from app.unpaid import Unpaid, describe  # noqa: PLC0415
+
+    # ── Что должно попадать в сводку ───────────────────────────────────
+    сводка = "\n".join(describe([
+        Unpaid(number="20260901-509506-1262682909", guest="Айтжанов Нурлыбек",
+               dates="2026-09-01 → 2026-09-02", room="Standart", amount=34200),
+    ]))
+    for нужно in ("20260901-509506-1262682909", "Айтжанов Нурлыбек",
+                  "2026-09-01", "Standart", "34200"):
+        check(f"в сводке есть «{нужно}»", нужно in сводка)
+    check("сказано, что делать", "позвонить" in сводка.lower())
+    # Гостю мы написать не можем: Exely отдаёт только имя и фамилию, ни
+    # телефона, ни почты. Отель должен знать, где искать контакты, иначе
+    # первым делом спросит об этом нас.
+    check("сказано, где брать контакты гостя", "кабинете Exely" in сводка)
+    check("сказано, почему не сами", "в API их нет" in сводка)
+    check("в заголовке видно, что речь про сайт", "с сайта" in сводка)
+
+    # ── Разбор ответа Exely ────────────────────────────────────────────
+    # Проверяем ту самую развилку, из-за которой сводка едва не наполнилась
+    # чужими бронями: 14 из 15 первых проверенных оказались с площадок.
+    import app.unpaid as _unpaid  # noqa: PLC0415
+
+    class SETTINGS_STUB:  # noqa: N801 — заглушка, а не класс предметной области
+        exely_client_id = exely_client_secret = exely_property_id = "x"
+        exely_auth_url = exely_api_base = "https://example.invalid"
+
+
+    def ответ(**поля):
+        основа = {
+            "number": "QA-1",
+            "status": "Active",
+            "source": {"type": "BookingEngine", "code": "PropertySite"},
+            "guaranteeInfo": {"totalPrepaid": 0.0},
+            "total": {"priceAfterTax": 50000.0},
+            "customer": {"lastName": "Петров", "firstName": "Пётр"},
+            "roomStays": [{"stayDates": {"arrivalDateTime": "2026-09-10T14:00:00",
+                                         "departureDateTime": "2026-09-12T12:00:00"},
+                           "roomType": {"name": "Comfort"}}],
+        }
+        основа.update(поля)
+        return {"booking": основа}
+
+    async def разобрать(данные):
+        """Прогнать _look с подставным ответом Exely."""
+        class _Api:
+            def __init__(self, *a, **k) -> None:  # noqa: D107
+                pass
+
+            async def _get(self, path):  # noqa: ANN001
+                if данные is None:
+                    raise RuntimeError("Exely недоступен")
+                return данные
+
+        import app.booking_system.exely_api as _ex  # noqa: PLC0415
+        было = _ex.ExelyApi
+        _ex.ExelyApi = _Api
+        try:
+            return await _unpaid._look(SETTINGS_STUB, "QA-1")
+        finally:
+            _ex.ExelyApi = было
+
+    вердикт, item = await разобрать(ответ())
+    check("неоплаченная бронь с сайта попадает в сводку", вердикт == "unpaid", вердикт)
+    check("имя гостя разобрано", item is not None and item.guest == "Петров Пётр")
+    check("даты разобраны", item is not None and item.dates.startswith("2026-09-10"))
+    check("категория разобрана", item is not None and item.room == "Comfort")
+
+    # Брони с площадок — не наше дело. Там расчёт по правилам площадки, часто
+    # при заезде, и «нет предоплаты» ничего плохого не означает.
+    вердикт, _ = await разобрать(ответ(source={"type": "Channel", "code": "BGC"}))
+    check("бронь с площадки в сводку не идёт", вердикт == "elsewhere", вердикт)
+
+    вердикт, _ = await разобрать(ответ(guaranteeInfo={"totalPrepaid": 50000.0}))
+    check("оплаченная бронь в сводку не идёт", вердикт == "paid", вердикт)
+
+    вердикт, _ = await разобрать(ответ(status="Cancelled"))
+    check("отменённая бронь в сводку не идёт", вердикт == "gone", вердикт)
+
+    # Сбой чтения — не то же самое, что «разобрались». Пометив такую бронь
+    # проверенной, мы никогда бы к ней не вернулись, и неоплаченная бронь
+    # тихо дожила бы до дня заезда.
+    вердикт, _ = await разобрать(None)
+    check("сбой чтения отделён от разобранного", вердикт == "unreadable", вердикт)
+
+    import inspect  # noqa: PLC0415
+
+    check("непрочитанная бронь не помечается проверенной",
+          'verdict == "unreadable"' in inspect.getsource(_unpaid.run))
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -2648,6 +2752,7 @@ async def main() -> int:
     await qa_funnel()
     await qa_refunds()
     await qa_payment_callback()
+    await qa_unpaid()
     await qa_knowledge()
 
     total = passed + len(failed)

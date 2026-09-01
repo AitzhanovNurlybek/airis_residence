@@ -442,6 +442,37 @@ async def followup_tick(
     return {"ok": True, **result}
 
 
+@router.post("/unpaid")
+async def unpaid_tick(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Найти вчерашние брони без предоплаты и сообщить о них отелю.
+
+    Гостю мы написать не можем: Exely отдаёт только имя и фамилию, ни
+    телефона, ни почты. Поэтому это сводка отелю, а не рассылка гостям —
+    контакты у отеля есть в кабинете, просто не в API.
+
+    `?dry_run=1` показывает, что нашлось, ничего не отправляя и не помечая
+    брони проверенными.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .unpaid import run as unpaid_run
+
+    dry = request.query_params.get("dry_run") in ("1", "true", "yes")
+    result = await unpaid_run(session, settings, dry_run=dry)
+    return {"ok": True, **result}
+
+
 @router.post("/sync-bookings")
 async def sync_bookings(
     request: Request,

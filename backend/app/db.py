@@ -717,6 +717,29 @@ class SeenPayment(Base):
     )
 
 
+class BookingCheck(Base):
+    """Отметка «эту бронь мы уже проверяли на оплату».
+
+    Через сутки после создания бронь проверяется: внесена ли предоплата.
+    Неоплаченная — повод отелю позвонить гостю, пока номер не простоял
+    впустую.
+
+    Отметка нужна, чтобы не спрашивать дважды. Без неё каждый суточный
+    запуск слал бы отелю один и тот же список, и его перестали бы читать
+    ровно так же, как перестают читать любое повторяющееся уведомление.
+    """
+
+    __tablename__ = "booking_checks"
+
+    number: Mapped[str] = mapped_column(String(60), primary_key=True)
+    #: Что выяснилось: paid | unpaid | gone (отменена или не прочиталась) |
+    #: elsewhere (бронь с площадки, а не с сайта отеля).
+    verdict: Mapped[str] = mapped_column(String(16), default="")
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {
