@@ -289,6 +289,13 @@ def describe(plan: RefundPlan, done: bool, note: str) -> list[str]:
     elif plan.due:
         lines.append(f"Автоматически не отправлен: {note}.")
         lines.append("Оформите возврат в кабинете FreedomPay по номеру платежа выше.")
+    elif plan.amount > 0:
+        # Деньги гостю причитаются, просто мы не смогли найти платёж.
+        # Сказать здесь «возвращать нечего» — прямо противоположно правде, и
+        # отель спокойно закроет сообщение, не вернув деньги.
+        lines.append("Платёж найти автоматически не вышло — оформите возврат вручную:")
+        lines.append("my.freedompay.kz → «Приём платежей» → найдите платёж")
+        lines.append(f"по номеру брони {plan.booking} и верните {plan.amount} ₸.")
     else:
         lines.append(f"Возвращать нечего: {note}.")
     return lines

@@ -2284,7 +2284,14 @@ async def qa_refunds() -> None:
     check("непроверенный статус не роняет отправку", isinstance(note, str), note)
 
     # Без ключей банка отправлять некуда, но и падать нельзя.
-    done, note = await execute(_S(refund_auto=True, refund_max=0), готовый)
+    #
+    # Пустые значения задаются ЯВНО: настройки читают backend/.env, а там
+    # теперь лежат настоящие ключи FreedomPay. Без этого «без доступа к
+    # банку» перестаёт быть «без доступа», и проверка молча меняет смысл —
+    # именно так она и упала, когда ключи появились.
+    без_банка = _S(refund_auto=True, refund_max=0, payment_provider="",
+                   payment_terminal_id="", payment_client_secret="")
+    done, note = await execute(без_банка, готовый)
     check("без доступа к банку возврат не уходит", not done, note)
     check("причина понятна", "не настроен" in note, note)
 
@@ -2348,16 +2355,23 @@ async def qa_refunds() -> None:
     check("он умеет возвращать", hasattr(провайдер, "refund"))
 
     check("без секретного ключа не считается настроенным",
-          not _S(payment_provider="freedompay",
-                 payment_terminal_id="570767").payment_configured)
+          not _S(payment_provider="freedompay", payment_terminal_id="570767",
+                 payment_client_secret="").payment_configured)
     check("без номера магазина не считается настроенным",
-          not _S(payment_provider="freedompay",
+          not _S(payment_provider="freedompay", payment_terminal_id="",
                  payment_client_secret="секрет").payment_configured)
     # Старые банки проверяются по-прежнему: правка не должна их сломать.
     check("Halyk по-прежнему проверяется по адресу и client_id",
           _S(payment_provider="epay_halyk", payment_base_url="https://x",
              payment_client_id="id").payment_configured)
-    check("пустые настройки — платежи не настроены", not _S().payment_configured)
+    # `_S()` без аргументов читает backend/.env, где теперь лежат боевые
+    # ключи, — значит «пустые настройки» надо задавать явно. Ровно на этом
+    # проверка и упала, когда ключи появились: она проверяла не то, что
+    # написано в её названии.
+    check("пустые настройки — платежи не настроены",
+          not _S(payment_provider="", payment_terminal_id="",
+                 payment_client_secret="", payment_base_url="",
+                 payment_client_id="").payment_configured)
 
     # ── Что видит отель ────────────────────────────────────────────────
     текст = "\n".join(describe(готовый, False, "автоматический возврат выключен"))
@@ -2372,6 +2386,22 @@ async def qa_refunds() -> None:
     пусто = "\n".join(describe(полностью, False, полностью.problem))
     check("когда возвращать нечего, заголовок не обещает возврат",
           "не требуется" in пусто, пусто[:60])
+
+    # Проверено на боевом магазине 2026-09-01: выборки транзакций у
+    # FreedomPay нет — get_transactions_list.php и соседние отвечают 403 с
+    # HTML-страницей. Платёж по номеру брони автоматически не найти, и это
+    # штатный исход, а не сбой.
+    #
+    # Сказать в таком случае «возвращать нечего» — прямо противоположно
+    # правде: деньги гостю причитаются. Отель закроет сообщение и не вернёт.
+    без_платежа = plan_refund(бронь(), {})
+    текст = "\n".join(describe(без_платежа, False, без_платежа.problem))
+    check("сумма к возврату названа, хотя платёж не найден",
+          "50000" in текст, текст[:80])
+    check("не сказано «возвращать нечего», когда деньги причитаются",
+          "Возвращать нечего" not in текст, текст[-90:])
+    check("сказано, где искать платёж", "my.freedompay.kz" in текст)
+    check("сказано, по чему искать", без_платежа.booking in текст)
 
 
 async def qa_knowledge() -> None:
