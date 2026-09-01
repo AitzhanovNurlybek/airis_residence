@@ -177,10 +177,28 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
 
             plan = await refund_for_booking(settings, booking)
             done, note = await execute(settings, plan)
-            await _tell_hotel("\n".join(describe(plan, done, note)),
-                              f"возврат по броне {number}")
+            # Молчим, когда возвращать нечего: «удержано полностью» отель
+            # увидит и в Exely, а лишнее сообщение обесценивает нужные.
+            if plan.amount > 0:
+                await _tell_hotel("\n".join(describe(plan, done, note)),
+                                  f"возврат по броне {number}")
+            else:
+                logger.info("Бронь %s: возвращать нечего, отель не тревожим", number)
         except Exception as error:  # noqa: BLE001 — расчёт не должен ронять уведомление
             logger.warning("Возврат по броне %s не посчитан: %s", number, error)
+
+    # Про саму бронь отель уже знает: у Exely есть своё приложение, и оно
+    # присылает уведомление о каждой броне и отмене. Дублировать его —
+    # значит приучить владельца отеля пролистывать наши сообщения не читая,
+    # а вместе с ними и те, ради которых всё делалось.
+    #
+    # Поэтому пишем только тогда, когда нам есть что добавить: расчёт
+    # возврата. Его приложение Exely не делает — оно про деньги ничего не
+    # знает.
+    if not str(getattr(settings, "notify_bookings", "") or ""):
+        logger.info("Бронь %s (%s): отель узнаёт о ней из Exely, не дублируем",
+                    number, kind)
+        return
 
     заголовок = ("Новая бронь с сайта" if "cancel" not in kind.lower()
                  else "Бронь отменена")
