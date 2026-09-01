@@ -683,6 +683,40 @@ class DialogFollowup(Base):
     )
 
 
+class SeenPayment(Base):
+    """Платёж, о котором банк сообщил уведомлением.
+
+    Единственный способ связать бронь с платежом. Поддержка FreedomPay
+    ответила прямо: искать платежи по описанию через API нельзя, «такого
+    API нет», фильтры есть только в кабинете. Зато «по каждому платежу мы
+    отправляем коллбэки», и в них приходит `pg_description` — а туда Exely
+    записывает номер брони целиком.
+
+    Отсюда замысел: ловить уведомления, запоминать номер платежа рядом с
+    описанием, и при отмене находить нужный платёж у себя, никуда не
+    обращаясь. Поиск, которого нет у банка, получается из данных, которые
+    банк присылает сам.
+    """
+
+    __tablename__ = "seen_payments"
+
+    #: Номер платежа в системе банка. Он же ключ: одно уведомление на платёж
+    #: может прийти несколько раз, и заводить дубли незачем.
+    payment_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    #: Номер заказа на стороне того, кто создал платёж (у Exely вида PG1798).
+    order_id: Mapped[str] = mapped_column(String(60), default="", index=True)
+    #: Описание заказа. Здесь и лежит номер брони — по нему ищем.
+    description: Mapped[str] = mapped_column(String(400), default="", index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(8), default="KZT")
+    #: paid | failed | pending — как разобрал parse_callback.
+    status: Mapped[str] = mapped_column(String(16), default="", index=True)
+    card: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {

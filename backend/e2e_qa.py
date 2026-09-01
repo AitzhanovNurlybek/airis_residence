@@ -2421,6 +2421,145 @@ async def qa_refunds() -> None:
     check("сказано, по чему искать", без_платежа.booking in текст)
 
 
+async def qa_payment_callback() -> None:
+    """Приём уведомлений о платежах и поиск платежа по своим записям.
+
+    Это единственный работающий способ связать бронь с платежом. Поддержка
+    FreedomPay ответила прямо: искать платежи по описанию через API нельзя,
+    «такого API нет». Зато «по каждому платежу мы отправляем коллбэки», и в
+    них приходит описание, куда Exely пишет номер брони.
+
+    Адрес приёмника по требованию банка открыт интернету и не требует
+    авторизации. Единственная защита — подпись, поэтому её проверка тут
+    важнее всего остального: без неё любой желающий объявит платёж
+    существующим, а потом по нему уйдут деньги.
+    """
+    head("Уведомления о платежах")
+
+    import hashlib as _hashlib  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    import secrets as _sec  # noqa: PLC0415
+
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+    from sqlalchemy import delete as _delete  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+
+    from app.config import Settings as _S  # noqa: PLC0415
+    from app.db import SeenPayment  # noqa: PLC0415
+    from app.refunds import _payment_from_own_records  # noqa: PLC0415
+
+    БРОНЬ = f"QA-CB-{int(time.time())}"
+    КЛЮЧ = "qa-secret-for-callback"
+
+    настройки = _S(payment_provider="freedompay", payment_terminal_id="570767",
+                   payment_client_secret=КЛЮЧ)
+
+    def подписать(поля: dict) -> dict:
+        """Подпись уведомления: имя скрипта — последняя часть нашего адреса."""
+        script = настройки.payment_result_url.rstrip("/").rsplit("/", 1)[-1]
+        parts = [script] + [str(поля[k]) for k in sorted(поля) if k != "pg_sig"]
+        parts += [КЛЮЧ]
+        поля = dict(поля)
+        поля["pg_sig"] = _hashlib.md5(";".join(parts).encode("utf-8")).hexdigest()
+        return поля
+
+    def уведомление(**замены) -> dict:
+        поля = {
+            "pg_payment_id": "1841799001",
+            "pg_order_id": "PG1801",
+            "pg_description": f"Airis Residence Hotel. {БРОНЬ}. Пётр Петров.",
+            "pg_amount": "59634",
+            "pg_currency": "KZT",
+            "pg_result": "1",
+            "pg_card_pan": "4400-43XX-XXXX-9121",
+            "pg_salt": _sec.token_hex(8),
+        }
+        поля.update(замены)
+        return подписать(поля)
+
+    async def wipe() -> None:
+        async with SessionLocal() as ses:
+            await ses.execute(
+                _delete(SeenPayment).where(SeenPayment.description.contains(БРОНЬ)))
+            await ses.commit()
+
+    await wipe()
+    was = _os.environ.get("PAYMENT_CLIENT_SECRET")
+    was_provider = _os.environ.get("PAYMENT_PROVIDER")
+    was_terminal = _os.environ.get("PAYMENT_TERMINAL_ID")
+    _os.environ["PAYMENT_PROVIDER"] = "freedompay"
+    _os.environ["PAYMENT_TERMINAL_ID"] = "570767"
+    _os.environ["PAYMENT_CLIENT_SECRET"] = КЛЮЧ
+    _gs.cache_clear()
+    try:
+        import app.main as _main  # noqa: PLC0415
+
+        client = TestClient(_main.app)
+
+        # ── Подпись решает всё ─────────────────────────────────────────
+        подделка = уведомление()
+        подделка["pg_sig"] = "0" * 32
+        ответ = client.post("/api/payments/result", data=подделка)
+        check("неподписанное уведомление отброшено",
+              "bad signature" in ответ.text, ответ.text[:90])
+        check("но банку отвечаем 200, а не ошибкой", ответ.status_code == 200)
+        async with SessionLocal() as ses:
+            from sqlalchemy import select as _select  # noqa: PLC0415
+            есть = (await ses.execute(
+                _select(SeenPayment).where(
+                    SeenPayment.description.contains(БРОНЬ)))).scalars().first()
+        check("подделка не попала в базу", есть is None)
+
+        # ── Настоящее уведомление ──────────────────────────────────────
+        ответ = client.post("/api/payments/result", data=уведомление())
+        check("подписанное уведомление принято", ответ.status_code == 200)
+        # Банк ждёт именно XML с подписью, а не слово «ok».
+        check("ответ банку — XML", ответ.text.strip().startswith("<?xml"),
+              ответ.text[:60])
+        for тег in ("pg_status", "pg_description", "pg_salt", "pg_sig"):
+            check(f"в ответе есть {тег}", f"<{тег}>" in ответ.text)
+        check("ответ говорит об успехе", "<pg_status>ok</pg_status>" in ответ.text)
+
+        # ── Ради чего всё: платёж находится по номеру брони ─────────────
+        найден = await _payment_from_own_records(БРОНЬ)
+        check("платёж находится по номеру брони из описания",
+              найден.get("pg_payment_id") == "1841799001", str(найден)[:90])
+        check("сумма сохранена", найден.get("pg_amount") == "59634")
+        check("карта сохранена", "9121" in str(найден.get("pg_card_pan")))
+
+        # Повтор того же уведомления — обычное дело, дубля быть не должно.
+        client.post("/api/payments/result", data=уведомление())
+        async with SessionLocal() as ses:
+            from sqlalchemy import func as _func, select as _select  # noqa: PLC0415
+            сколько = (await ses.execute(
+                _select(_func.count(SeenPayment.payment_id)).where(
+                    SeenPayment.description.contains(БРОНЬ)))).scalar()
+        check("повтор уведомления не заводит второй платёж", сколько == 1, str(сколько))
+
+        # Неудачный платёж запоминаем, но возвращать по нему нечего.
+        client.post("/api/payments/result",
+                    data=уведомление(pg_payment_id="1841799002", pg_result="0"))
+        найден = await _payment_from_own_records(БРОНЬ)
+        check("для возврата берётся оплаченный, а не отказной",
+              найден.get("pg_payment_id") == "1841799001",
+              str(найден.get("pg_payment_id")))
+
+        # Чужая бронь не должна находиться по нашему номеру.
+        check("по неизвестной броне платёж не находится",
+              not await _payment_from_own_records("QA-CB-НЕТ-ТАКОЙ"))
+    finally:
+        await wipe()
+        for имя, значение in (("PAYMENT_CLIENT_SECRET", was),
+                              ("PAYMENT_PROVIDER", was_provider),
+                              ("PAYMENT_TERMINAL_ID", was_terminal)):
+            if значение is None:
+                _os.environ.pop(имя, None)
+            else:
+                _os.environ[имя] = значение
+        _gs.cache_clear()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -2492,6 +2631,7 @@ async def main() -> int:
     await qa_followup()
     await qa_funnel()
     await qa_refunds()
+    await qa_payment_callback()
     await qa_knowledge()
 
     total = passed + len(failed)

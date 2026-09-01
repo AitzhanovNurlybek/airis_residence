@@ -170,6 +170,16 @@ async def refund_for_booking(settings: Any, booking: dict[str, Any]) -> RefundPl
     if plan.amount <= 0:
         return plan
 
+    # Сначала смотрим у себя. Уведомления банка о платежах мы запоминаем
+    # вместе с описанием, а в описании Exely пишет номер брони — значит
+    # нужный платёж чаще всего уже лежит в своей базе.
+    #
+    # Это единственный работающий путь: поиск по описанию через API
+    # невозможен, поддержка FreedomPay ответила «такого API нет».
+    payment = await _payment_from_own_records(number)
+    if payment:
+        return plan_refund(booking, payment)
+
     provider = get_provider(settings)
     if provider is None:
         plan.problem = "доступ к банку не настроен (PAYMENT_TERMINAL_ID и ключ)"
@@ -179,13 +189,45 @@ async def refund_for_booking(settings: Any, booking: dict[str, Any]) -> RefundPl
         return plan
 
     try:
-        # Ищем по номеру брони: Exely пишет его в описание платежа целиком.
+        # Запасной путь на случай, если банк когда-нибудь откроет поиск.
         payment = await provider.find_payment(needle=number)
     except PaymentError as error:
         plan.problem = f"платёж не искался: {error}"
         return plan
 
     return plan_refund(booking, payment)
+
+
+async def _payment_from_own_records(number: str) -> dict[str, str]:
+    """Платёж из запомненных уведомлений банка.
+
+    Возвращает данные в том же виде, что и поиск через API, чтобы расчёт не
+    знал, откуда они взялись.
+    """
+    from sqlalchemy import select
+
+    from .db import SeenPayment, SessionLocal
+
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                select(SeenPayment)
+                .where(SeenPayment.description.contains(number))
+                .where(SeenPayment.status == "paid")
+                .order_by(SeenPayment.created_at.desc())
+            )
+        ).scalars().first()
+
+    if row is None:
+        return {}
+    return {
+        "pg_payment_id": row.payment_id,
+        "pg_order_id": row.order_id,
+        "pg_amount": str(row.amount),
+        "pg_currency": row.currency,
+        "pg_card_pan": row.card,
+        "pg_description": row.description,
+    }
 
 
 async def _still_cancelled(settings: Any, number: str) -> bool | None:
