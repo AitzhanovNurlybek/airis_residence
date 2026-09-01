@@ -42,3 +42,6 @@ Thumbs.db
 backend/_*_tmp/
 
 .env*
+
+# Записная книжка паролей (backend/parol.py). Наружу не уходит никогда.
+paroli.txt
