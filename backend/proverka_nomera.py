@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import io
 import sys
+import time
 
 import httpx
 
@@ -99,12 +100,24 @@ async def main() -> int:
                     params={"key": secret},
                     json={
                         "typeWebhook": "incomingMessageReceived",
-                        "idMessage": "PROVERKA-PERENOSA",
+                        # Идентификатор свой на каждый запуск: у вебхука есть
+                        # защита от повторов, и с постоянным номером вторая
+                        # проверка отбрасывалась как дубль. Выглядело это как
+                        # поломка бота — ровно в тот момент, когда проверку и
+                        # запускают, сразу после переноса номера.
+                        "idMessage": f"PROVERKA-PERENOSA-{int(time.time())}",
                         "instanceData": {"wid": wid},
                         "senderData": {"chatId": TEST_CHAT, "senderName": "Проверка"},
                         "messageData": {
                             "typeMessage": "textMessage",
-                            "textMessageData": {"textMessage": "во сколько заезд?"},
+                            # Текст тоже свой на каждый запуск. Поверх дедупа
+                            # по идентификатору есть вторая защита — от той же
+                            # фразы из того же чата за последние полторы
+                            # минуты. Два прогона подряд она принимала за
+                            # повтор, и проверка снова врала про поломку.
+                            "textMessageData": {
+                                "textMessage": f"во сколько заезд? ({int(time.time())})"
+                            },
                         },
                     },
                 )
