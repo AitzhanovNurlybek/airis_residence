@@ -2679,6 +2679,74 @@ async def qa_unpaid() -> None:
     check("непрочитанная бронь не помечается проверенной",
           'verdict == "unreadable"' in inspect.getsource(_unpaid.run))
 
+    # ── Мостик между чатом и бронью ────────────────────────────────────
+    # Спросить гостя напрямую можно только так: он называет имя в переписке,
+    # то же имя стоит в броне. Exely не отдаёт ни телефона, ни почты, а
+    # список броней бесполезен — там тысяча самых старых, новее декабря 2025
+    # ничего нет, и никакие фильтры этого не меняют (проверено 2026-09-01 на
+    # шести вариантах параметров).
+    import time  # noqa: PLC0415
+
+    from sqlalchemy import delete as _del  # noqa: PLC0415
+
+    from app.config import Settings as _S  # noqa: PLC0415
+    from app.db import GuestName as _GN  # noqa: PLC0415
+
+    ЧАТ = f"qa-unpaid-{int(time.time())}@c.us"
+    ИМЯ = f"тестов тест{int(time.time())}"
+
+    ушло: list = []
+
+    class _Стенд:
+        def __init__(self, *a, **k) -> None:  # noqa: D107
+            pass
+
+        async def send(self, chat_id: str, text: str) -> str:
+            ушло.append((chat_id, text))
+            return "stub"
+
+    import app.channels.whatsapp as _wa  # noqa: PLC0415
+
+    настоящий_канал = _wa.WhatsAppChannel
+    _wa.WhatsAppChannel = _Стенд
+    try:
+        бронь = Unpaid(number="QA-U-1", guest=ИМЯ.title(),
+                       dates="2026-09-10 → 2026-09-12", room="Comfort", amount=50000)
+        # Имени ещё не знаем — гостю не пишем.
+        check("без известного имени гостю не пишем",
+              not await _unpaid._ask_guest(_S(), бронь))
+
+        async with SessionLocal() as ses:
+            ses.add(_GN(channel="whatsapp", chat_id=ЧАТ, name=ИМЯ))
+            await ses.commit()
+        check("по известному имени гостю пишем",
+              await _unpaid._ask_guest(_S(), бронь))
+        текст = ушло[-1][1] if ушло else ""
+        check("в напоминании названы даты", "2026-09-10" in текст, текст[:70])
+        check("напоминание спрашивает, в силе ли планы",
+              "планы в силе" in текст, текст[:70])
+        # Перенос строки должен быть переносом, а не двумя буквами.
+        check("в напоминании нет буквальных переносов",
+              chr(92) + "n" not in текст, текст[:70])
+
+        # Однофамильцы: два чата с одним именем — писать нельзя никому.
+        # Напомнить чужому человеку о чужой броне значит выдать чужие данные.
+        async with SessionLocal() as ses:
+            ses.add(_GN(channel="whatsapp", chat_id=ЧАТ + "x", name=ИМЯ))
+            await ses.commit()
+        ушло.clear()
+        check("при двух одинаковых именах не пишем никому",
+              not await _unpaid._ask_guest(_S(), бронь))
+        check("и ничего не отправлено", not ушло)
+
+        check("без имени в броне гостю не пишем",
+              not await _unpaid._ask_guest(_S(), Unpaid(number="QA-U-2", guest="")))
+    finally:
+        _wa.WhatsAppChannel = настоящий_канал
+        async with SessionLocal() as ses:
+            await ses.execute(_del(_GN).where(_GN.name == ИМЯ))
+            await ses.commit()
+
 
 async def qa_knowledge() -> None:
     head("Справка об отеле")

@@ -76,7 +76,10 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
         history=history,
         today=hotel_today().isoformat(),
         booking=booking,
-        guest={"phone": message.phone, "name": message.sender_name},
+        # chat_id нужен, чтобы связать имя гостя с этой перепиской: бронь
+        # оформляется на сайте, и другого мостика между ней и чатом нет.
+        guest={"phone": message.phone, "name": message.sender_name,
+               "chat_id": message.chat_id},
     )
 
     photos = reply.get("photos") or [] if reply["ok"] else []

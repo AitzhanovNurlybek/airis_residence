@@ -740,6 +740,30 @@ class BookingCheck(Base):
     )
 
 
+class GuestName(Base):
+    """Имя, которое гость назвал в переписке перед бронированием.
+
+    Единственный мостик между чатом и бронью. Exely не отдаёт ни телефона,
+    ни почты — только имя и фамилию, — а WhatsApp знает телефон, но не знает
+    брони. Совпадение имён связывает одно с другим.
+
+    Мостик не идеальный: однофамильцы существуют. Поэтому по нему можно
+    только НАПОМНИТЬ гостю о его же броне, и только когда совпадение
+    единственное. Показывать по имени чужие данные нельзя.
+    """
+
+    __tablename__ = "guest_names"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), index=True)
+    chat_id: Mapped[str] = mapped_column(String(80), index=True)
+    #: Как гость себя назвал, в нижнем регистре — для сравнения.
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "rooms": {

@@ -243,8 +243,29 @@ async def exely_webhook(
         # начнёт слать повторы.
         if number and any(w in kind.lower() for w in ("book", "reserv")):
             background.add_task(notify_hotel_booking, number, kind)
+            # И запоминаем саму бронь, чтобы её нашли по имени гостя.
+            # Через список это невозможно: Exely отдаёт там тысячу самых
+            # старых броней и ни одной свежей. Уведомление — единственный
+            # момент, когда мы вообще узнаём, что бронь появилась.
+            background.add_task(_remember_booking, number)
 
     return {"ok": True, "saved": saved, "duplicates": duplicates, "events": len(events)}
+
+
+async def _remember_booking(number: str) -> None:
+    """Сохранить бронь в свою базу — для поиска по имени гостя."""
+    from .booking_sync import remember
+    from .booking_system.exely_api import ExelyApi
+
+    settings = get_settings()
+    try:
+        api = ExelyApi(settings.exely_client_id, settings.exely_client_secret,
+                       settings.exely_property_id, auth_url=settings.exely_auth_url,
+                       api_base=settings.exely_api_base)
+        async with SessionLocal() as session:
+            await remember(session, api, settings.exely_property_id, number)
+    except Exception as error:  # noqa: BLE001 — не должно ронять приём уведомления
+        logger.warning("Бронь %s не запомнилась: %s", number, error)
 
 
 @router.post("/whatsapp")

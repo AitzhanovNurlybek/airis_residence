@@ -162,6 +162,56 @@ async def sync(session: AsyncSession, api: ExelyApi, property_id: str,
     }
 
 
+async def remember(session: AsyncSession, api: ExelyApi, property_id: str,
+                   number: str) -> bool:
+    """Запомнить одну бронь по номеру — так, чтобы её нашли по имени гостя.
+
+    Появилось потому, что перенос списком не работает. Проверено на боевом
+    2026-09-01: `/bookings` отдаёт ровно тысячу САМЫХ СТАРЫХ броней — новее
+    5 декабря 2025 в нём нет ничего, — и никакие параметры на это не влияют:
+    ни offset, ни page, ни фильтры по датам создания и заезда. Все шесть
+    вариантов вернули один и тот же список.
+
+    Значит гостя, забывшего номер брони, поиск по имени не нашёл бы вовсе:
+    в базе лежали бы только прошлогодние отменённые.
+
+    Зато номер каждой новой брони приходит уведомлением, а по номеру
+    Exely отдаёт всё. Отсюда и способ: запоминаем бронь в момент, когда
+    узнали о ней, а не пытаемся вычитать задним числом.
+    """
+    try:
+        full = await api._get(f"/v1/properties/{property_id}/bookings/{number}")
+    except BookingSystemUnavailable as error:
+        logger.warning("Бронь %s не прочиталась: %s", number, error)
+        return False
+
+    booking = (full or {}).get("booking")
+    if not isinstance(booking, dict):
+        return False
+
+    имя = _name(booking)
+    заезд, выезд = _dates(booking)
+    record = await session.get(ExelyBooking, number)
+    if record is None:
+        record = ExelyBooking(number=number)
+        session.add(record)
+    record.status = str(booking.get("status") or "")
+    record.guest_name = имя
+    record.guest_search = имя.casefold()
+    record.check_in = заезд
+    record.check_out = выезд
+    record.room_name = _room(booking)
+    try:
+        record.total_amount = int(round(float(
+            (booking.get("total") or {}).get("priceAfterTax"))))
+    except (TypeError, ValueError):
+        record.total_amount = 0
+    record.modified_at = str(booking.get("modifiedDateTime") or "")
+    await session.commit()
+    logger.info("Бронь %s запомнена: %s", number, имя or "без имени")
+    return True
+
+
 async def find_by_name(
     session: AsyncSession, name: str, limit: int = 5
 ) -> list[ExelyBooking]:

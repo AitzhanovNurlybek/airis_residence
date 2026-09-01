@@ -308,6 +308,32 @@ CHANGE_TOOL = {
 #: Инструмент закрывает этот разрыв: отель получает просьбу сразу, в том
 #: числе ночью, и утром её обрабатывает. Ничего не отменяет — только
 #: передаёт.
+#: Имя гостя, названное перед бронированием.
+#:
+#: Нужно ровно для одного: напомнить о неоплаченной броне. Бронь оформляется
+#: на сайте, и связать её с этой перепиской больше нечем — Exely отдаёт
+#: только имя и фамилию, а WhatsApp знает телефон, но не знает броней.
+#:
+#: Имя всё равно спрашивается при бронировании, так что лишнего вопроса гостю
+#: это не добавляет.
+REMEMBER_NAME_TOOL = {
+    "name": "remember_name",
+    "description": (
+        "Запомнить имя и фамилию гостя, на которые оформляется бронь. "
+        "Вызывай, когда гость назвал их перед бронированием или в ответ на "
+        "твой вопрос. Нужно, чтобы потом напомнить ему о его же броне."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string",
+                     "description": "Имя и фамилия так, как назвал гость"},
+        },
+        "required": ["name"],
+    },
+}
+
+
 CANCEL_REQUEST_TOOL = {
     "name": "cancel_request",
     "description": (
@@ -410,7 +436,8 @@ BOOKING_LINK_TOOL = {
 
 # Передать просьбу об отмене можно всегда: это сообщение отелю, а не
 # запись в систему бронирования.
-READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL, CANCEL_REQUEST_TOOL]
+READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL, CANCEL_REQUEST_TOOL,
+                   REMEMBER_NAME_TOOL]
 FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
 
 
@@ -435,6 +462,7 @@ FIRST_ACTION = """
 Гость спросил про свободные номера или про цену на даты — ПЕРВЫМ ДЕЙСТВИЕМ вызови check_availability. Даты выведи сам: «завтра» — завтра плюс ночь, одна названная дата — она плюс ночь, «на выходных» — ближайшие суббота и воскресенье. Потом скажи, какие даты взял.
 Ни числа гостей, ни даты выезда, ни категории до этого не спрашивай: гость задал вопрос и ждёт ответа, а не анкеты.
 Пишет отель, а не приятель. Как бы ни писал гость — со смайликами, сленгом, «хаха» — ты отвечаешь ровно и по делу. Не смеёшься в ответ, не подхватываешь «кайф», «круто», «класс», «огонь», не ставишь несколько восклицательных знаков подряд. Тёплым быть можно, фамильярным нельзя.
+Перед тем как дать ссылку на бронирование, спроси, на чьё имя оформляем, и вызови remember_name. Имя всё равно понадобится в форме, так что лишнего вопроса это не добавляет, — а нам оно нужно, чтобы потом напомнить гостю о его же броне, если оплата не придёт. Про запоминание гостю говорить не надо.
 Гость сказал, что хочет отменить бронь, — ПЕРВЫМ ДЕЙСТВИЕМ вызови cancel_request, не дожидаясь номера брони. Номер уточнишь потом, а отель должен узнать сразу: без этого просьба остаётся в переписке, и о пустом номере узнают в день заезда.
 Спросили про возврат денег — назови срок сразу, до всяких уточнений: возврат оформляется в день отмены, на карту приходит за 1–7 рабочих дней, зависит от банка гостя. Это и есть ответ на «когда». Номер брони спрашивай потом и только если он для чего-то нужен.
 Цену бери из тарифа и не объясняй, почему она такая. Ни «скидка», ни «на выходные дешевле», ни «акция» — почему тариф такой, ты не знаешь, а гость на выдуманное условие потом сошлётся.
@@ -577,6 +605,40 @@ def _tool_room_page(facts: dict[str, Any], args: dict[str, Any],
             )
     codes = ", ".join(sorted(str(r.get("slug")) for r in facts.get("rooms", [])))
     return f"Категории «{slug}» нет. Известные: {codes}"
+
+
+async def _tool_remember_name(guest: dict[str, Any] | None,
+                              args: dict[str, Any]) -> str:
+    """Запомнить, на чьё имя оформляется бронь."""
+    имя = " ".join(str(args.get("name") or "").split()).strip()
+    chat = str((guest or {}).get("chat_id") or "")
+    if not имя or len(имя) < 3 or not chat:
+        return "Имя не запомнено."
+
+    from sqlalchemy import select
+
+    from .db import GuestName, SessionLocal
+
+    try:
+        async with SessionLocal() as session:
+            уже = (
+                await session.execute(
+                    select(GuestName)
+                    .where(GuestName.chat_id == chat)
+                    .where(GuestName.name == имя.casefold())
+                )
+            ).scalars().first()
+            if уже is None:
+                session.add(GuestName(channel="whatsapp", chat_id=chat,
+                                      name=имя.casefold()))
+                await session.commit()
+    except Exception as error:  # noqa: BLE001
+        # Запоминание — вспомогательное дело. База может быть недоступна, а
+        # гость ждёт ответа про свою бронь: уронить ради этого весь ответ
+        # значило бы обменять важное на второстепенное.
+        logger.warning("Имя гостя не запомнилось: %s", error)
+        return "Запомнить не вышло, но это не важно — продолжай разговор."
+    return "Имя запомнено. Гостю об этом говорить не нужно, продолжай разговор."
 
 
 async def _tool_cancel_request(settings: Any, guest: dict[str, Any] | None,
@@ -1106,7 +1168,9 @@ async def answer(
                 args = block.get("input") or {}
                 tool_calls.append({"name": name, "input": args})
 
-                if name == "cancel_request":
+                if name == "remember_name":
+                    output = await _tool_remember_name(guest, args)
+                elif name == "cancel_request":
                     output = await _tool_cancel_request(settings, guest, args)
                 elif name == "room_page":
                     output = _tool_room_page(facts, args, photos)

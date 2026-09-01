@@ -216,8 +216,75 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
     if not found:
         return {"checked": len(numbers), "unpaid": 0}
 
-    from .notify import _tell_hotel
+    # Сначала пробуем спросить самого гостя: он назвал имя в переписке, и по
+    # нему бронь связывается с чатом. Это и просила заказчица — «через сутки
+    # ещё раз спросить, точно приедете».
+    спросили: list[str] = []
+    остались: list[Unpaid] = []
+    for item in found:
+        if await _ask_guest(settings, item):
+            спросили.append(item.number)
+        else:
+            остались.append(item)
 
-    sent = await _tell_hotel("\n".join(describe(found)), "брони без предоплаты")
-    logger.info("Броней без предоплаты: %d, отелю ушло: %d", len(found), sent)
-    return {"checked": len(numbers), "unpaid": len(found), "sent": sent}
+    sent = 0
+    if остались:
+        from .notify import _tell_hotel
+
+        sent = await _tell_hotel("\n".join(describe(остались)),
+                                 "брони без предоплаты")
+    logger.info("Броней без предоплаты: %d, спросили гостя: %d, отелю: %d",
+                len(found), len(спросили), sent)
+    return {"checked": len(numbers), "unpaid": len(found),
+            "asked_guests": len(спросили), "sent_hotel": sent}
+
+
+async def _ask_guest(settings: Any, item: Unpaid) -> bool:
+    """Напомнить гостю о его броне, если знаем, в каком он чате.
+
+    Связка идёт по имени: гость назвал его в переписке перед бронированием,
+    и оно же стоит в броне. Другого мостика нет — Exely не отдаёт ни
+    телефона, ни почты.
+
+    Мостик не идеальный, поэтому два ограничения. Пишем только при
+    ЕДИНСТВЕННОМ совпадении: однофамильцы существуют, и напомнить чужому
+    человеку о чужой броне — значит выдать чужие данные. И пишем только о
+    броне, ничего лишнего не раскрывая.
+    """
+    if not item.guest:
+        return False
+
+    from sqlalchemy import select
+
+    from .db import GuestName, SessionLocal
+
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(GuestName).where(GuestName.name == item.guest.casefold())
+            )
+        ).scalars().all()
+
+    чаты = {row.chat_id for row in rows}
+    if len(чаты) != 1:
+        # Ни одного или несколько — гостю не пишем.
+        return False
+
+    from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
+
+    куда = f" на {item.dates}" if item.dates else ""
+    текст = "\n".join([
+        f"Здравствуйте! У вас оформлена бронь в Airis Residence{куда}.",
+        "",
+        "Оплата пока не поступила — подскажите, планы в силе? Если да, "
+        "оплатить можно на сайте, а если что-то изменилось, просто "
+        "напишите, и мы освободим номер.",
+    ])
+    try:
+        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+        await channel.send(list(чаты)[0], for_whatsapp(текст))
+    except (WhatsAppError, Exception) as error:  # noqa: BLE001
+        logger.warning("Гостю по броне %s не написали: %s", item.number, error)
+        return False
+    logger.info("Гость по броне %s спрошен напрямую", item.number)
+    return True
