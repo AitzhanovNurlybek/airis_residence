@@ -1036,7 +1036,7 @@ def qa_payments() -> None:
     check("кривая дата не роняет", not _date_problem(PaymentDoc(paid_at="вчера")))
 
     facts = {"hotel": {"legalName": 'ТОО "INCOME HOUSE"', "legal": {
-        "bin": "200640012670", "iik": "KZ8596503F0013625797KZT"}}}
+        "bin": "200640012670", "iik": "KZ11722S000048166255"}}}
     ours = PaymentDoc(payee="ТОО INCOME HOUSE", payee_bin="200640012670")
     alien = PaymentDoc(payee="ТОО ДРУГОЙ ОТЕЛЬ", payee_bin="111111111111")
     blank = PaymentDoc()

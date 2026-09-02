@@ -161,8 +161,13 @@ class HalykEpayProvider(PaymentProvider):
 
 class ForteBankProvider(HalykEpayProvider):
     """
-    ForteBank. Расчётный счёт отеля открыт в ForteBank, поэтому
-    эквайринг, скорее всего, будет от него же.
+    ForteBank. Заготовка, оставленная до выбора эквайера.
+
+    Догадка «счёт в ForteBank, значит и эквайринг будет оттуда» не
+    подтвердилась дважды: эквайринг подключён через FreedomPay, а счёт
+    с 2026-09-02 переведён в Kaspi. Класс не удалён на случай смены
+    эквайера, но рабочий провайдер — FreedomPayProvider ниже.
+
     Протокол близок к ePay — методы наследуются; при расхождениях
     переопределить create_payment() и parse_callback().
     """
