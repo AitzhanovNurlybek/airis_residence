@@ -191,7 +191,8 @@ class ExelyBookingSystem:
     def display(self, slug: str) -> str:
         return self._names.get(slug) or NAMES.get(slug, slug)
 
-    async def availability(self, check_in: date, check_out: date) -> Availability:
+    async def availability(self, check_in: date, check_out: date, *,
+                           guests: int = 2) -> Availability:
         nights = (check_out - check_in).days
         if nights <= 0:
             return Availability(check_in, check_out, 0, [], "exely")
@@ -202,11 +203,16 @@ class ExelyBookingSystem:
             "include_rates": "true",
             "include_transfers": "false",
             "language": "ru-ru",
-            # Двое взрослых — потому что нас интересует, свободен ли номер, а
-            # не сколько он стоит одному. Цену мы всё равно берём из своего
-            # прайса: он совпадает с Exely и не зависит от акций, которые
-            # сегодня есть, а завтра нет.
-            "criterions[0].adults": "2",
+            # Число гостей решает, какие категории вообще покажут. Раньше
+            # здесь стояла жёсткая двойка — «нам важно, свободен ли номер, а
+            # не сколько он стоит одному». Но Exely на двоих не показывает
+            # одноместный вовсе, и бот считал Standart Single занятым ВСЕГДА:
+            # гостю, приехавшему одному, самый дешёвый номер не предлагался
+            # никогда. Проверено 2026-09-02 на живом движке — на одного он
+            # свободен, на двоих его нет в ответе.
+            #
+            # Цену по-прежнему берём из своего прайса, а не отсюда.
+            "criterions[0].adults": str(max(1, min(int(guests or 2), 6))),
             "criterions[0].dates": f"{check_in.isoformat()};{check_out.isoformat()}",
             "criterions[0].hotels[0].code": self._hotel,
         }

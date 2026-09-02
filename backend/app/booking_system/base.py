@@ -124,7 +124,8 @@ class BookingSystem(Protocol):
     name: str
     source: Source
 
-    async def availability(self, check_in: date, check_out: date) -> Availability:
+    async def availability(self, check_in: date, check_out: date, *,
+                           guests: int = 2) -> Availability:
         """Свободные номера на период."""
         ...
 

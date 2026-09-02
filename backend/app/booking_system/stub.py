@@ -70,7 +70,8 @@ class StubBookingSystem:
         # которых нет на сайте, ей незачем.
         self._names = room_names or {}
 
-    async def availability(self, check_in: date, check_out: date) -> Availability:
+    async def availability(self, check_in: date, check_out: date, *,
+                           guests: int = 2) -> Availability:
         nights = (check_out - check_in).days
         if nights <= 0:
             return Availability(check_in, check_out, 0, [], "stub")

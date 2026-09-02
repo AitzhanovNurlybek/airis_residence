@@ -63,8 +63,9 @@ class HybridBookingSystem:
 
     # ─────────────────────────── чтение ────────────────────────────
 
-    async def availability(self, check_in: date, check_out: date) -> Availability:
-        return await self._exely.availability(check_in, check_out)
+    async def availability(self, check_in: date, check_out: date, *,
+                           guests: int = 2) -> Availability:
+        return await self._exely.availability(check_in, check_out, guests=guests)
 
     async def get_booking(self, external_id: str) -> ExternalBooking | None:
         async with self._sessions() as session:

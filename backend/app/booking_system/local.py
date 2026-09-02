@@ -162,7 +162,8 @@ class LocalBookingSystem:
         async with self._sessions() as session:
             return await self._stock(session)
 
-    async def availability(self, check_in: date, check_out: date) -> Availability:
+    async def availability(self, check_in: date, check_out: date, *,
+                           guests: int = 2) -> Availability:
         nights = (check_out - check_in).days
         if nights <= 0:
             return Availability(check_in, check_out, 0, [], "stub")

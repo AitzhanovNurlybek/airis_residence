@@ -230,6 +230,14 @@ AVAILABILITY_TOOL = {
         "properties": {
             "check_in": {"type": "string", "description": "Дата заезда, ГГГГ-ММ-ДД"},
             "check_out": {"type": "string", "description": "Дата выезда, ГГГГ-ММ-ДД"},
+            "guests": {
+                "type": "integer",
+                "description": (
+                    "Сколько человек заселяется. Ставь 1, если гость едет один: "
+                    "одноместный номер показывается только при запросе на одного. "
+                    "Не назвал — не указывай, посчитаем как двоих."
+                ),
+            },
         },
         "required": ["check_in", "check_out"],
     },
@@ -721,8 +729,15 @@ async def _tool_availability(
     if check_out <= check_in:
         return "Дата выезда должна быть позже даты заезда."
 
+    # Число гостей меняет не цену, а САМ СПИСОК категорий: одноместный
+    # Exely показывает только при запросе на одного.
     try:
-        result = await booking.availability(check_in, check_out)
+        гостей = int(args.get("guests") or 2)
+    except (TypeError, ValueError):
+        гостей = 2
+
+    try:
+        result = await booking.availability(check_in, check_out, guests=гостей)
     except BookingSystemUnavailable as error:
         return f"Система бронирования не ответила: {error}"
 

@@ -37,6 +37,7 @@ from app.booking_system.exely import ExelyBookingSystem as _Exely  # noqa: E402
 from app.booking_system.exely_api import ExelyApi, _as_date, _money, _tail  # noqa: E402
 from app.concierge import (  # noqa: E402
     _status_word,
+    AVAILABILITY_TOOL,
     FIND_TOOL,
     FULL_TOOLS,
     FIRST_ACTION,
@@ -359,6 +360,28 @@ def qa_tools() -> None:
     names = {t["name"] for t in FULL_TOOLS}
     check("полный набор — пять инструментов", len(FULL_TOOLS) == 5, str(len(FULL_TOOLS)))
     check("есть проверка наличия", "check_availability" in names)
+
+    # Одноместный номер Exely показывает ТОЛЬКО при запросе на одного гостя.
+    # Пока в запрос была зашита жёсткая двойка, Standart Single всегда
+    # считался занятым, и гостю, приехавшему одному, самый дешёвый номер не
+    # предлагался никогда. Проверено 2026-09-02 на живом движке: на 20
+    # сентября на одного он свободен (2 шт.), на двоих его нет в ответе.
+    import inspect as _insp  # noqa: PLC0415
+
+    from app.booking_system.exely import ExelyBookingSystem as _EBS  # noqa: PLC0415
+
+    схема = (AVAILABILITY_TOOL["input_schema"]["properties"])
+    check("инструмент спрашивает число гостей", "guests" in схема)
+    check("и объясняет, зачем оно нужно",
+          "одномест" in схема.get("guests", {}).get("description", ""),
+          схема.get("guests", {}).get("description", "")[:80])
+
+    исходник = _insp.getsource(_EBS.availability)
+    check("число гостей уходит в запрос, а не зашито",
+          '"criterions[0].adults": "2"' not in исходник
+          and "adults" in исходник and "guests" in исходник)
+    check("гостей передаёт и обработчик инструмента",
+          "guests=" in _insp.getsource(_tool_availability))
     check("есть оформление", "create_booking" in names)
     read_names = {t["name"] for t in READ_ONLY_TOOLS}
     check("в режиме чтения оформления нет", "create_booking" not in read_names)
