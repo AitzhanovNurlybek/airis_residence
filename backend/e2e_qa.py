@@ -2204,8 +2204,65 @@ async def qa_refunds() -> None:
     from app.refunds import RefundPlan, describe, execute, plan_refund  # noqa: PLC0415
     from app.payments import get_provider as _get_provider  # noqa: PLC0415
 
-    оплачен = {"pg_payment_id": "1841766142", "pg_amount": "50000",
+    оплачен = {"pg_payment_id": "QA0000000000", "pg_amount": "50000",
                "pg_card_pan": "555555******4444"}
+
+    # ── Банк подменяется на весь раздел ────────────────────────────────
+    #
+    # Здесь проверяются предохранители перед отправкой денег, и часть
+    # проверок обязана дойти до самой отправки — иначе они ничего не
+    # проверяют. Но `Settings()` читает `backend/.env`, где лежат
+    # НАСТОЯЩИЕ ключи FreedomPay, и «отправка» получалась настоящей.
+    #
+    # Так и случилось 2026-09-01: прогон отправил в банк реальный запрос
+    # на возврат 50 000 ₸ по реальному платежу. Банк его отклонил — сумма
+    # больше оплаченного, — и деньги уцелели по случайности, а не по
+    # замыслу. Полдня после этого ушло на выяснение у Exely и FreedomPay,
+    # кто отправил возврат, которого никто не отправлял.
+    #
+    # Поэтому здесь не «постараемся не дойти до банка», а «дойти нельзя»:
+    # провайдер подменён на записывающий стенд. Пустые ключи он по-прежнему
+    # отражает как отсутствие доступа — иначе проверка «без доступа к
+    # банку» потеряет смысл.
+    import app.refunds as _ref  # noqa: PLC0415
+
+    отправлено: list[dict] = []
+
+    class _СтендБанка:
+        name = "qa-stub"
+
+        async def refund(self, **kwargs) -> dict:
+            отправлено.append(kwargs)
+            return {"message": "принят стендом"}
+
+    def _стенд(settings):  # noqa: ANN001
+        if not getattr(settings, "payment_provider", ""):
+            return None
+        return _СтендБанка()
+
+    настоящий_провайдер = _ref.get_provider
+    _ref.get_provider = _стенд
+    try:
+        await _qa_refunds_body(оплачен, отправлено)
+    finally:
+        _ref.get_provider = настоящий_провайдер
+
+    # Список обязан быть НЕпустым: часть проверок по замыслу доходит до
+    # самой отправки, и именно поэтому раньше они уходили в настоящий банк.
+    # Пустой список означал бы, что проверка предохранителей ничего не
+    # проверяет, а «до банка не дошли» выполняется само собой.
+    check("проверки действительно доходят до отправки", len(отправлено) > 0,
+          str(len(отправлено)))
+    check("но уходят на стенд, а не в банк",
+          all(str(k.get("payment_id", "")).startswith("QA") for k in отправлено),
+          str([k.get("payment_id") for k in отправлено]))
+
+
+async def _qa_refunds_body(оплачен: dict, отправлено: list) -> None:
+    """Тело проверок возврата. Вынесено, чтобы банк был подменён целиком."""
+    from app.config import Settings as _S  # noqa: PLC0415
+    from app.refunds import RefundPlan, describe, execute, plan_refund  # noqa: PLC0415
+    from app.payments import get_provider as _get_provider  # noqa: PLC0415
 
     def бронь(**поля):
         основа = {
@@ -2221,7 +2278,7 @@ async def qa_refunds() -> None:
     plan = plan_refund(бронь(), оплачен)
     check("возврат считается как предоплата минус штраф", plan.amount == 50000,
           str(plan.amount))
-    check("платёж подхвачен", plan.payment_id == "1841766142")
+    check("платёж подхвачен", plan.payment_id == "QA0000000000")
     check("возврат признан положенным", plan.due, plan.problem)
 
     # ── Сумму считает Exely, а не мы ───────────────────────────────────
@@ -2353,7 +2410,7 @@ async def qa_refunds() -> None:
     _ref._still_cancelled = _отменена
     try:
         план = RefundPlan(booking="QA-IDEMP-1", prepaid=50000, penalty=20000,
-                          amount=30000, payment_id="1841766142")
+                          amount=30000, payment_id="QA0000000000")
         done, note = await execute(_S(refund_auto=True, refund_max=0), план)
     finally:
         _ref.get_provider = настоящий_провайдер
@@ -2408,7 +2465,7 @@ async def qa_refunds() -> None:
 
     # ── Что видит отель ────────────────────────────────────────────────
     текст = "\n".join(describe(готовый, False, "автоматический возврат выключен"))
-    for нужно in ("QA-BRON-NE-SUSHESTVUET", "50000", "1841766142"):
+    for нужно in ("QA-BRON-NE-SUSHESTVUET", "50000", "QA0000000000"):
         check(f"в сообщении есть «{нужно}»", нужно in текст)
     check("сказано, что делать руками", "кабинете FreedomPay" in текст)
 
