@@ -354,7 +354,7 @@ def qa_modes() -> None:
 # ─────────────────────── инструменты консьержа ───────────────────────
 
 
-def qa_tools() -> None:
+async def qa_tools() -> None:
     head("Инструменты консьержа")
 
     names = {t["name"] for t in FULL_TOOLS}
@@ -382,6 +382,58 @@ def qa_tools() -> None:
           and "adults" in исходник and "guests" in исходник)
     check("гостей передаёт и обработчик инструмента",
           "guests=" in _insp.getsource(_tool_availability))
+
+    # ── «Мест нет» не должно быть концом разговора ─────────────────────
+    #
+    # Просьба отеля, и причина у неё деловая: наличие в системе неточно в
+    # обе стороны. Часть номеров отель держит в резерве, а снятую бронь из
+    # шахматки убирают не сразу — «занято» в системе не означает «занято в
+    # отеле». Гость, услышавший голый отказ, просто уходит.
+    from datetime import date as _d  # noqa: PLC0415
+
+    from app.booking_system.base import Availability, RoomOffer  # noqa: PLC0415
+
+    class _ВсёЗанято:
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            пусто = [
+                RoomOffer(room_slug="standart", room_name="Standart", rooms_left=0,
+                          price_per_night=None, source="exely", rates=()),
+                RoomOffer(room_slug="comfort", room_name="Comfort", rooms_left=0,
+                          price_per_night=None, source="exely", rates=()),
+            ]
+            return Availability(check_in, check_out, 1, пусто, "exely")
+
+    факты = {"hotel": {"contacts": {"phonePrimary": "+7 (777) 531-00-09"}},
+             "rooms": []}
+    вывод = await _tool_availability(
+        _ВсёЗанято(), {"check_in": "2026-09-05", "check_out": "2026-09-06"}, факты)
+    check("при полной занятости сказано не обрывать разговор",
+          "Не заканчивай разговор отказом" in вывод, вывод[-200:])
+    check("телефон стойки попадает в подсказку",
+          "531-00-09" in вывод, вывод[-200:])
+    check("резерв упомянут", "резерв" in вывод, вывод[-160:])
+    check("обещать номер запрещено", "нельзя" in вывод, вывод[-160:])
+
+    # А когда номера есть — никакой подсказки быть не должно: она сбивала бы
+    # разговор на телефон там, где бот и так отвечает.
+    class _ЕстьНомера(_ВсёЗанято):
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            есть = [RoomOffer(room_slug="standart", room_name="Standart", rooms_left=3,
+                              price_per_night=36000, source="exely", rates=())]
+            return Availability(check_in, check_out, 1, есть, "exely")
+
+    вывод2 = await _tool_availability(
+        _ЕстьНомера(), {"check_in": "2026-09-20", "check_out": "2026-09-21"}, факты)
+    check("при свободных номерах подсказки про телефон нет",
+          "Не заканчивай разговор отказом" not in вывод2, вывод2[-160:])
+
+    # Правила должны говорить то же самое: подсказка в выводе сильнее, но
+    # разговор заканчивается телефоном и там, где инструмент не звучал.
+    правила = build_system_prompt("", "2026-09-02", availability="exely")
+    check("в правилах сказано заканчивать разговор телефоном",
+          "ЧЕМ ЗАКАНЧИВАТЬ РАЗГОВОР" in правила)
+    check("и сказано, что отказ — не конец разговора",
+          "отказ — не конец разговора" in правила.lower())
     check("есть оформление", "create_booking" in names)
     read_names = {t["name"] for t in READ_ONLY_TOOLS}
     check("в режиме чтения оформления нет", "create_booking" not in read_names)
@@ -2887,7 +2939,7 @@ async def main() -> int:
     qa_time()
     qa_exely_parsing()
     qa_modes()
-    qa_tools()
+    await qa_tools()
     await qa_exely_api()
     qa_webhooks()
     qa_freedompay()
