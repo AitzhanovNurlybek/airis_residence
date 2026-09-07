@@ -693,20 +693,50 @@ async def _tool_cancel_request(settings: Any, guest: dict[str, Any] | None,
             "звонком на стойку, и дай телефон.")
 
 
-def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any]) -> str:
+def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any],
+               *, corporate: dict[str, Any] | None = None) -> str:
     """Собрать ссылку на форму брони.
 
     Адрес берём из справки (`hotel.url`), а не из настроек: settings.site_url
     на локальной машине указывает на 127.0.0.1, и такую ссылку гостю слать
     некуда. Настройки — запасной вариант, если справка почему-то без адреса.
+
+    Гостю по договору публичная форма не подходит вовсе — см. ниже.
     """
+    site = str(facts.get("hotel", {}).get("url")
+               or getattr(settings, "site_url", "") or "")
+
+    # Публичная форма берёт оплату картой по прайсу. У компании по договору
+    # цена другая и оплата другая — постоплата по счёту. Отправив сотрудника
+    # на публичную форму, мы взяли бы с него больше договорного и мимо
+    # договора, а бухгалтерия компании осталась бы без счёта.
+    #
+    # Запрет живёт здесь, а не только в правилах: с правилом в промпте бот
+    # присылал публичную форму 4 раза из 4 — инструмент был под рукой, и он
+    # им пользовался. Инструмент, который физически не может вернуть чужую
+    # ссылку, надёжнее просьбы её не возвращать.
+    if corporate:
+        куда = f"{site.rstrip('/')}/corp" if site else "/corp"
+        компания = corporate.get("company") or "компании"
+        кто = " ".join(x for x in (corporate.get("manager_name"),
+                                   corporate.get("manager_phone")) if x)
+        ответ = [
+            f"Публичная форма этому гостю НЕ подходит: он от {компания}, "
+            "у которой договор с отелем.",
+            f"Дай ссылку на корпоративный кабинет: {куда}",
+            "Там сотрудник оформляет заявку по договорным ценам, оплата — "
+            "по счёту, а не картой.",
+        ]
+        if кто:
+            ответ.append(f"Если нужен человек — менеджер компании: {кто}")
+        return "\n".join(ответ)
+
     slug = str(args.get("room") or "").strip()
     known = {str(room.get("slug", "")) for room in facts.get("rooms", [])}
     if slug and slug not in known:
         codes = ", ".join(sorted(c for c in known if c))
         return f"Категории «{slug}» нет. Известные: {codes}"
 
-    site = str(facts.get("hotel", {}).get("url") or getattr(settings, "site_url", "") or "")
     if not site:
         return "Адрес сайта неизвестен — ссылку собрать не из чего, дай гостю телефон стойки"
 
@@ -734,7 +764,8 @@ def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any]) -> st
 
 
 async def _tool_availability(
-    booking: BookingSystem, args: dict[str, Any], facts: dict[str, Any] | None = None
+    booking: BookingSystem, args: dict[str, Any], facts: dict[str, Any] | None = None,
+    *, corporate: dict[str, Any] | None = None,
 ) -> str:
     try:
         check_in = _parse_date(args.get("check_in"))
@@ -806,6 +837,30 @@ async def _tool_availability(
         if facts:
             priced = _room_price(facts, offer.room_slug)
             rack = priced[1] if priced else None
+
+        # Гость по договору: тарифы Exely ему не подходят вовсе. Договорная
+        # цена считается от прайса отеля, а не от тарифа со скидкой, и в
+        # кабинете сотрудник видит именно её. Назвать здесь тариф значило бы
+        # дать третье число к тем двум, что уже есть.
+        if corporate:
+            from .corp_guest import price_for  # noqa: PLC0415
+
+            публичная = None
+            if facts:
+                по_гостям = _room_price(facts, offer.room_slug, гостей)
+                публичная = по_гостям[1] if по_гостям else None
+            if публичная:
+                цена = price_for(corporate, offer.room_slug, публичная)
+                итог = f" — за {result.nights} ноч. {цена * result.nights} тенге"
+                lines.append(
+                    f"    · цена по договору: {цена} тенге за ночь{итог}")
+            else:
+                # Категория есть у Exely, но цены на неё мы не знаем. Считать
+                # процент не от чего, а выдумать цену по договору нельзя.
+                lines.append(
+                    "    · цены по договору на эту категорию нет — скажи, что "
+                    "её назовёт менеджер, своей не придумывай")
+            continue
         # Тарифы, если система их отдаёт. Цена на сайте — прайс, а продаётся
         # номер по тарифу, и он бывает заметно дешевле. Гость, услышавший от
         # консьержа прайс, открывает форму и видит другое число.
@@ -1151,6 +1206,35 @@ async def answer(
         can_book=can_book, can_find=can_find,
     )
 
+    # Гость пишет с телефона сотрудника компании, у которой договор с отелем.
+    # Тогда меняется и цена, и способ бронирования: публичная форма берёт
+    # карту по прайсу, а у компании постоплата по счёту через кабинет.
+    # Отправить корпоративного гостя на публичную форму — значит взять с
+    # него больше договорного и мимо договора.
+    корпоратив = (guest or {}).get("corporate") or None
+    if корпоратив:
+        строки = [
+            "",
+            "─────────────────────────────────────────────────",
+            "ЭТОТ ГОСТЬ — ПО КОРПОРАТИВНОМУ ДОГОВОРУ",
+            "",
+            f"Компания: {корпоратив.get('company')}. Телефон узнан по договору.",
+            "",
+            "- Цены называй ТОЛЬКО корпоративные — их подставляет инструмент",
+            "  проверки наличия. Прайсовых цен этому гостю не называй и разницу",
+            "  не комментируй: условия договора обсуждает менеджер, не ты.",
+            "- Ссылку на публичную форму бронирования НЕ давай. Публичная форма",
+            "  берёт оплату картой по прайсу, а у компании постоплата по счёту.",
+            "  Бронь оформляется в корпоративном кабинете: /corp",
+            "- Скидку, процент и условия договора вслух не проговаривай.",
+            "  Называй готовую цену, а не то, как она получена.",
+        ]
+        if корпоратив.get("manager_name") or корпоратив.get("manager_phone"):
+            кто = " ".join(x for x in (корпоратив.get("manager_name"),
+                                       корпоратив.get("manager_phone")) if x)
+            строки.append(f"- Вопросы по договору и счетам — менеджер: {кто}")
+        system += "\n".join(строки)
+
     depth = max(0, settings.concierge_history_depth)
     messages: list[dict[str, Any]] = [
         *(history or [])[-depth:],
@@ -1228,9 +1312,11 @@ async def answer(
                 elif name == "room_page":
                     output = _tool_room_page(facts, args, photos)
                 elif name == "booking_link":
-                    output = _tool_link(settings, facts, args)
+                    output = _tool_link(
+                        settings, facts, args, corporate=корпоратив)
                 elif name == "check_availability":
-                    output = await _tool_availability(booking, args, facts)
+                    output = await _tool_availability(
+                        booking, args, facts, corporate=корпоратив)
                 elif name == "create_booking":
                     output = await _tool_create(booking, args, facts, guest)
                 elif name == "find_booking":

@@ -434,6 +434,119 @@ async def qa_tools() -> None:
           "ЧЕМ ЗАКАНЧИВАТЬ РАЗГОВОР" in правила)
     check("и сказано, что отказ — не конец разговора",
           "отказ — не конец разговора" in правила.lower())
+
+    # ── Гость по корпоративному договору ───────────────────────────────
+    #
+    # У компании свои цены, и до этого бот про договоры не знал: сотрудник
+    # слышал в переписке прайс, а в кабинете видел договорную цену. Хуже
+    # того, бот отправлял его на публичную форму — то есть на оплату картой
+    # по прайсу, мимо договора и без счёта для бухгалтерии.
+    import time as _t  # noqa: PLC0415
+
+    from sqlalchemy import delete as _del2  # noqa: PLC0415
+
+    from app.corp_guest import _tail, find_corporate, price_for  # noqa: PLC0415
+    from app.config import Settings as _S  # noqa: PLC0415
+    from app.concierge import _tool_link  # noqa: PLC0415
+    from app.db import Company, CompanyRate, CompanyUser  # noqa: PLC0415
+
+    # Один и тот же номер записывают по-разному — узнавать надо все записи.
+    хвосты = {_tail(x) for x in ("+7 701 555 77 99", "77015557799",
+                                 "8 (701) 555-77-99", "7 701-555-7799")}
+    check("телефон узнаётся в любой записи", len(хвосты) == 1, str(хвосты))
+    check("короткий номер не даёт ложных совпадений", _tail("12345") == "")
+
+    # Точная цена из договора важнее процента, иначе скидка от стойки
+    # отменяла бы то, о чём договорились по конкретной категории.
+    корп = {"discount_percent": 15, "rates": {"comfort": 38000}}
+    check("процент применяется", price_for(корп, "standart", 40000) == 34000,
+          str(price_for(корп, "standart", 40000)))
+    check("точная цена важнее процента",
+          price_for(корп, "comfort", 45000) == 38000)
+    check("цена округляется вниз до сотни",
+          price_for(корп, "standart-single", 35000) == 29700,
+          str(price_for(корп, "standart-single", 35000)))
+
+    ФАКТЫ = {"hotel": {"url": "https://airisresidence.kz"},
+             "rooms": [{"slug": "standart", "name": "Standart", "price": 40000}]}
+
+    # Публичная форма берёт карту по прайсу — корпоративному она не подходит.
+    ссылка_корп = _tool_link(_S(), ФАКТЫ, {"room": "standart"},
+                             corporate={"company": 'ТОО "Компас"',
+                                        "manager_name": "Айнур",
+                                        "manager_phone": "+7 701 930 0370"})
+    check("корпоративного ведём в кабинет",
+          "airisresidence.kz/corp" in ссылка_корп, ссылка_корп[:90])
+    check("и НЕ на публичную форму",
+          "/booking" not in ссылка_корп, ссылка_корп[:90])
+    check("менеджер компании назван", "Айнур" in ссылка_корп)
+
+    ссылка_обычная = _tool_link(_S(), ФАКТЫ, {"room": "standart"})
+    check("обычному гостю по-прежнему публичная форма",
+          "/booking?room-type=" in ссылка_обычная, ссылка_обычная[:90])
+
+    # Наличие: договорная цена вместо тарифов Exely.
+    вывод_корп = await _tool_availability(
+        _ЕстьНомера(), {"check_in": "2026-09-20", "check_out": "2026-09-21"},
+        ФАКТЫ, corporate=корп)
+    check("в наличии показана цена по договору",
+          "по договору: 34000" in вывод_корп, вывод_корп[-220:])
+
+    # Категория без договорной цены: выдумывать нельзя.
+    без_цены = await _tool_availability(
+        _ЕстьНомера(), {"check_in": "2026-09-20", "check_out": "2026-09-21"},
+        {"hotel": {"url": "x"}, "rooms": []}, corporate=корп)
+    check("без цены в договоре отправляем к менеджеру",
+          "назовёт менеджер" in без_цены, без_цены[-200:])
+
+    # Узнавание по базе. Ошибиться в сторону «принять чужого за своего»
+    # нельзя: это выдача условий чужого договора постороннему.
+    СЛАГ = f"qa-corp-{int(_t.time())}"
+    ТЕЛЕФОН = f"+7 701 000 {int(_t.time()) % 10000:04d}"
+    try:
+        async with SessionLocal() as ses:
+            комп = Company(slug=СЛАГ, name="QA Компания", discount_percent=10,
+                           is_active=True)
+            ses.add(комп)
+            await ses.flush()
+            ses.add(CompanyUser(company_id=комп.id, email=f"{СЛАГ}@qa.kz",
+                                full_name="QA Сотрудник", phone=ТЕЛЕФОН,
+                                is_active=True))
+            await ses.commit()
+            айди = комп.id
+
+        нашли = await find_corporate(ТЕЛЕФОН)
+        check("сотрудник компании узнан",
+              (нашли or {}).get("company") == "QA Компания", str(нашли)[:80])
+        check("посторонний остаётся обычным гостем",
+              await find_corporate("+7 999 111 22 33") is None)
+
+        # Два человека с одним телефоном — не знаем, кто именно пишет.
+        async with SessionLocal() as ses:
+            ses.add(CompanyUser(company_id=айди, email=f"{СЛАГ}-2@qa.kz",
+                                full_name="Двойник", phone=ТЕЛЕФОН,
+                                is_active=True))
+            await ses.commit()
+        check("при двух совпадениях договор не применяем",
+              await find_corporate(ТЕЛЕФОН) is None)
+
+        # Компанию отключили — договор больше не действует.
+        async with SessionLocal() as ses:
+            await ses.execute(_del2(CompanyUser).where(
+                CompanyUser.email == f"{СЛАГ}-2@qa.kz"))
+            комп = await ses.get(Company, айди)
+            комп.is_active = False
+            await ses.commit()
+        check("у отключённой компании цен нет",
+              await find_corporate(ТЕЛЕФОН) is None)
+    finally:
+        async with SessionLocal() as ses:
+            await ses.execute(_del2(CompanyRate).where(
+                CompanyRate.company_id == айди))
+            await ses.execute(_del2(CompanyUser).where(
+                CompanyUser.company_id == айди))
+            await ses.execute(_del2(Company).where(Company.id == айди))
+            await ses.commit()
     check("есть оформление", "create_booking" in names)
     read_names = {t["name"] for t in READ_ONLY_TOOLS}
     check("в режиме чтения оформления нет", "create_booking" not in read_names)

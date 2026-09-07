@@ -24,6 +24,7 @@ from dataclasses import dataclass, field, replace
 from ..almaty import today as hotel_today
 from ..concierge import answer
 from ..db import SessionLocal
+from ..corp_guest import find_corporate
 from ..dialogs import load_history, save_turn
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
@@ -70,6 +71,12 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
     depth = max(0, settings.concierge_history_depth)
     history = await load_history(SessionLocal, CHANNEL, message.chat_id, depth)
 
+    # У компании с договором свои цены. Раньше бот про договоры не знал и
+    # называл прайс — сотрудник слышал одну цену в переписке и видел другую
+    # в кабинете. Поиск только читает справочник и при любом сомнении
+    # (телефон у двоих, компания отключена, база молчит) возвращает None.
+    корпоратив = await find_corporate(message.phone)
+
     reply = await answer(
         settings,
         message=message.text,
@@ -79,7 +86,11 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
         # chat_id нужен, чтобы связать имя гостя с этой перепиской: бронь
         # оформляется на сайте, и другого мостика между ней и чатом нет.
         guest={"phone": message.phone, "name": message.sender_name,
-               "chat_id": message.chat_id},
+               "chat_id": message.chat_id,
+               # Сотрудник компании с договором. Узнаётся по телефону —
+               # других мостиков нет, гость представляется не всегда.
+               # None у обычного гостя, и тогда всё как раньше.
+               "corporate": корпоратив},
     )
 
     photos = reply.get("photos") or [] if reply["ok"] else []
