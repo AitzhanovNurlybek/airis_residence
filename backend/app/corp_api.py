@@ -97,6 +97,55 @@ def corp_price(public_price: int, discount_percent: int, override: int | None) -
     return public_price
 
 
+async def live_availability(
+    settings: Settings, check_in: date, check_out: date,
+    want: list[tuple[str, str, int]],
+) -> tuple[str, str]:
+    """Хватает ли номеров на эти даты. Возвращает (вердикт, причина).
+
+    Вердикты:
+      ok       — всех запрошенных категорий хватает, можно подтверждать;
+      short    — чего-то не хватает, и мы точно это знаем;
+      unknown  — спросить не удалось; решает человек.
+
+    Разделение «short» и «unknown» здесь главное. Отказать по ошибке — значит
+    прогнать партнёра, которому номер был; подтвердить по ошибке — значит
+    пообещать номер, которого нет. Оба исхода плохие, поэтому там, где мы не
+    знаем, не делаем ни того, ни другого.
+
+    Спрашиваем наличие НА ОДНОГО гостя, хотя в заявке их больше. Exely
+    показывает лишь те категории, куда помещается запрошенное число людей, и
+    на двоих одноместный не покажет вовсе — заявка на Standart Single
+    получила бы отказ при свободном номере. Запрос на одного даёт самый
+    широкий список, а вместимость мы и так проверяем отдельно.
+    """
+    from .booking_system import get_booking_system
+
+    try:
+        booking = get_booking_system(settings)
+    except Exception as error:  # noqa: BLE001
+        return "unknown", f"система бронирования не настроена: {error}"
+    if booking is None:
+        return "unknown", "система бронирования не настроена"
+
+    try:
+        result = await booking.availability(check_in, check_out, guests=1)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Наличие для авто-подтверждения не прочиталось: %s", error)
+        return "unknown", "система бронирования не ответила"
+
+    свободно = {offer.room_slug: offer.rooms_left for offer in result.offers}
+    for slug, название, сколько in want:
+        осталось = свободно.get(slug)
+        if осталось is None:
+            # Категория есть у нас, но неизвестна системе бронирования.
+            # Сказать про неё нечего — пусть смотрит менеджер.
+            return "unknown", f"категории «{название}» нет в системе бронирования"
+        if осталось < сколько:
+            return "short", f"{название}: свободно {осталось}, а в заявке {сколько}"
+    return "ok", ""
+
+
 async def _rates_map(session: AsyncSession, company_id: int) -> dict[str, int]:
     result = await session.execute(
         select(CompanyRate).where(CompanyRate.company_id == company_id)
@@ -346,14 +395,28 @@ async def corp_create_booking(
     background: BackgroundTasks,
     user: CompanyUser = Depends(require_corp_user),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ):
     """
     Оформление брони по корпоративным ценам.
 
-    Пока система бронирования отеля не отдаёт API, наличие номеров здесь не
-    проверяется — подтверждает менеджер. Поэтому бронь создаётся в статусе
-    `new` и в кабинете честно подписана как заявка: обещать гостю
-    подтверждённый номер, не умея его подтвердить, нельзя.
+    Обычной компании бронь создаётся заявкой в статусе `new`: наличие
+    подтверждает менеджер. Обещать гостю подтверждённый номер, не умея его
+    подтвердить, нельзя, и в кабинете это честно подписано как заявка.
+
+    Доверенному партнёру (`company.auto_confirm`) заявка подтверждается сама,
+    если система бронирования говорит, что номера свободны. Что это значит и
+    чего НЕ значит:
+
+    **Значит:** на момент проверки в Exely были свободные номера нужных
+    категорий, и партнёр получает ответ за секунду вместо часа ожидания.
+
+    **Не значит:** бронь занесена в шахматку. Exely не создаёт брони через
+    API вовсе — только отдаёт наличие. Занести её обязан человек, и
+    уведомление отелю об этом говорит прямо.
+
+    Отказ отправляется сразу и с точной причиной — это лучше тишины, в
+    которую партнёр упирается, когда менеджер не успевает ответить.
     """
     if hotel_today() > data.checkIn:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Дата заезда уже прошла")
@@ -405,6 +468,27 @@ async def corp_create_booking(
             f"Выбранные номера вмещают {capacity} гостей, а в заявке {guests}",
         )
 
+    # Доверенный партнёр: подтверждаем сами, если номера действительно есть.
+    статус = "new"
+    сам_подтвердил = False
+    if company.auto_confirm:
+        вердикт, причина = await live_availability(
+            settings, data.checkIn, data.checkOut,
+            [(item.room_slug, item.room_name, item.rooms_count) for item in items],
+        )
+        if вердикт == "ok":
+            статус, сам_подтвердил = "confirmed", True
+        elif вердикт == "short":
+            # Отказ сразу и с цифрами. Партнёр переиграет даты в ту же минуту,
+            # а не через час, когда менеджер дойдёт до почты.
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, f"Свободных номеров не хватает. {причина}"
+            )
+        else:
+            # Спросить не вышло — решает человек, как и раньше. Молча
+            # подтвердить здесь значило бы пообещать номер наугад.
+            logger.info("Заявка %s ушла менеджеру: %s", user.company_id, причина)
+
     booking = CorpBooking(
         number="",
         company_id=user.company_id,
@@ -418,7 +502,9 @@ async def corp_create_booking(
         guest_phone=data.guestPhone.strip(),
         comment=data.comment.strip(),
         meal_plan=data.mealPlan,
-        status="new",
+        status=статус,
+        auto_confirmed=сам_подтвердил,
+        confirmed_at=utcnow() if сам_подтвердил else None,
         total_amount=total,
     )
     session.add(booking)
@@ -604,6 +690,7 @@ async def admin_create_company(
         manager_phone=data.managerPhone.strip(),
         discount_percent=data.discountPercent,
         breakfast_price=data.breakfastPrice,
+        auto_confirm=data.autoConfirm,
     )
     session.add(company)
     await session.commit()
@@ -628,6 +715,7 @@ async def admin_edit_company(
         "discountPercent": "discount_percent",
         "breakfastPrice": "breakfast_price",
         "isActive": "is_active",
+        "autoConfirm": "auto_confirm",
     }
     for incoming, column in fields.items():
         value = getattr(data, incoming)

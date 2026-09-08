@@ -235,6 +235,7 @@ class CompanyOut(BaseModel):
     # увидеть текущее состояние было негде — в списке компаний приостановленная
     # выглядела как обычная.
     isActive: bool = Field(default=True, validation_alias="is_active")
+    autoConfirm: bool = Field(default=False, validation_alias="auto_confirm")
 
 
 class CompanyUserOut(BaseModel):
@@ -334,6 +335,9 @@ class CorpBookingOut(BaseModel):
     invoiceNumber: str = Field(default="", validation_alias="invoice_number")
     createdAt: datetime = Field(validation_alias="created_at")
     cancelReason: str = Field(default="", validation_alias="cancel_reason")
+    # Подтверждено проверкой наличия, а не человеком: в шахматке Exely
+    # такой брони ещё нет, её надо занести руками.
+    autoConfirmed: bool = Field(default=False, validation_alias="auto_confirmed")
     # Кто оформил — в таблице «Мои бронирования» есть колонка «Сотрудник».
     createdByName: str = ""
     # Чья это заявка. В кабинете компания и так одна, а вот в общем списке у
@@ -379,6 +383,9 @@ class CompanyIn(BaseModel):
     managerPhone: str = Field(default="", max_length=40)
     discountPercent: int = Field(default=0, ge=0, le=90)
     breakfastPrice: int = Field(default=0, ge=0, le=100_000)
+    # Доверенный партнёр: заявки подтверждает проверка наличия,
+    # а не менеджер. По умолчанию выключено.
+    autoConfirm: bool = False
 
 
 class CompanyPatch(BaseModel):
@@ -393,6 +400,7 @@ class CompanyPatch(BaseModel):
     discountPercent: int | None = Field(default=None, ge=0, le=90)
     breakfastPrice: int | None = Field(default=None, ge=0, le=100_000)
     isActive: bool | None = None
+    autoConfirm: bool | None = None
 
 
 class CompanyRateIn(BaseModel):

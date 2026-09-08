@@ -107,6 +107,7 @@ export function CompanyEditor({
         managerPhone: String(form.get("managerPhone") ?? "").trim(),
         discountPercent: Number(form.get("discountPercent") ?? 0) || 0,
         breakfastPrice: Number(form.get("breakfastPrice") ?? 0) || 0,
+        autoConfirm: form.get("autoConfirm") === "on",
       });
       setCompany(saved);
       toast.show("Реквизиты сохранены");
@@ -351,6 +352,30 @@ export function CompanyEditor({
               className={inputClass}
             />
           </Field>
+          <div className="md:col-span-2">
+            <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <input
+                name="autoConfirm"
+                type="checkbox"
+                defaultChecked={company.autoConfirm}
+                className="mt-1 h-4 w-4 shrink-0"
+              />
+              <span className="text-sm">
+                <span className="font-medium">
+                  Доверенный партнёр — подтверждать заявки автоматически
+                </span>
+                <span className="mt-1 block text-slate-600">
+                  Заявка подтвердится сама, если номера свободны, и получит
+                  отказ сразу, если их нет. Партнёр перестанет ждать ответа.
+                </span>
+                <span className="mt-2 block text-amber-900">
+                  Такую бронь <strong>нужно занести в шахматку Exely вручную</strong>:
+                  их API брони не создаёт, а партнёру уже сказано «да».
+                  Уведомление об этом придёт в WhatsApp.
+                </span>
+              </span>
+            </label>
+          </div>
           <div className="md:col-span-2">
             <AdminButton type="submit" disabled={busy}>
               Сохранить реквизиты

@@ -66,6 +66,13 @@ export type AdminCompany = {
    */
   breakfastPrice: number;
   isActive: boolean;
+  /**
+   * Доверенный партнёр: заявку подтверждает проверка живого наличия, а
+   * не менеджер. Выключено по умолчанию — подтверждение обязывает отель
+   * дать номер, а занести бронь в шахматку Exely всё равно должен
+   * человек: их API брони не создаёт.
+   */
+  autoConfirm: boolean;
 };
 
 export type AdminCompanyUser = {
@@ -111,6 +118,8 @@ export type AdminCorpBooking = {
   invoiceNumber: string;
   createdAt: string;
   cancelReason: string;
+  /** Подтверждено проверкой наличия. В шахматке Exely её ещё нет. */
+  autoConfirmed: boolean;
   createdByName: string;
   /** Чья заявка. В общем списке без этого непонятно, кому звонить. */
   companySlug: string;

@@ -269,6 +269,14 @@ class Company(Base):
     breakfast_price: Mapped[int] = mapped_column(Integer, default=0)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    # Доверенный партнёр: заявку подтверждает не менеджер, а проверка живого
+    # наличия. Выключено по умолчанию, и это не осторожность ради осторожности:
+    # подтверждение обязывает отель дать номер, а Exely не умеет создавать
+    # брони через API — занести её в шахматку всё равно должен человек.
+    # Включать имеет смысл там, где отель этому человеку доверяет.
+    auto_confirm: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -392,6 +400,11 @@ class CorpBooking(Base):
     total_amount: Mapped[int] = mapped_column(Integer, default=0)  # тенге
 
     invoice_number: Mapped[str] = mapped_column(String(60), default="")
+
+    # Подтверждено проверкой наличия, а не человеком. Разница видна и в
+    # админке, и в уведомлении: такую бронь никто ещё не заносил в шахматку
+    # Exely — API их не создаёт, — и сделать это нужно как можно скорее.
+    auto_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -774,9 +787,15 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
     },
     "companies": {
         "breakfast_price": "INTEGER DEFAULT 0",
+        # BOOLEAN пишем как есть: SQLite принимает его синонимом NUMERIC,
+        # Postgres понимает буквально. Значение по умолчанию ЛОЖНО намеренно —
+        # существующие компании не должны вдруг начать подтверждать заявки
+        # сами от того, что мы выкатили новую версию.
+        "auto_confirm": "BOOLEAN DEFAULT 0",
     },
     "corp_bookings": {
         "meal_plan": "VARCHAR(20) DEFAULT 'breakfast'",
+        "auto_confirmed": "BOOLEAN DEFAULT 0",
     },
 }
 

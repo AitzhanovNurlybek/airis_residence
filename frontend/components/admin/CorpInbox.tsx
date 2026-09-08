@@ -67,6 +67,17 @@ export function CorpInbox({ bookings }: { bookings: AdminCorpBooking[] }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <span className="text-cream">{booking.companyName || "—"}</span>
+                    {/* Такую бронь партнёру уже подтвердили, а в шахматке
+                        Exely её нет и само не появится: их API брони не
+                        создаёт. Это не статус, а невыполненное дело. */}
+                    {booking.autoConfirmed && booking.status !== "cancelled" && (
+                      <span
+                        className="rounded-full bg-amber-500 px-2.5 py-0.5 text-[0.65rem] tracking-wide text-black uppercase"
+                        title="Подтверждено автоматически по свободным номерам. Занесите бронь в шахматку Exely — сама она туда не попадёт."
+                      >
+                        занести в Exely
+                      </span>
+                    )}
                     {burning && (
                       <span className="rounded-full bg-wine-500 px-2.5 py-0.5 text-[0.65rem] tracking-wide text-white uppercase">
                         {days === 0

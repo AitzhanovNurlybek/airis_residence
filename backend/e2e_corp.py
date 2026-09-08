@@ -32,9 +32,37 @@ os.environ["SECRET_KEY"] = "e2e-secret-key-long-enough-for-hmac-signing"
 os.environ["TELEGRAM_BOT_TOKEN"] = ""
 os.environ["TELEGRAM_CHAT_ID"] = ""
 
+# Каналы наружу глушим ЯВНО, пустыми значениями, а не надеждой на то, что
+# они не настроены.
+#
+# Так уже дважды выходило иначе. Пока заявки уведомляли только Telegram,
+# отключить его хватало. Как только уведомление переехало в WhatsApp, этот
+# набор отправил 25 настоящих сообщений: ключи Green API он не обнулял, а
+# в backend/.env они боевые. Повезло, что получателем был свой же номер
+# бота, — при заполненном LEAD_NOTIFY_PHONE их получил бы отель.
+#
+# Правило простое: набор проверок не должен уметь отправить наружу ничего.
+os.environ["GREEN_API_ID"] = ""
+os.environ["GREEN_API_TOKEN"] = ""
+os.environ["LEAD_NOTIFY_PHONE"] = ""
+
 import httpx  # noqa: E402
 
 from app.db import init_db  # noqa: E402
+from app.almaty import today as hotel_today  # noqa: E402
+
+
+def через(дней: int) -> str:
+    """Дата через столько-то дней от сегодня.
+
+    Раньше даты здесь были записаны числами (2026-09-04). Пока сегодня было
+    раньше этого дня, всё работало, а потом набор начал падать на первой же
+    броне: «дата заезда уже прошла». Проверка, которая протухает от того,
+    что прошла неделя, хуже отсутствующей — её начинают игнорировать.
+    """
+    from datetime import timedelta
+
+    return (hotel_today() + timedelta(days=дней)).isoformat()
 from app.main import app, seed_rooms_if_empty  # noqa: E402
 
 OK, FAIL = "  ✅", "  ❌"
@@ -196,8 +224,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-07",
+                "checkIn": через(3),
+                "checkOut": через(6),
                 "adults": 2,
                 "guestName": "Ержан Сотрудник",
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
@@ -224,8 +252,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=boss_h,
             json={
-                "checkIn": "2026-09-15",
-                "checkOut": "2026-09-17",
+                "checkIn": через(14),
+                "checkOut": через(16),
                 "adults": 1,
                 "items": [{"roomSlug": "standart", "roomsCount": 1}],
             },
@@ -319,8 +347,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-06",
+                "checkIn": через(3),
+                "checkOut": через(5),
                 "adults": 2,
                 "mealPlan": "none",
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
@@ -347,8 +375,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-06",
+                "checkIn": через(3),
+                "checkOut": через(5),
                 "adults": 2,
                 "mealPlan": "none",
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
@@ -367,8 +395,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-06",
+                "checkIn": через(3),
+                "checkOut": через(5),
                 "adults": 2,
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
             },
@@ -389,8 +417,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-06",
+                "checkIn": через(3),
+                "checkOut": через(5),
                 "adults": 2,
                 "mealPlan": "none",
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
@@ -409,8 +437,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-06",
+                "checkIn": через(3),
+                "checkOut": через(5),
                 "adults": 1,
                 "mealPlan": "полный пансион",
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
@@ -424,8 +452,8 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-10",
-                "checkOut": "2026-09-09",
+                "checkIn": через(9),
+                "checkOut": через(8),
                 "adults": 1,
                 "items": [{"roomSlug": "comfort", "roomsCount": 1}],
             },
@@ -448,13 +476,132 @@ async def main() -> None:
             "/api/corp/bookings",
             headers=staff_h,
             json={
-                "checkIn": "2026-09-04",
-                "checkOut": "2026-09-05",
+                "checkIn": через(3),
+                "checkOut": через(4),
                 "adults": 5,
                 "items": [{"roomSlug": "standart-single", "roomsCount": 1}],
             },
         )
         check("перебор гостей отклонён", r.status_code == 400, r.text[:80])
+
+        print("\n── Доверенный партнёр: авто-подтверждение ──")
+        #
+        # Партнёр упирается в тишину: заявка ждёт, пока менеджер дойдёт до
+        # почты. Если наличие можно проверить за секунду, ждать незачем.
+        #
+        # Но «подтверждено» здесь значит ровно одно: на момент проверки
+        # номера были свободны. Занести бронь в шахматку API Exely не умеет —
+        # такого метода у них нет вовсе, — поэтому её всё равно заносит
+        # человек, и уведомление отелю говорит об этом прямо.
+        #
+        # Систему бронирования подменяем: проверки не должны зависеть ни от
+        # сети, ни от того, что сегодня свободно в настоящем отеле.
+        import app.corp_api as _corp  # noqa: PLC0415
+
+        настоящая_проверка = _corp.live_availability
+        ответ_системы = {"verdict": "ok", "reason": ""}
+
+        async def _подставная(settings, check_in, check_out, want):  # noqa: ANN001
+            return ответ_системы["verdict"], ответ_системы["reason"]
+
+        _corp.live_availability = _подставная
+        try:
+            r = await c.patch(
+                "/api/admin/corp/companies/company-a",
+                headers=admin_h,
+                json={"autoConfirm": True},
+            )
+            check("тумблер доверенного партнёра включается",
+                  r.status_code == 200 and r.json()["autoConfirm"] is True,
+                  str(r.status_code))
+
+            r = await c.post(
+                "/api/corp/bookings",
+                headers=staff_h,
+                json={
+                    "checkIn": через(30),
+                    "checkOut": через(32),
+                    "adults": 2,
+                    "guestName": "Гость Партнёра",
+                    "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+                },
+            )
+            check("заявка создана", r.status_code == 201, str(r.status_code))
+            сама = r.json()
+            check("и подтверждена сразу", сама["status"] == "confirmed",
+                  str(сама.get("status")))
+            check("помечена как подтверждённая автоматически",
+                  сама["autoConfirmed"] is True)
+
+            # Мест не хватает — отказ немедленный и с цифрами. Молчание тут
+            # хуже отказа: партнёр ждёт впустую и теряет свои же даты.
+            ответ_системы.update(verdict="short",
+                                 reason="Comfort: свободно 0, а в заявке 2")
+            r = await c.post(
+                "/api/corp/bookings",
+                headers=staff_h,
+                json={
+                    "checkIn": через(30),
+                    "checkOut": через(32),
+                    "adults": 2,
+                    "guestName": "Гость Партнёра",
+                    "items": [{"roomSlug": "comfort", "roomsCount": 2}],
+                },
+            )
+            check("при нехватке мест — отказ сразу", r.status_code == 409,
+                  str(r.status_code))
+            причина = r.json().get("detail", "")
+            check("в отказе названы цифры", "свободно 0" in причина, причина[:70])
+
+            # Система не ответила — решает человек. Подтвердить наугад значит
+            # пообещать номер, которого может не быть.
+            ответ_системы.update(verdict="unknown",
+                                 reason="система бронирования не ответила")
+            r = await c.post(
+                "/api/corp/bookings",
+                headers=staff_h,
+                json={
+                    "checkIn": через(34),
+                    "checkOut": через(35),
+                    "adults": 1,
+                    "guestName": "Гость Партнёра",
+                    "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+                },
+            )
+            check("при недоступной системе заявка ждёт менеджера",
+                  r.status_code == 201 and r.json()["status"] == "new",
+                  f"{r.status_code} {r.json().get('status')}")
+            check("и автоматической не помечена",
+                  r.json()["autoConfirmed"] is False)
+
+            # Тумблер выключен — всё как раньше, даже когда номера есть.
+            ответ_системы.update(verdict="ok", reason="")
+            await c.patch(
+                "/api/admin/corp/companies/company-a",
+                headers=admin_h,
+                json={"autoConfirm": False},
+            )
+            r = await c.post(
+                "/api/corp/bookings",
+                headers=staff_h,
+                json={
+                    "checkIn": через(36),
+                    "checkOut": через(37),
+                    "adults": 1,
+                    "guestName": "Обычный порядок",
+                    "items": [{"roomSlug": "comfort", "roomsCount": 1}],
+                },
+            )
+            check("без тумблера заявка по-прежнему ждёт менеджера",
+                  r.json()["status"] == "new", str(r.json().get("status")))
+        finally:
+            _corp.live_availability = настоящая_проверка
+            await c.patch(
+                "/api/admin/corp/companies/company-a",
+                headers=admin_h,
+                json={"autoConfirm": False},
+            )
+
 
         print("\n── Изоляция компаний ──")
         # Заводим вторую компанию: главный вопрос безопасности здесь не «пустят

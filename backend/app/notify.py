@@ -295,9 +295,6 @@ async def notify_corp_booking(booking_id: int) -> None:
     админке. Это не тот случай, когда ошибку канала нельзя глушить в лог.
     """
     settings = get_settings()
-    if not (settings.telegram_bot_token and settings.telegram_chat_id):
-        logger.info("Telegram не настроен, бронь #%s только в базе", booking_id)
-        return
 
     async with SessionLocal() as session:
         booking = await session.get(CorpBooking, booking_id)
@@ -309,10 +306,25 @@ async def notify_corp_booking(booking_id: int) -> None:
         )
         items = list(items_result.scalars().all())
 
-    lines = [
-        f"🏢 *Корпоративная заявка {booking.number}*",
-        "",
-        f"Компания: {company.name if company else '—'}",
+    # Авто-подтверждённая бронь требует действия, а не прочтения: партнёру
+    # уже сказано «да», а в шахматке Exely её нет и не появится само —
+    # их API брони не создаёт. Поэтому заголовок другой и просьба прямая.
+    if getattr(booking, "auto_confirmed", False):
+        lines = [
+            f"🔴 АВТО-ПОДТВЕРЖДЁННАЯ БРОНЬ {booking.number}",
+            "",
+            "Партнёру уже подтверждено — номера были свободны.",
+            "ЗАНЕСИТЕ ЕЁ В ШАХМАТКУ EXELY: сама она туда не попадёт.",
+            "",
+            f"Компания: {company.name if company else '—'}",
+        ]
+    else:
+        lines = [
+            f"🏢 Корпоративная заявка {booking.number}",
+            "",
+            f"Компания: {company.name if company else '—'}",
+        ]
+    lines += [
         f"📅 {booking.check_in} → {booking.check_out} ({booking.nights} ноч.)",
         f"👥 Гостей: {booking.adults} взр." + (f", {booking.children} дет." if booking.children else ""),
     ]
@@ -331,18 +343,32 @@ async def notify_corp_booking(booking_id: int) -> None:
     if booking.comment:
         lines += ["", f"💬 {booking.comment}"]
 
-    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    payload = {
-        "chat_id": settings.telegram_chat_id,
-        "text": "\n".join(lines),
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True,
-    }
+    текст = "\n".join(lines)
 
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
-                logger.error("Telegram вернул %s: %s", resp.status_code, resp.text)
-    except Exception:
-        logger.exception("Не удалось отправить бронь %s в Telegram", booking_id)
+    # Главный канал — WhatsApp, а не Telegram. Telegram у этого отеля не
+    # настроен, и корпоративные заявки уходили в никуда: функция молча
+    # выходила по первой же проверке. Отель читает WhatsApp — туда и пишем,
+    # тем же способом, что лиды и отмены.
+    ушло = await _tell_hotel(текст, f"корпоративная заявка {booking.number}")
+
+    # Telegram остаётся, если он всё-таки настроен: лишний канал для брони,
+    # которую нужно занести руками, не мешает.
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json={
+                    "chat_id": settings.telegram_chat_id,
+                    "text": текст,
+                    "disable_web_page_preview": True,
+                })
+                if resp.status_code != 200:
+                    logger.error("Telegram вернул %s: %s", resp.status_code, resp.text)
+                else:
+                    ушло += 1
+        except Exception:
+            logger.exception("Не удалось отправить бронь %s в Telegram", booking_id)
+
+    if not ушло:
+        logger.error("Заявку %s не удалось отправить никуда — она только в базе",
+                     booking.number)
