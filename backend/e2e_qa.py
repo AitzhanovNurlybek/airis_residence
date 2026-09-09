@@ -2993,6 +2993,90 @@ async def qa_unpaid() -> None:
             await ses.commit()
 
 
+async def qa_schema() -> None:
+    """Догонка схемы: колонки, добавленные после первого запуска.
+
+    Миграций в проекте нет, новые колонки догоняются списком в `db.py`.
+    Раздел появился после полного простоя боевого бэкенда: две булевы
+    колонки были записаны как `BOOLEAN DEFAULT 0`, Postgres на нуле для
+    BOOLEAN падает, ошибка шла из init_db наверх — и 500 отвечали ВСЕ
+    запросы, включая вебхук WhatsApp. Гости писали в пустоту из-за колонки
+    в корпоративном разделе.
+
+    Проверяется не «добавляется ли колонка», а то, что сбой одной колонки
+    не утаскивает за собой ни соседние, ни запуск приложения.
+    """
+    head("Догонка схемы базы")
+
+    import os as _os3  # noqa: PLC0415
+    import tempfile as _tmp  # noqa: PLC0415
+    import importlib as _imp  # noqa: PLC0415
+
+    from sqlalchemy import inspect as _insp2  # noqa: PLC0415
+
+    # Ни одна булева колонка не должна получить DEFAULT 0: Postgres такого
+    # не принимает, а падение видно только на боевом.
+    import app.db as _db_mod  # noqa: PLC0415
+
+    плохие = [
+        f"{таблица}.{имя}"
+        for таблица, колонки in _db_mod._LATE_COLUMNS.items()
+        for имя, ddl in колонки.items()
+        if "BOOLEAN" in ddl.upper() and "DEFAULT 0" in ddl.upper()
+    ]
+    check("булевых колонок с DEFAULT 0 нет", not плохие, str(плохие))
+
+    # Отдельная база: настоящую трогать нельзя, а проверка меняет схему.
+    было_url = _os3.environ.get("DATABASE_URL")
+    путь = _tmp.mktemp(suffix=".db").replace("\\", "/")
+    _os3.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{путь}"
+    try:
+        db = _imp.reload(_db_mod)
+
+        async with db.engine.begin() as conn:
+            await conn.exec_driver_sql(
+                "CREATE TABLE companies (id INTEGER PRIMARY KEY, slug VARCHAR(60))")
+
+        было = db._LATE_COLUMNS["companies"]
+        db._LATE_COLUMNS["companies"] = {
+            "auto_confirm": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "bitaya": "ЧЕПУХА DEFAULT ???",
+            "breakfast_price": "INTEGER DEFAULT 0",
+        }
+        try:
+            упало = False
+            try:
+                await db.init_db()
+            except Exception:  # noqa: BLE001
+                упало = True
+            check("кривая колонка не роняет запуск", not упало)
+
+            async with db.engine.begin() as conn:
+                есть = await conn.run_sync(
+                    lambda c: {к["name"] for к in _insp2(c).get_columns("companies")})
+            check("нужная колонка добавлена", "auto_confirm" in есть, str(sorted(есть)))
+            check("соседняя добавлена несмотря на сбой предыдущей",
+                  "breakfast_price" in есть, str(sorted(есть)))
+            check("кривая колонка не создана", "bitaya" not in есть)
+
+            async with db.engine.begin() as conn:
+                await conn.exec_driver_sql("INSERT INTO companies (slug) VALUES ('x')")
+                значение = (await conn.exec_driver_sql(
+                    "SELECT auto_confirm FROM companies")).scalar()
+            # Ложь намеренна: выкатка версии не должна включать
+            # авто-подтверждение заявок у тех, кто о нём не просил.
+            check("по умолчанию авто-подтверждение выключено", not значение,
+                  str(значение))
+        finally:
+            db._LATE_COLUMNS["companies"] = было
+    finally:
+        if было_url is None:
+            _os3.environ.pop("DATABASE_URL", None)
+        else:
+            _os3.environ["DATABASE_URL"] = было_url
+        _imp.reload(_db_mod)
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -3087,6 +3171,7 @@ async def main() -> int:
     await qa_refunds()
     await qa_payment_callback()
     await qa_unpaid()
+    await qa_schema()
     await qa_knowledge()
 
     total = passed + len(failed)

@@ -849,7 +849,16 @@ async def _tool_availability(
             if facts:
                 по_гостям = _room_price(facts, offer.room_slug, гостей)
                 публичная = по_гостям[1] if по_гостям else None
-            if публичная:
+            # Договорная цена есть только там, где о ней договорились: либо
+            # точная цена на категорию, либо процент на весь прайс. Если нет
+            # ни того ни другого, прайс остаётся прайсом — назвать его «ценой
+            # по договору» значит выдать за скидку то, что ею не является, а
+            # партнёр сверит с сайтом и спросит, в чём же договор.
+            оговорена = (
+                offer.room_slug in (corporate.get("rates") or {})
+                or int(corporate.get("discount_percent") or 0) > 0
+            )
+            if публичная and оговорена:
                 цена = price_for(corporate, offer.room_slug, публичная)
                 итог = f" — за {result.nights} ноч. {цена * result.nights} тенге"
                 lines.append(
