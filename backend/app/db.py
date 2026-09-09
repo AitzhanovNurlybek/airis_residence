@@ -787,15 +787,20 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
     },
     "companies": {
         "breakfast_price": "INTEGER DEFAULT 0",
-        # BOOLEAN пишем как есть: SQLite принимает его синонимом NUMERIC,
-        # Postgres понимает буквально. Значение по умолчанию ЛОЖНО намеренно —
-        # существующие компании не должны вдруг начать подтверждать заявки
-        # сами от того, что мы выкатили новую версию.
-        "auto_confirm": "BOOLEAN DEFAULT 0",
+        # DEFAULT FALSE, а НЕ DEFAULT 0. Postgres на нуле для BOOLEAN падает
+        # («column is of type boolean but default expression is of type
+        # integer»), и это уже стоило полного простоя боевого бэкенда:
+        # ALTER падал, init_db пробрасывал ошибку, запуск не завершался, и
+        # все запросы отвечали 500 — вместе с ботом. SQLite ключевые слова
+        # TRUE/FALSE понимает с 3.23, так что общее написание есть.
+        #
+        # Ложь по умолчанию намеренна: существующие компании не должны
+        # начать подтверждать заявки сами от того, что мы выкатили версию.
+        "auto_confirm": "BOOLEAN NOT NULL DEFAULT FALSE",
     },
     "corp_bookings": {
         "meal_plan": "VARCHAR(20) DEFAULT 'breakfast'",
-        "auto_confirmed": "BOOLEAN DEFAULT 0",
+        "auto_confirmed": "BOOLEAN NOT NULL DEFAULT FALSE",
     },
 }
 
@@ -820,15 +825,40 @@ def _add_late_columns(conn) -> None:
         for name, ddl in columns.items():
             if name in existing:
                 continue
-            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-            logger.info("База: добавлена колонка %s.%s", table, name)
+            # Каждая колонка — своей вложенной транзакцией. У Postgres после
+            # ошибки транзакция аборчена целиком: без этого одна неверная
+            # строка утаскивала за собой все следующие, включая исправные.
+            try:
+                with conn.begin_nested():
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+                logger.info("База: добавлена колонка %s.%s", table, name)
+            except Exception as error:  # noqa: BLE001
+                logger.error("База: не добавилась колонка %s.%s (%s) — %s",
+                             table, name, ddl, error)
 
 
 async def init_db() -> None:
-    """Создаёт таблицы. Для боевого проекта заменить на alembic-миграции."""
+    """Создаёт таблицы и догоняет схему. Для боевого — заменить на alembic.
+
+    Догонка схемы отделена от создания таблиц и не может уронить запуск.
+    Причина известна на опыте: `BOOLEAN DEFAULT 0` не принимается Postgres,
+    ALTER падал, ошибка шла наверх, приложение не поднималось — и 500
+    отвечали ВСЕ запросы, включая вебхук WhatsApp. Гости писали в пустоту
+    из-за одной колонки в корпоративном разделе.
+
+    Схема, отставшая на колонку, ломает свой кусок работы. Схема, уронившая
+    запуск, ломает всё сразу. Второе хуже, поэтому здесь ошибка гасится и
+    остаётся в журнале.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_late_columns)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(_add_late_columns)
+    except Exception as error:  # noqa: BLE001
+        logger.error("База: догнать схему не вышло — %s", error)
 
 
 async def get_session():
