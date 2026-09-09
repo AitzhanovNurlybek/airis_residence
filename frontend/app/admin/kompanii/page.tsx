@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { CompaniesBoard } from "@/components/admin/CompaniesBoard";
 import { CorpInbox } from "@/components/admin/CorpInbox";
+import { ExelyQueue } from "@/components/admin/ExelyQueue";
 import { adminFetch, isAdminSignedIn } from "@/lib/adminServer";
 import type { AdminCompany, AdminCorpBooking } from "@/lib/adminTypes";
 
@@ -24,6 +25,7 @@ export default async function AdminCompaniesPage() {
 
   return (
     <>
+      <ExelyQueue bookings={bookings} />
       <CorpInbox bookings={bookings} />
       <CompaniesBoard initial={companies} />
     </>

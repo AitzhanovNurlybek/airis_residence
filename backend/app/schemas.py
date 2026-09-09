@@ -338,6 +338,16 @@ class CorpBookingOut(BaseModel):
     # Подтверждено проверкой наличия, а не человеком: в шахматке Exely
     # такой брони ещё нет, её надо занести руками.
     autoConfirmed: bool = Field(default=False, validation_alias="auto_confirmed")
+    # Когда бронь занесли в шахматку Exely. Пусто — ещё не занесли.
+    # Когда подтверждена. В очереди «занести в Exely» это главная колонка:
+    # важно не что бронь есть, а сколько она уже ждёт — риск двойной
+    # продажи растёт с каждым часом.
+    confirmedAt: datetime | None = Field(default=None, validation_alias="confirmed_at")
+    enteredAt: datetime | None = Field(default=None, validation_alias="entered_at")
+    # Готовый к переносу блок: всё, что нужно набрать в Exely, одним куском.
+    # Собирается на сервере, а не в браузере, чтобы сообщение отелю в WhatsApp
+    # и экран админки не разошлись со временем.
+    exelyBlock: str = ""
     # Кто оформил — в таблице «Мои бронирования» есть колонка «Сотрудник».
     createdByName: str = ""
     # Чья это заявка. В кабинете компания и так одна, а вот в общем списке у
@@ -413,6 +423,12 @@ class CompanyRateOut(BaseModel):
 
     roomSlug: str = Field(validation_alias="room_slug")
     price: int
+
+
+class CorpBookingEnteredIn(BaseModel):
+    """Отметка «занесено в шахматку Exely» — или снятие отметки."""
+
+    entered: bool = True
 
 
 class CorpBookingStatusIn(BaseModel):

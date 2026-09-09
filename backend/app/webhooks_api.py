@@ -494,6 +494,37 @@ async def unpaid_tick(
     return {"ok": True, **result}
 
 
+@router.post("/corp-pending")
+async def corp_pending_tick(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Напомнить о бронях, подтверждённых партнёру, но не занесённых в Exely.
+
+    Занесение — единственный шаг, который нельзя автоматизировать: Exely не
+    создаёт брони извне. Пока бронь не занесена, номер выглядит свободным и
+    его могут продать второй раз — поэтому напоминание повторяется, пока в
+    админке не нажали «Занесено».
+
+    `?dry_run=1` показывает текст, ничего не отправляя.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .corp_pending import run as pending_run
+
+    dry = request.query_params.get("dry_run") in ("1", "true", "yes")
+    result = await pending_run(session, settings, dry_run=dry)
+    return {"ok": True, **result}
+
+
 @router.post("/sync-bookings")
 async def sync_bookings(
     request: Request,

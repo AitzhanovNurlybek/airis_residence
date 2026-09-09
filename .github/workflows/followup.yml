@@ -36,6 +36,16 @@ jobs:
           code=$(curl -s -o sync.json -w "%{http_code}" --max-time 120             -X POST "https://airisresidence.kz/api/backend/api/webhooks/sync-bookings"             -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
           echo "HTTP $code"; cat sync.json; echo
 
+      # Напоминание о бронях, подтверждённых партнёру, но не занесённых в
+      # шахматку Exely. Расписание то же, что у дожима, и по той же причине:
+      # повод не календарный. Пока бронь не занесена, номер выглядит
+      # свободным и его могут продать второй раз — ждать до вечера дорого.
+      - name: Напомнить о незанесённых бронях
+        continue-on-error: true   # напоминание не должно мешать дожиму
+        run: |
+          code=$(curl -s -o pending.json -w "%{http_code}" --max-time 120             -X POST "https://airisresidence.kz/api/backend/api/webhooks/corp-pending"             -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "HTTP $code"; cat pending.json; echo
+
       - name: Написать тем, кто пропал
         run: |
           # Секрет заголовком, а не в адресе: адреса попадают в логи запусков

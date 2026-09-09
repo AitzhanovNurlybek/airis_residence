@@ -406,6 +406,16 @@ class CorpBooking(Base):
     # Exely — API их не создаёт, — и сделать это нужно как можно скорее.
     auto_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Когда бронь занесли в шахматку Exely. Пусто — ещё не занесли.
+    #
+    # Единственный шаг, который нельзя автоматизировать: Exely не создаёт
+    # брони извне. Раз он остаётся человеку, его нужно хотя бы не забывать —
+    # а просьба в сообщении WhatsApp уезжает вверх за полчаса. Отметка
+    # превращает её в очередь, которую видно и которая напоминает о себе.
+    entered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -801,6 +811,7 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "corp_bookings": {
         "meal_plan": "VARCHAR(20) DEFAULT 'breakfast'",
         "auto_confirmed": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "entered_at": "TIMESTAMP WITH TIME ZONE",
     },
 }
 

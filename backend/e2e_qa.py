@@ -3077,6 +3077,111 @@ async def qa_schema() -> None:
         _imp.reload(_db_mod)
 
 
+async def qa_corp_pending() -> None:
+    """Очередь «занести в Exely»: единственная ручная работа отеля.
+
+    Занесение автоматизировать нельзя — Exely не создаёт брони извне. Раз
+    шаг остаётся человеку, он не должен теряться: пока бронь не занесена,
+    номер выглядит свободным и его могут продать второй раз.
+
+    Проверяется в основном то, что в очередь НЕ должно попадать: очередь,
+    набравшая лишнего, перестаёт читаться, а вместе с лишним перестают
+    замечать настоящее.
+    """
+    head("Очередь занесения в Exely")
+
+    import time  # noqa: PLC0415
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    from app.corp_api import exely_block  # noqa: PLC0415
+    from app.corp_pending import describe, pending  # noqa: PLC0415
+    from app.db import (  # noqa: PLC0415
+        Company as _C,
+        CorpBooking as _CB,
+        CorpBookingItem as _CBI,
+        utcnow as _now,
+    )
+    from sqlalchemy import delete as _d3  # noqa: PLC0415
+
+    # ── Блок для переноса ──────────────────────────────────────────────
+    класс_брони = _CB(
+        number="K-0042", check_in=date(2026, 9, 20), check_out=date(2026, 9, 22),
+        nights=2, adults=2, children=1, guest_name="Сериков Ерлан",
+        guest_phone="+7 701 555 77 99", meal_plan="breakfast", comment="поздний заезд",
+    )
+    строки = [_CBI(room_name="Standart", rooms_count=2, price_per_night=25000)]
+    блок = exely_block(класс_брони, строки, "Компас")
+    for нужно in ("20.09.2026", "22.09.2026", "2 ноч.", "Standart × 2",
+                  "2 взр., 1 дет.", "Сериков Ерлан", "+7 701 555 77 99",
+                  "завтрак", "Компас", "K-0042", "поздний заезд"):
+        check(f"в блоке есть «{нужно}»", нужно in блок, блок[:120])
+    check("блок многострочный, а не сплошной", блок.count(chr(10)) >= 5)
+    check("в блоке нет буквальных переносов", chr(92) + "n" not in блок, блок[:80])
+
+    # ── Что попадает в очередь, а что нет ──────────────────────────────
+    МЕТКА = f"QA-PEND-{int(time.time())}"
+    async with SessionLocal() as ses:
+        компания = _C(slug=МЕТКА.lower(), name="QA Партнёр", is_active=True)
+        ses.add(компания)
+        await ses.flush()
+        cid = компания.id
+
+        давно = _now() - _td(hours=2)
+        только_что = _now()
+
+        варианты = [
+            ("ждёт два часа", dict(auto_confirmed=True, status="confirmed",
+                                   confirmed_at=давно, entered_at=None), True),
+            ("подтверждена минуту назад", dict(auto_confirmed=True, status="confirmed",
+                                               confirmed_at=только_что,
+                                               entered_at=None), False),
+            ("уже занесена", dict(auto_confirmed=True, status="confirmed",
+                                  confirmed_at=давно, entered_at=давно), False),
+            ("подтвердил человек", dict(auto_confirmed=False, status="confirmed",
+                                        confirmed_at=давно, entered_at=None), False),
+            ("отменена", dict(auto_confirmed=True, status="cancelled",
+                              confirmed_at=давно, entered_at=None), False),
+            ("оплачена", dict(auto_confirmed=True, status="paid",
+                              confirmed_at=давно, entered_at=None), False),
+            ("счёт выставлен, но не занесена",
+             dict(auto_confirmed=True, status="invoiced",
+                  confirmed_at=давно, entered_at=None), True),
+        ]
+        номера = {}
+        for i, (имя, поля, _) in enumerate(варианты):
+            b = _CB(number=f"{МЕТКА}-{i}", company_id=cid,
+                    check_in=date(2026, 9, 20), check_out=date(2026, 9, 21),
+                    nights=1, adults=1, total_amount=25000, **поля)
+            ses.add(b)
+            номера[имя] = b.number
+        await ses.commit()
+
+    try:
+        async with SessionLocal() as ses:
+            очередь = {b.number for b in await pending(ses)}
+        for имя, _, должна in варианты:
+            есть = номера[имя] in очередь
+            слово = "попадает" if должна else "НЕ попадает"
+            check(f"{имя} — {слово} в очередь", есть == должна,
+                  f"в очереди: {есть}")
+
+        # Сводка обязана называть, сколько бронь уже ждёт: без этого она
+        # читается как список, а не как «это горит».
+        async with SessionLocal() as ses:
+            брони = [b for b in await pending(ses) if b.number.startswith(МЕТКА)]
+            текст = describe([(b, "QA Партнёр", "блок") for b in брони])
+        check("в сводке сказано, сколько не занесено", "Не занесено в Exely" in текст)
+        check("названа опасность двойной продажи", "второй раз" in текст, текст[:150])
+        check("сказано, сколько ждёт", "ждёт" in текст, текст[:200])
+        check("сказано, что делать после", "отметьте в админке" in текст.lower(),
+              текст[-120:])
+    finally:
+        async with SessionLocal() as ses:
+            await ses.execute(_d3(_CB).where(_CB.company_id == cid))
+            await ses.execute(_d3(_C).where(_C.id == cid))
+            await ses.commit()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -3172,6 +3277,7 @@ async def main() -> int:
     await qa_payment_callback()
     await qa_unpaid()
     await qa_schema()
+    await qa_corp_pending()
     await qa_knowledge()
 
     total = passed + len(failed)

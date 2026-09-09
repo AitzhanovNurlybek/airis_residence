@@ -163,6 +163,44 @@ async def _published_rooms(session: AsyncSession) -> list[Room]:
 # ────────────────────────── Сборка ответов ────────────────────────────
 
 
+ПИТАНИЕ = {"breakfast": "завтрак", "none": "без питания",
+           "halfboard": "полупансион", "fullboard": "полный пансион"}
+
+
+def exely_block(booking: CorpBooking, items: list[CorpBookingItem],
+                company_name: str = "") -> str:
+    """Всё, что нужно набрать в Exely, одним куском для копирования.
+
+    Единственный шаг, который нельзя автоматизировать: Exely не создаёт
+    брони извне. Раз человек всё равно перепечатывает данные, пусть он
+    перепечатывает их из одного места, а не собирает по экрану — там, где
+    собирают глазами, путают даты и фамилии.
+
+    Формат один и тот же в админке и в сообщении WhatsApp: расходись они,
+    человек начал бы сверять два источника вместо того, чтобы копировать.
+    """
+    строки = [
+        f"{booking.check_in:%d.%m.%Y} → {booking.check_out:%d.%m.%Y}"
+        f"  ({booking.nights} ноч.)",
+    ]
+    for item in items:
+        строки.append(f"{item.room_name} × {item.rooms_count}")
+    гости = f"{booking.adults} взр."
+    if booking.children:
+        гости += f", {booking.children} дет."
+    строки.append(гости)
+    кто = booking.guest_name or "имя не указано"
+    if booking.guest_phone:
+        кто += f", {booking.guest_phone}"
+    строки.append(f"Гость: {кто}")
+    строки.append(f"Питание: {ПИТАНИЕ.get(booking.meal_plan, booking.meal_plan)}")
+    подпись = " · ".join(x for x in (company_name, booking.number) if x)
+    строки.append(f"Оплата по счёту · {подпись}")
+    if booking.comment:
+        строки.append(f"Комментарий: {booking.comment}")
+    return "\n".join(строки)
+
+
 async def _bookings_out(
     session: AsyncSession, bookings: list[CorpBooking]
 ) -> list[CorpBookingOut]:
@@ -213,6 +251,9 @@ async def _bookings_out(
         if company:
             model.companySlug = company.slug
             model.companyName = company.name
+        model.exelyBlock = exely_block(
+            booking, by_booking.get(booking.id, []),
+            company.name if company else "")
         out.append(model)
     return out
 
@@ -907,6 +948,33 @@ async def admin_set_booking_status(
     if data.invoiceNumber:
         booking.invoice_number = data.invoiceNumber.strip()
 
+    await session.commit()
+    await session.refresh(booking)
+    return (await _bookings_out(session, [booking]))[0]
+
+
+@admin.post("/bookings/{booking_id}/entered", response_model=CorpBookingOut)
+async def admin_mark_entered(
+    booking_id: int,
+    data: CorpBookingEnteredIn,
+    session: AsyncSession = Depends(get_session),
+):
+    """Отметить, что бронь занесена в шахматку Exely.
+
+    Отдельная отметка, а не статус. Статус описывает сделку с компанией
+    (подтверждена, выставлен счёт, оплачена), а занесение — работу отеля
+    внутри Exely: у подтверждённой брони может быть выставлен счёт, а в
+    шахматке её всё ещё нет. Смешав их, мы потеряли бы ровно тот случай,
+    ради которого отметка и нужна.
+
+    Снять отметку тоже можно: занесли не ту бронь — надо иметь возможность
+    вернуть её в очередь, а не заводить вторую.
+    """
+    booking = await session.get(CorpBooking, booking_id)
+    if booking is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Бронирование не найдено")
+
+    booking.entered_at = utcnow() if data.entered else None
     await session.commit()
     await session.refresh(booking)
     return (await _bookings_out(session, [booking]))[0]

@@ -343,6 +343,16 @@ async def notify_corp_booking(booking_id: int) -> None:
     if booking.comment:
         lines += ["", f"💬 {booking.comment}"]
 
+    # Готовый к переносу блок — только там, где его правда надо переносить.
+    # Отель всё равно перепечатывает эти данные в Exely руками, и пусть
+    # перепечатывает из одного куска, а не собирает их по сообщению глазами:
+    # там, где собирают глазами, путают даты и фамилии.
+    if getattr(booking, "auto_confirmed", False):
+        from .corp_api import exely_block  # noqa: PLC0415
+
+        lines += ["", "─── скопировать в Exely ───", "",
+                  exely_block(booking, items, company.name if company else "")]
+
     текст = "\n".join(lines)
 
     # Главный канал — WhatsApp, а не Telegram. Telegram у этого отеля не
