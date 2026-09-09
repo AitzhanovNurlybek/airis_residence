@@ -91,15 +91,36 @@ async def seed_rooms_if_empty() -> None:
 
 _initialised = False
 
+#: Чем закончилась подготовка базы. Пусто — всё в порядке. Видно в /health:
+#: без этого причина сбоя остаётся только в журнале, до которого не всегда
+#: есть доступ.
+_startup_error = ""
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # В serverless этот код выполняется при каждом холодном старте.
     # Флаг избавляет от лишней работы, пока экземпляр живой.
-    global _initialised
+    global _initialised, _startup_error
     if not _initialised:
-        await init_db()
-        await seed_rooms_if_empty()
+        # Подготовка базы не должна уносить с собой весь сервис.
+        #
+        # Так уже случилось: неверный DDL в догонке схемы ронял init_db,
+        # исключение шло наверх, lifespan не завершался — и ВСЕ запросы
+        # отвечали 500, включая вебхук WhatsApp. Гости писали в пустоту
+        # из-за колонки в корпоративном разделе.
+        #
+        # Отвалившаяся подготовка ломает свой кусок работы. Отвалившийся
+        # запуск ломает всё сразу и вдобавок молчит о причине: наружу идёт
+        # только FUNCTION_INVOCATION_FAILED, а журнала под рукой может не
+        # быть. Поэтому ошибка ловится, запоминается и видна в /health.
+        try:
+            await init_db()
+            await seed_rooms_if_empty()
+            _startup_error = ""
+        except Exception as error:  # noqa: BLE001
+            _startup_error = f"{type(error).__name__}: {error}"
+            logger.exception("Подготовка базы не удалась")
         _initialised = True
         logger.info(
             "Готово. Хранилище: %s, админка: %s, платежи: %s",
@@ -184,8 +205,12 @@ def require_api_key(x_api_key: str = Header(default="")) -> None:
 
 @app.get("/health", tags=["service"])
 async def health():
+    # Статус говорит о том, готова ли база, а не о том, жив ли процесс:
+    # «ok» при неподготовленной базе — самая дорогая ложь, какую может
+    # сказать проверка здоровья.
     return {
-        "status": "ok",
+        "status": "ok" if not _startup_error else "degraded",
+        "startup_error": _startup_error,
         "admin_configured": settings.admin_configured,
         "payments_configured": settings.payment_configured,
         "telegram_configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
