@@ -3182,6 +3182,184 @@ async def qa_corp_pending() -> None:
             await ses.commit()
 
 
+async def qa_memory_week() -> None:
+    """Память на неделю и пометка о паузе.
+
+    Отель попросил помнить разговор неделю: «бывают разные случаи». Длинная
+    память опасна одним — в истории нет дат. Проверено 2026-09-13: история
+    пятидневной давности, и бот 13 сентября называл цену «на 10–11 сентября»
+    как действующую в 2 случаях из 3. Поэтому неделя идёт в паре с пометкой,
+    и проверяется в первую очередь пометка.
+    """
+    head("Память на неделю")
+
+    from datetime import timedelta as _td  # noqa: PLC0415
+    import json as _json  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    from sqlalchemy import delete as _del  # noqa: PLC0415
+
+    from app.concierge import _with_note  # noqa: PLC0415
+    from app.db import DialogMessage as _DM, utcnow as _now  # noqa: PLC0415
+    from app.dialogs import (  # noqa: PLC0415
+        CONTINUES_FOR,
+        STALE_AFTER,
+        last_message_at,
+        pause_hours,
+    )
+
+    check("разговор помнится неделю", CONTINUES_FOR == _td(days=7), str(CONTINUES_FOR))
+    check("устаревшим разговор считается после суток", STALE_AFTER == _td(hours=24))
+
+    # ── Пауза ──────────────────────────────────────────────────────────
+    сейчас = _now()
+    check("без переписки паузы нет", pause_hours(None) is None)
+    check("пауза считается в часах",
+          abs(pause_hours(сейчас - _td(hours=5), сейчас) - 5) < 0.01)
+    # SQLite отдаёт время без пояса, Postgres — с поясом. Падать на этом
+    # нельзя: из-за пометки гость не должен остаться без ответа.
+    наивное = (сейчас - _td(days=2)).replace(tzinfo=None)
+    check("время без пояса не роняет расчёт",
+          abs(pause_hours(наивное, сейчас) - 48) < 0.01, str(pause_hours(наивное, сейчас)))
+    check("время из будущего не даёт отрицательной паузы",
+          pause_hours(сейчас + _td(hours=1), сейчас) == 0.0)
+
+    # ── Пометка идёт в запрос, но не в историю ─────────────────────────
+    исходные = [
+        {"role": "user", "content": "есть Comfort на 10 сентября?"},
+        {"role": "assistant", "content": "Свободен, 45 000 ₸."},
+        {"role": "user", "content": "а сколько будет стоить?"},
+    ]
+    с_пометкой = _with_note(исходные, 2, "[пометка]")
+    check("пометка встаёт перед репликой гостя",
+          с_пометкой[2]["content"][0] == {"type": "text", "text": "[пометка]"})
+    check("текст гостя сохранён после пометки",
+          с_пометкой[2]["content"][1]["text"] == "а сколько будет стоить?")
+    # Список с пометкой уходит только в модель. Исходный потом ложится в
+    # историю — и пометка там через неделю читалась бы как действующая.
+    check("исходная реплика не изменена", исходные[2]["content"] == "а сколько будет стоить?")
+    check("без пометки сообщения не трогаются", _with_note(исходные, 2, "") is исходные)
+
+    # ── История пятидневной давности теперь подхватывается ─────────────
+    ЧАТ = f"qa-memory-{int(time.time())}@c.us"
+    try:
+        async with SessionLocal() as ses:
+            for дней, текст in ((9, "девять дней назад"), (5, "пять дней назад")):
+                ses.add(_DM(channel="whatsapp", chat_id=ЧАТ, role="user",
+                            content=_json.dumps(текст, ensure_ascii=False),
+                            created_at=сейчас - _td(days=дней)))
+            await ses.commit()
+
+        история = await load_history(SessionLocal, "whatsapp", ЧАТ, depth=12)
+        тексты = [m["content"] for m in история]
+        check("реплика пятидневной давности помнится", "пять дней назад" in тексты, str(тексты))
+        check("старше недели — нет", "девять дней назад" not in тексты, str(тексты))
+
+        последняя = await last_message_at(SessionLocal, "whatsapp", ЧАТ)
+        пауза = pause_hours(последняя)
+        check("пауза после пяти дней больше суток — пометка сработает",
+              пауза is not None and пауза >= STALE_AFTER.total_seconds() / 3600,
+              str(пауза))
+    finally:
+        async with SessionLocal() as ses:
+            await ses.execute(_del(_DM).where(_DM.chat_id == ЧАТ))
+            await ses.commit()
+
+
+async def qa_reception_notify() -> None:
+    """Корпоративные уведомления — ещё и на ресепшен.
+
+    Просьба отеля: «чтобы наши с ресепшена видели и вносили сразу». Бронь
+    компании заносит в шахматку ресепшен, и узнавать о ней он должен сам.
+
+    Проверяется в основном то, что туда НЕ должно уходить: заявки с сайта,
+    отмены, суммы возвратов. И то, что ресепшен не отнимает уведомлений у
+    владельца. Настоящих отправок нет — канал подменён.
+    """
+    head("Уведомления ресепшену")
+
+    import inspect as _insp  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+
+    import app.channels.whatsapp as _wa  # noqa: PLC0415
+    import app.corp_pending as _cp  # noqa: PLC0415
+    import app.notify as _nt  # noqa: PLC0415
+    from app.config import Settings as _S, get_settings as _gs  # noqa: PLC0415
+
+    check("по умолчанию ресепшену ничего не уходит",
+          _S(corp_notify_phone="").corp_notify_numbers == [])
+    check("номер ресепшена разбирается",
+          _S(corp_notify_phone="+7 777 531 00 09").corp_notify_numbers == ["77775310009"])
+    # У группы есть звук и пуш у каждого участника — у чата с самим собой нет.
+    check("группа WhatsApp принимается как есть",
+          _S(corp_notify_phone="120363040000000000@g.us").corp_notify_numbers
+          == ["120363040000000000@g.us"])
+    check("короткая опечатка отбрасывается",
+          _S(corp_notify_phone="555").corp_notify_numbers == [])
+
+    ушло: list[str] = []
+
+    class _Стенд:
+        def __init__(self, *a, **k) -> None:  # noqa: D107
+            pass
+
+        async def send(self, chat: str, text: str) -> str:
+            ушло.append(chat)
+            return "stub"
+
+    было_канал = _wa.WhatsAppChannel
+    было_env = {k: _os.environ.get(k) for k in ("LEAD_NOTIFY_PHONE", "CORP_NOTIFY_PHONE")}
+    _wa.WhatsAppChannel = _Стенд
+    try:
+        async def кому(corporate: bool, lead: str, corp: str) -> list[str]:
+            _os.environ["LEAD_NOTIFY_PHONE"] = lead
+            _os.environ["CORP_NOTIFY_PHONE"] = corp
+            _gs.cache_clear()
+            ушло.clear()
+            отправка = getattr(_nt, "_tell_hotel_настоящий", _nt._tell_hotel)
+            await отправка("проверка", "qa", corporate=corporate)
+            return list(ушло)
+
+        ВЛАДЕЛЕЦ, РЕСЕПШЕН = "77010000001", "77775310009"
+
+        r = await кому(True, ВЛАДЕЛЕЦ, "")
+        check("без ресепшена корпоративное уходит как раньше",
+              r == [f"{ВЛАДЕЛЕЦ}@c.us"], str(r))
+
+        r = await кому(True, ВЛАДЕЛЕЦ, РЕСЕПШЕН)
+        check("корпоративное уходит ресепшену", f"{РЕСЕПШЕН}@c.us" in r, str(r))
+        check("и владелец его не теряет", f"{ВЛАДЕЛЕЦ}@c.us" in r, str(r))
+
+        r = await кому(False, ВЛАДЕЛЕЦ, РЕСЕПШЕН)
+        check("заявки с сайта и отмены ресепшену НЕ уходят",
+              f"{РЕСЕПШЕН}@c.us" not in r, str(r))
+
+        r = await кому(True, РЕСЕПШЕН, "+7 (777) 531-00-09")
+        check("один номер в двух списках — одно сообщение",
+              r.count(f"{РЕСЕПШЕН}@c.us") == 1, str(r))
+
+        r = await кому(True, ВЛАДЕЛЕЦ, "120363040000000000@g.us")
+        check("в группу пишется по её id, без @c.us",
+              "120363040000000000@g.us" in r, str(r))
+
+        # Метка должна стоять у обеих корпоративных отправок, иначе ресепшен
+        # узнает только о половине.
+        check("новая заявка компании помечена корпоративной",
+              "corporate=True" in _insp.getsource(_nt.notify_corp_booking))
+        check("напоминание «не занесено» тоже",
+              "corporate=True" in _insp.getsource(_cp.run))
+        check("заявка с сайта — нет",
+              "corporate=True" not in _insp.getsource(_nt.notify_whatsapp))
+    finally:
+        _wa.WhatsAppChannel = было_канал
+        for k, v in было_env.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+        _gs.cache_clear()
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -3253,10 +3431,14 @@ async def main() -> int:
 
     отправлено_наружу: list[tuple[str, str]] = []
 
-    async def _вместо_отправки(text: str, что: str) -> int:
+    async def _вместо_отправки(text: str, что: str, *, corporate: bool = False) -> int:
         отправлено_наружу.append((что, text))
         return 1
 
+    # Настоящую отправку сохраняем: раздел о ресепшене проверяет, КОМУ она
+    # пишет, и с подменой проверял бы саму подмену. Канал WhatsApp он при
+    # этом подменяет сам — наружу ничего не уходит.
+    _notify._tell_hotel_настоящий = _notify._tell_hotel
     _notify._tell_hotel = _вместо_отправки
 
     qa_time()
@@ -3278,6 +3460,8 @@ async def main() -> int:
     await qa_unpaid()
     await qa_schema()
     await qa_corp_pending()
+    await qa_memory_week()
+    await qa_reception_notify()
     await qa_knowledge()
 
     total = passed + len(failed)

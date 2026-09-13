@@ -25,7 +25,7 @@ from ..almaty import today as hotel_today
 from ..concierge import answer
 from ..db import SessionLocal
 from ..corp_guest import find_corporate
-from ..dialogs import load_history, save_turn
+from ..dialogs import last_message_at, load_history, pause_hours, save_turn
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
 from ..guest_messages import VOICE_NOT_SUPPORTED, render
@@ -70,6 +70,14 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
     """Обычная реплика гостя."""
     depth = max(0, settings.concierge_history_depth)
     history = await load_history(SessionLocal, CHANNEL, message.chat_id, depth)
+    # Сколько прошло с прошлой реплики. В самой истории дат нет, и после
+    # паузы в несколько дней модель называла цены на прошедшие даты как
+    # действующие. Сбой здесь не повод молчать гостю — тогда просто без паузы.
+    try:
+        пауза = pause_hours(
+            await last_message_at(SessionLocal, CHANNEL, message.chat_id))
+    except Exception:  # noqa: BLE001
+        пауза = None
 
     # У компании с договором свои цены. Раньше бот про договоры не знал и
     # называл прайс — сотрудник слышал одну цену в переписке и видел другую
@@ -90,7 +98,9 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
                # Сотрудник компании с договором. Узнаётся по телефону —
                # других мостиков нет, гость представляется не всегда.
                # None у обычного гостя, и тогда всё как раньше.
-               "corporate": корпоратив},
+               "corporate": корпоратив,
+               # Часы с прошлой реплики. None — разговор первый.
+               "pause_hours": пауза},
     )
 
     photos = reply.get("photos") or [] if reply["ok"] else []

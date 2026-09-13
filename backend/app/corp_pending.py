@@ -143,7 +143,8 @@ async def run(session: AsyncSession, settings: Any, *,
 
     from .notify import _tell_hotel
 
-    ушло = await _tell_hotel(текст, "брони, не занесённые в Exely")
+    # Напоминание — тоже ресепшену: заносить в шахматку будет он.
+    ушло = await _tell_hotel(текст, "брони, не занесённые в Exely", corporate=True)
     logger.info("Напоминание о %d незанесённых бронях, отправлено: %d",
                 len(брони), ушло)
     return {"pending": len(брони), "sent": ушло}

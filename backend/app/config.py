@@ -12,6 +12,27 @@ from .almaty import HOTEL_TZ
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _recipients(raw: str | None) -> list[str]:
+    """Номера (и группы WhatsApp) из строки через запятую.
+
+    Номер приводится к цифрам: «+7 (777) 531-00-09» и «77775310009» — один
+    получатель, дважды ему писать нельзя. Короче десяти цифр — опечатка:
+    слать туда нельзя, попадём в чужой чат. Id группы (…@g.us) оставляется
+    как есть.
+    """
+    out: list[str] = []
+    for item in (raw or "").replace(";", ",").split(","):
+        item = item.strip()
+        if item.endswith("@g.us"):
+            if item not in out:
+                out.append(item)
+            continue
+        digits = "".join(ch for ch in item if ch.isdigit())
+        if len(digits) >= 10 and digits not in out:
+            out.append(digits)
+    return out
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -226,6 +247,21 @@ class Settings(BaseSettings):
     # заезда успела пройти.
     lead_notify_phone: str = ""
 
+    # Дополнительные получатели ТОЛЬКО корпоративных уведомлений: новая
+    # заявка компании и напоминание «не занесено в Exely».
+    #
+    # Просьба отеля (2026-09-13): «чтобы наши с ресепшена видели и вносили
+    # сразу». Бронь компании заносит в шахматку ресепшен, а не владелец, и
+    # узнавать о ней он должен первым. Заявки с сайта, отмены и суммы к
+    # возврату сюда не идут: ресепшену они не нужны, а суммы возвратов —
+    # не то, что стоит рассылать шире необходимого.
+    #
+    # Добавляет получателей, а не заменяет: владелец свои уведомления
+    # получать не перестаёт. Номера через запятую; можно и id группы
+    # WhatsApp (…@g.us) — у группы, в отличие от чата с самим собой, есть
+    # звук и пуш у каждого участника.
+    corp_notify_phone: str = ""
+
     # Дублировать ли уведомления о бронях и отменах. По умолчанию НЕТ:
     # у Exely есть своё приложение, оно присылает их само, и второй канал
     # приучает владельца пролистывать сообщения не читая — вместе с теми,
@@ -258,15 +294,12 @@ class Settings(BaseSettings):
         на смене, и добавлять второго получателя правкой кода неправильно.
         Разделитель — запятая, лишние символы в номере не мешают.
         """
-        raw = (self.lead_notify_phone or "").replace(";", ",")
-        out: list[str] = []
-        for item in raw.split(","):
-            digits = "".join(ch for ch in item if ch.isdigit())
-            # Казахстанский номер — 11 цифр. Короче — это опечатка, и слать
-            # туда нельзя: попадём в чужой чат.
-            if len(digits) >= 10 and digits not in out:
-                out.append(digits)
-        return out
+        return _recipients(self.lead_notify_phone)
+
+    @property
+    def corp_notify_numbers(self) -> list[str]:
+        """Кому дополнительно слать корпоративные уведомления."""
+        return _recipients(self.corp_notify_phone)
 
     followup_after_hours: int = 2
     followup_final_hours: int = 24

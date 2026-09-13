@@ -57,12 +57,17 @@ async def notify_whatsapp(lead: Lead) -> None:
     await _tell_hotel("\n".join(lead_lines(lead)), f"заявка #{lead.id}")
 
 
-async def _tell_hotel(text: str, что: str) -> int:
+async def _tell_hotel(text: str, что: str, *, corporate: bool = False) -> int:
     """Отправить сообщение отелю в WhatsApp. Возвращает, скольким ушло.
 
     Получателей может быть несколько — владелец и менеджер на смене. Если не
     задан ни один, пишем на номер самого бота: чат «Сообщение для себя» есть
     всегда и не зависит от того, кто сегодня работает.
+
+    `corporate` — уведомление о брони компании. К обычным получателям тогда
+    добавляется ресепшен (`corp_notify_phone`): бронь компании заносит в
+    шахматку он. Кому что уходит, решается здесь, одним местом, а не у
+    каждого, кто зовёт эту функцию.
     """
     settings = get_settings()
     try:
@@ -88,10 +93,18 @@ async def _tell_hotel(text: str, что: str) -> int:
             return 0
         numbers = [own] if own else []
 
+    if corporate:
+        numbers = list(numbers)
+        for extra in settings.corp_notify_numbers:
+            if extra not in numbers:
+                numbers.append(extra)
+
     sent = 0
     for phone in numbers:
         try:
-            await channel.send(f"{phone}@c.us", for_whatsapp(text))
+            # Группа WhatsApp приходит готовым id (…@g.us), номер — цифрами.
+            chat = phone if "@" in phone else f"{phone}@c.us"
+            await channel.send(chat, for_whatsapp(text))
             sent += 1
         except WhatsAppError as error:
             # Один недоступный получатель не должен лишать уведомления
@@ -359,7 +372,8 @@ async def notify_corp_booking(booking_id: int) -> None:
     # настроен, и корпоративные заявки уходили в никуда: функция молча
     # выходила по первой же проверке. Отель читает WhatsApp — туда и пишем,
     # тем же способом, что лиды и отмены.
-    ушло = await _tell_hotel(текст, f"корпоративная заявка {booking.number}")
+    ушло = await _tell_hotel(текст, f"корпоративная заявка {booking.number}",
+                             corporate=True)
 
     # Telegram остаётся, если он всё-таки настроен: лишний канал для брони,
     # которую нужно занести руками, не мешает.

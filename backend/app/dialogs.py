@@ -14,8 +14,12 @@
 
 Не считаем разговор оконченным. У переписки нет кнопки «завершить», и попытка
 угадать конец («полчаса молчит — значит всё») чаще ошибается, чем помогает.
-Вместо этого — срок давности: реплики старше суток в новый запрос не
+Вместо этого — срок давности: реплики старше недели в новый запрос не
 подмешиваются, но из базы не исчезают.
+
+Длинная память опасна одним: в истории нет дат, и модель не знает, сколько
+прошло. Поэтому вместе с историей берётся время последней реплики, и после
+долгой паузы консьерж получает прямое предупреждение — см. `last_message_at`.
 """
 
 from __future__ import annotations
@@ -45,7 +49,21 @@ logger = logging.getLogger(__name__)
 #:
 #: Тормошить гостя дольше, чем помнишь его, нельзя. Число реплик при этом
 #: ограничено отдельно, так что длиннее память не значит дороже запрос.
-CONTINUES_FOR = timedelta(hours=72)
+#:
+#: Неделя — по просьбе отеля (2026-09-13): «бывают разные случаи». Гость
+#: спросил в понедельник, вернулся в пятницу — и не должен объяснять всё
+#: заново. Дожим при этом по-прежнему пишет только в первые трое суток:
+#: помнить дольше можно, тормошить дольше — нет.
+CONTINUES_FOR = timedelta(days=7)
+
+#: С какой паузы предупреждать консьержа, что разговор старый.
+#:
+#: Проверено 2026-09-13: история пятидневной давности, гость спрашивает
+#: «а сколько будет стоить?» — и бот 13 сентября называет цену «на 10–11
+#: сентября», то есть на прошедшие даты, в 2 случаях из 3. В истории нет дат,
+#: модель не знает, что прошли дни. Сутки — граница, после которой названные
+#: в разговоре даты, цены и наличие уже нельзя считать действующими.
+STALE_AFTER = timedelta(hours=24)
 
 
 async def load_history(
@@ -79,6 +97,44 @@ async def load_history(
         history.append({"role": row.role, "content": content})
 
     return _openable(history)
+
+
+async def last_message_at(
+    sessions: async_sessionmaker[AsyncSession],
+    channel: str,
+    chat_id: str,
+):
+    """Когда была последняя реплика в этом чате. None — переписки не было."""
+    async with sessions() as session:
+        row = (
+            await session.execute(
+                select(DialogMessage.created_at)
+                .where(
+                    DialogMessage.channel == channel,
+                    DialogMessage.chat_id == chat_id,
+                )
+                .order_by(DialogMessage.id.desc())
+                .limit(1)
+            )
+        ).scalar()
+    return row
+
+
+def pause_hours(last, now=None) -> float | None:
+    """Сколько часов прошло с последней реплики.
+
+    SQLite отдаёт время без часового пояса, Postgres — с ним, и вычитание
+    одного из другого падает. Пауза нужна для одного предупреждения, и
+    уронить из-за неё ответ гостю нельзя.
+    """
+    if last is None:
+        return None
+    from datetime import timezone
+
+    now = now or utcnow()
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - last).total_seconds() / 3600)
 
 
 def _blocks(message: dict[str, Any], kind: str) -> bool:
