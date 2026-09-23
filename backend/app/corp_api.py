@@ -52,6 +52,7 @@ from .schemas import (
     CorpBookingIn,
     CorpBookingItemOut,
     CorpBookingOut,
+    CorpBookingEnteredIn,
     CorpBookingStatusIn,
     CorpCancelIn,
     CorpLoginIn,

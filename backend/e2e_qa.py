@@ -3360,6 +3360,95 @@ async def qa_reception_notify() -> None:
         _gs.cache_clear()
 
 
+async def qa_annotations() -> None:
+    """Имена в аннотациях должны существовать — как на Python 3.12.
+
+    Раздел появился после суток простоя боевого сайта. В `corp_api.py`
+    обработчик объявлял `data: CorpBookingEnteredIn`, а импорта этой схемы
+    не было. Локально всё запускалось и 649 проверок проходили; на сервере
+    приложение не поднималось вовсе:
+
+        NameError: name 'CorpBookingEnteredIn' is not defined
+
+    Разница в версии Python. Локально стоит 3.14, где аннотации вычисляются
+    лениво (PEP 649) — несуществующее имя в аннотации не всплывает никогда.
+    Vercel собирает на 3.12, где аннотация вычисляется сразу, при объявлении
+    функции. То есть запуск на своей машине этот класс ошибок физически не
+    ловит, и никакая внимательность тут не помогает.
+
+    `get_type_hints` вычисляет аннотации принудительно и на 3.14 — это и
+    есть поведение 3.12. Проверяются все обработчики маршрутов: именно их
+    FastAPI разбирает при старте, и именно там падение убивает весь сервис.
+    """
+    head("Имена в аннотациях")
+
+    import typing as _t  # noqa: PLC0415
+
+    import app.main as _main  # noqa: PLC0415
+
+    поломки: list[str] = []
+    обработчики: list[tuple[str, object]] = []
+
+    def обойти(маршруты) -> None:
+        """Вглубь: подключённые роутеры лежат вложенными объектами.
+
+        Сначала здесь был простой перебор `app.routes` — и он проверял 15
+        маршрутов из main.py, а весь корпоративный кабинет пропускал. То
+        есть ровно то место, где сломалось, проверка и не видела.
+        """
+        for маршрут in маршруты or []:
+            # FastAPI 0.141 хранит подключённый роутер объектом
+            # `_IncludedRouter`, и сами маршруты лежат в `original_router`,
+            # а не в `routes`. Учитываем оба вида, чтобы проверка не
+            # развалилась молча на следующей версии.
+            вложенные = getattr(маршрут, "routes", None)
+            внутренний = getattr(маршрут, "original_router", None)
+            if вложенные is None and внутренний is not None:
+                вложенные = getattr(внутренний, "routes", None)
+            if вложенные:
+                обойти(вложенные)
+                continue
+            обработчик = getattr(маршрут, "endpoint", None)
+            if обработчик is not None:
+                обработчики.append((getattr(маршрут, "path", "?"), обработчик))
+
+    обойти(_main.app.routes)
+    for путь, обработчик in обработчики:
+        try:
+            _t.get_type_hints(обработчик)
+        except Exception as error:  # noqa: BLE001
+            поломки.append(f"{путь}: {error}")
+
+    сколько = len(обработчики)
+    пути = {путь for путь, _ in обработчики}
+    check("обработчиков для проверки хватает", сколько > 40, str(сколько))
+    # Именно корпоративный кабинет и уронил боевой: если его тут нет,
+    # проверка бесполезна.
+    check("корпоративный кабинет попал в проверку",
+          any("/corp" in путь for путь in пути), str(сколько))
+    check("во всех аннотациях обработчиков имена существуют",
+          not поломки, "; ".join(поломки[:3]))
+
+    # Те же грабли ждут в моделях Pydantic: там аннотации разбирает сам
+    # pydantic, и несуществующее имя роняет импорт модуля.
+    from pydantic import BaseModel as _BM  # noqa: PLC0415
+
+    import app.schemas as _sch  # noqa: PLC0415
+
+    кривые: list[str] = []
+    моделей = 0
+    for имя in dir(_sch):
+        значение = getattr(_sch, имя)
+        if isinstance(значение, type) and issubclass(значение, _BM) and значение is not _BM:
+            моделей += 1
+            try:
+                _t.get_type_hints(значение)
+            except Exception as error:  # noqa: BLE001
+                кривые.append(f"{имя}: {error}")
+    check("моделей для проверки хватает", моделей > 10, str(моделей))
+    check("во всех схемах имена существуют", not кривые, "; ".join(кривые[:3]))
+
+
 async def qa_knowledge() -> None:
     head("Справка об отеле")
 
@@ -3462,6 +3551,7 @@ async def main() -> int:
     await qa_corp_pending()
     await qa_memory_week()
     await qa_reception_notify()
+    await qa_annotations()
     await qa_knowledge()
 
     total = passed + len(failed)
