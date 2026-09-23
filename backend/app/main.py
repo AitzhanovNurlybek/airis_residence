@@ -214,6 +214,11 @@ async def health():
         "admin_configured": settings.admin_configured,
         "payments_configured": settings.payment_configured,
         "telegram_configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        # Уходят ли корпоративные заявки ещё и ресепшену. Только признак,
+        # без самого номера: телефон сотрудника наружу отдавать незачем, а
+        # проверить настройку иначе нечем — переменные окружения снаружи не
+        # видны, и «я вписал» против «оно работает» проверяется только так.
+        "corp_notify_configured": bool(settings.corp_notify_numbers),
     }
 
 
