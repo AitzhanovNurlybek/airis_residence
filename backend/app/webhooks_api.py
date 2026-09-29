@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -170,6 +171,67 @@ def _kind(payload: dict[str, Any], request: Request) -> str:
             return value.split(":")[-1][:60] if ":" in value else value[:60]
     # Иные отправители кладут тип события в заголовок, а не в тело.
     return (request.headers.get("x-event-type") or "unknown")[:60]
+
+
+#: Сколько раз пробовать отправить ответ гостю.
+#:
+#: Одна попытка обходилась дорого. 2026-09-28 гость написал дважды, бот оба
+#: раза разобрался и сочинил ответ — в истории они лежат, — но WhatsApp их не
+#: принял, и обе реплики молча пропали. Гость сутки ждал, отель ничего не
+#: заметил, а узнали мы об этом от заказчика по скриншоту.
+ПОПЫТОК_ОТПРАВКИ = 3
+
+
+async def _отправить_с_повтором(channel, chat_id: str, текст: str) -> str:
+    """Отправить ответ, пробуя несколько раз. Возвращает "" или причину сбоя.
+
+    Сбои отправки почти всегда мгновенные и проходящие: перезагрузка
+    инстанса, секундная недоступность WhatsApp. Пауза между попытками
+    растёт, чтобы не долбить сервис, который и так споткнулся.
+    """
+    последняя = ""
+    for попытка in range(1, ПОПЫТОК_ОТПРАВКИ + 1):
+        try:
+            await channel.send(chat_id, текст)
+            if попытка > 1:
+                logger.info("Ответ ушёл с %d-й попытки", попытка)
+            return ""
+        except WhatsAppError as error:
+            последняя = str(error)
+            logger.warning("Ответ не ушёл (попытка %d из %d): %s",
+                           попытка, ПОПЫТОК_ОТПРАВКИ, error)
+            if попытка < ПОПЫТОК_ОТПРАВКИ:
+                await asyncio.sleep(1.5 * попытка)
+    return последняя or "неизвестная ошибка"
+
+
+async def _сказать_отелю_что_ответ_не_ушёл(
+    телефон: str, вопрос: str, ответ: str, причина: str
+) -> None:
+    """Сообщить отелю, что гость остался без ответа.
+
+    Молчание здесь — худший исход: гость ждёт, отель не знает, и всё
+    выясняется через сутки. Отправляем тем же каналом, и если он тоже
+    недоступен — это уже видно всем, а не только гостю.
+    """
+    from .notify import _tell_hotel
+
+    текст = "\n".join([
+        "🔴 Гость написал, а ответ НЕ УШЁЛ",
+        "",
+        f"Гость: +{телефон}",
+        f"Спросил: {вопрос[:300]}",
+        "",
+        f"Причина сбоя: {причина[:200]}",
+        "",
+        "Ответьте гостю вручную — бот подготовил вот это:",
+        "",
+        ответ[:1200],
+    ])
+    try:
+        await _tell_hotel(текст, "ответ гостю не доставлен")
+    except Exception as error:  # noqa: BLE001
+        logger.error("Не удалось сообщить отелю о недоставленном ответе: %s", error)
 
 
 @router.post("/exely")
@@ -371,11 +433,14 @@ async def whatsapp_webhook(
         logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
         reply = Reply(FALLBACK)
 
-    try:
-        await channel.send(message.chat_id, for_whatsapp(reply.text))
-    except WhatsAppError as error:
-        logger.warning("Вебхук WhatsApp: ответ не ушёл: %s", error)
-        return {"ok": False, "error": "send failed"}
+    причина = await _отправить_с_повтором(
+        channel, message.chat_id, for_whatsapp(reply.text))
+    if причина:
+        logger.error("Вебхук WhatsApp: ответ гостю %s не доставлен: %s",
+                     message.phone, причина)
+        await _сказать_отелю_что_ответ_не_ушёл(
+            message.phone, message.text or "", reply.text, причина)
+        return {"ok": False, "error": "send failed", "reason": причина}
 
     # Снимки идут после текста и по одному. Сбой на картинке не должен
     # выглядеть как сбой ответа: текст гость уже получил, и обрывать
