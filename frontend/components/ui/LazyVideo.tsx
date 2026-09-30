@@ -61,7 +61,10 @@ export function LazyVideo({
             <div className="aspect-video w-full min-w-[min(100%,40rem)] bg-ink-900" />
           )}
 
-          <span className="absolute inset-0 bg-ink-950/40 transition-colors group-hover:bg-ink-950/25" />
+          {/* Затемнение лёгкое: кнопку и так видно по кругу с подложкой, а
+              при 40% кадр кухни с деревянной стеной выглядел мутным, будто
+              снят не в фокусе. */}
+          <span className="absolute inset-0 bg-ink-950/15 transition-colors group-hover:bg-ink-950/5" />
           <span className="absolute inset-0 grid place-items-center">
             <span className="grid h-20 w-20 place-items-center rounded-full border border-sand-200/40 bg-ink-950/60 backdrop-blur-sm transition-transform duration-300 can-hover:group-hover:scale-110">
               <svg viewBox="0 0 24 24" className="ml-1 h-7 w-7 fill-sand-200" aria-hidden>

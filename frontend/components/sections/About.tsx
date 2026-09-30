@@ -32,7 +32,7 @@ function CheckTimes({ floating = false }: { floating?: boolean }) {
       className={
         floating
           ? "glass absolute bottom-[8%] left-[2%] rounded-2xl px-5 py-4 shadow-lift"
-          : "glass mt-4 flex items-center justify-around rounded-2xl px-5 py-4"
+          : "glass flex items-center justify-around rounded-2xl px-5 py-4 md:mt-4"
       }
     >
       <div className={floating ? "" : "text-center"}>
@@ -80,9 +80,12 @@ export function About() {
         />
 
         <div ref={ref} className="mt-12 grid items-center gap-10 md:mt-16 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
-          {/* Телефон и планшет: простая сетка из двух фото — читается сразу */}
+          {/* Планшет: простая сетка из двух фото — читается сразу. На
+              телефоне фото нет: блок стоит сразу под номерами, где
+              фотографий уже пять, и без них он короче почти на экран.
+              Остаётся время заезда и выезда — его ищут. */}
           <div className="lg:hidden">
-            <div className="grid grid-cols-5 gap-3">
+            <div className="hidden grid-cols-5 gap-3 md:grid">
               <div className="relative col-span-3 aspect-3/4 overflow-hidden rounded-card shadow-lift">
                 <Image
                   src="/images/rooms/standart/01.jpg"

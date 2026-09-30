@@ -1,4 +1,4 @@
-import { nearby, site } from "@/lib/site";
+import { eventVenues, nearby, site } from "@/lib/site";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { AirportRoutes } from "@/components/sections/AirportRoutes";
 import { Reveal } from "@/components/ui/Reveal";
@@ -8,9 +8,32 @@ import { IconClock, IconMail, IconPhone, IconPin } from "@/components/ui/Icons";
  * Карта грузится статичным iframe без API-ключа.
  * Адрес и телефоны дублируются текстом рядом с картой — это то,
  * что читают поисковики и что попадает в локальную выдачу.
+ *
+ * Карт две, и это не случайность. Встроенная карта Google подписывает
+ * вокруг булавки чужие гостиницы: на сайте отеля гость видел Rixos,
+ * Казжол и Holiday Inn в двух кварталах от безымянной красной точки.
+ * У 2ГИС вместо этого открыта карточка самого отеля — телефон,
+ * «Круглосуточно», фотографии, «Путь сюда», и в Алматы это привычная
+ * карта. Но карточка шире телефона, обрезается справа вместе с кнопкой
+ * закрытия, поэтому на телефоне остаётся Google — приближенный так, что
+ * соседние гостиницы в кадр не попадают. Ленивый iframe в скрытом блоке
+ * не грузится, так что лишнего трафика нет.
+ *
+ * `withEvents` — на главной, где под этим блоком идут площадки событий:
+ * тогда стадион и театр не повторяются здесь во второй раз.
  */
-export function Location() {
-  const mapSrc = `https://maps.google.com/maps?q=${site.address.lat},${site.address.lng}&z=16&output=embed&hl=ru`;
+export function Location({ withEvents = false }: { withEvents?: boolean }) {
+  const googleSrc = `https://maps.google.com/maps?q=${site.address.lat},${site.address.lng}&z=17&output=embed&hl=ru`;
+  const twoGisOptions = {
+    pos: { lat: site.address.lat, lon: site.address.lng, zoom: 16 },
+    opt: { city: "almaty" },
+    org: site.address.twoGisFirmId,
+  };
+  const twoGisSrc = `https://widgets.2gis.com/widget?type=firmsonmap&options=${encodeURIComponent(JSON.stringify(twoGisOptions))}`;
+  const mapTitle = `Карта: ${site.name}, ${site.address.full}`;
+
+  const venues = new Set<string>(eventVenues.map((venue) => venue.name));
+  const places = withEvents ? nearby.filter((place) => !venues.has(place.name)) : nearby;
 
   return (
     <section id="raspolozhenie" className="relative scroll-mt-24 py-20 md:py-32">
@@ -25,12 +48,19 @@ export function Location() {
           <Reveal className="order-2 lg:order-1">
             <div className="h-full overflow-hidden rounded-card border border-white/10 shadow-deep">
               <iframe
-                src={mapSrc}
-                title={`Карта: ${site.name}, ${site.address.full}`}
-                className="h-[22rem] w-full lg:h-full lg:min-h-[28rem]"
+                src={googleSrc}
+                title={mapTitle}
+                className="h-[22rem] w-full lg:hidden"
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
                 style={{ border: 0, filter: "grayscale(0.35) contrast(1.05)" }}
+              />
+              <iframe
+                src={twoGisSrc}
+                title={mapTitle}
+                className="hidden h-full min-h-[28rem] w-full lg:block"
+                loading="lazy"
+                style={{ border: 0 }}
               />
             </div>
           </Reveal>
@@ -89,7 +119,7 @@ export function Location() {
               <div>
                 <h3 className="eyebrow">Рядом с отелем</h3>
                 <ul className="mt-5 divide-y divide-white/8">
-                  {nearby.map((place) => (
+                  {places.map((place) => (
                     <li
                       key={place.name}
                       className="flex items-baseline justify-between gap-6 py-3.5 text-sm"
