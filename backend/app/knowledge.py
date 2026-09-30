@@ -77,6 +77,20 @@ def _guests(count: Any) -> str:
     return "гостей"
 
 
+def _airport_path(steps: list) -> str:
+    """Шаги маршрута из аэропорта одной строкой: «пешком 6 мин → автобус 96 → …»."""
+    части = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("kind") == "walk":
+            части.append(f"пешком {step.get('minutes')} мин")
+        elif step.get("kind") in ("bus", "trolley"):
+            что = "автобус" if step.get("kind") == "bus" else "троллейбус"
+            части.append(f"{что} {' или '.join(str(x) for x in step.get('lines') or [])}")
+    return " → ".join(части)
+
+
 def render_brief(facts: dict[str, Any]) -> str:
     """
     Факты в виде текста для модели.
@@ -156,6 +170,31 @@ def render_brief(facts: dict[str, Any]) -> str:
         f"{n.get('name')} — {n.get('distance')}" + (f", {n.get('walk')} пешком" if n.get("walk") else "")
         for n in facts.get("nearby", [])
     ))
+
+    # Как добраться из аэропорта. Спрашивают до прилёта, часто иностранцы, и
+    # ответ должен совпадать с блоком на сайте: турист сверит одно с другим.
+    # Маршруты — не выдумка модели, а то, что 2ГИС строит до адреса отеля.
+    airport = facts.get("airport") or {}
+    if airport.get("options"):
+        add("")
+        add(f"КАК ДОБРАТЬСЯ ИЗ АЭРОПОРТА ({airport.get('distance', '')}, "
+            f"по данным 2ГИС на {airport.get('checked', '')}):")
+        for option in airport["options"]:
+            add(f"- {option.get('title')}: {option.get('time')}, {option.get('price')}. "
+                f"{option.get('note')}")
+            путь = _airport_path(option.get("steps") or [])
+            if путь:
+                add(f"  Путь: {путь}.")
+        if airport.get("payment"):
+            add(f"Оплата проезда: {airport['payment']}")
+        if airport.get("routeGoogle"):
+            add(f"Точный маршрут с расписанием на сегодня — по ссылке: {airport['routeGoogle']}")
+        add("Время и интервалы примерные — так и говори гостю. Автобус 92 из "
+            "аэропорта не советуй: он популярный, но до отеля 2ГИС его не предлагает.")
+        add("Названий остановок и мест пересадки в этих данных НЕТ — не называй их "
+            "сам, ни метро, ни улицы: турист пойдёт искать то, чего нет. Где выйти и "
+            "где пересесть, покажет маршрут по ссылке выше — дай её. И не говори "
+            "«прямо до отеля»: после автобуса ещё идти пешком, минуты указаны в пути.")
 
     venues = facts.get("eventVenues", [])
     if venues:

@@ -89,7 +89,7 @@ export function Rooms({ rooms = fallbackRooms }: { rooms?: Room[] }) {
           title={
             <>
               {rooms.length} {typesWord(rooms.length)} номеров —
-              <br className="hidden md:block" /> от компактного до люкса
+              <br className="hidden md:block" /> от компактного до просторного Comfort Plus
             </>
           }
           description="Все номера с кондиционером, сейфом, мини-баром и собственной ванной комнатой. Завтрак включён в стоимость любого тарифа."

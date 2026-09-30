@@ -140,6 +140,44 @@ export const IconCube = (p: P) => (
   </svg>
 );
 
+export const IconPlane = (p: P) => (
+  <svg {...base} aria-hidden {...p}>
+    <path d="M10.5 13.5 4 11l1.2-1.6 7.3.9 3.9-4.6a1.8 1.8 0 0 1 2.6 2.4L15 12.1l.9 7.3-1.6 1.2-2.5-6.5-3.4 2.8.3 2.1-1.2.9-1.4-3-3-1.4.9-1.2 2.1.3Z" />
+  </svg>
+);
+
+export const IconBus = (p: P) => (
+  <svg {...base} aria-hidden {...p}>
+    <rect x="5" y="3.5" width="14" height="14" rx="2.5" />
+    <path d="M5 11h14M9 3.5v7.5" />
+    <path d="M7.5 17.5v2M16.5 17.5v2" />
+    <circle cx="8.5" cy="14.3" r="0.9" />
+    <circle cx="15.5" cy="14.3" r="0.9" />
+  </svg>
+);
+
+export const IconTrolley = (p: P) => (
+  <svg {...base} aria-hidden {...p}>
+    <path d="M9 2.5 11 6M15 2.5 13 6" />
+    <rect x="5" y="6" width="14" height="12" rx="2.5" />
+    <path d="M5 12h14" />
+    <path d="M7.5 18v2M16.5 18v2" />
+  </svg>
+);
+
+export const IconWalk = (p: P) => (
+  <svg {...base} aria-hidden {...p}>
+    <circle cx="13" cy="4.5" r="1.6" />
+    <path d="m9.5 21 2-6 2.5 2v4M11.5 15l1-5 3 3h2.5M12.5 10 9 11.5 8 14.5" />
+  </svg>
+);
+
+export const IconMoon = (p: P) => (
+  <svg {...base} aria-hidden {...p}>
+    <path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10Z" />
+  </svg>
+);
+
 export const amenityIcons: Record<string, (p: P) => React.ReactElement> = {
   breakfast: IconBreakfast,
   reception: IconReception,

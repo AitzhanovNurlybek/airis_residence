@@ -1,5 +1,6 @@
 import { nearby, site } from "@/lib/site";
 import { SectionHead } from "@/components/ui/SectionHead";
+import { AirportRoutes } from "@/components/sections/AirportRoutes";
 import { Reveal } from "@/components/ui/Reveal";
 import { IconClock, IconMail, IconPhone, IconPin } from "@/components/ui/Icons";
 
@@ -107,6 +108,8 @@ export function Location() {
             </Reveal>
           </div>
         </div>
+
+        <AirportRoutes />
       </div>
     </section>
   );

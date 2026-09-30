@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { faqItems } from "@/lib/faq";
 import { getRoomsWithSource } from "@/lib/rooms";
-import { amenities, eventVenues, nearby, site } from "@/lib/site";
+import { airport, amenities, eventVenues, nearby, site } from "@/lib/site";
 
 /**
  * Машиночитаемая выжимка всего, что отель рассказывает о себе.
@@ -92,6 +92,25 @@ export async function GET() {
 
     amenities: amenities.map(({ title, note }) => ({ title, note })),
     nearby,
+    // Как добраться из аэропорта. Консьержа спрашивают об этом до прилёта,
+    // и отвечать он должен тем же, что написано на сайте, а не по памяти.
+    airport: {
+      name: airport.name,
+      distance: airport.distance,
+      checked: airport.checked,
+      // Шаги маршрута отдаём целиком. Без них консьерж дорисовывал путь сам и
+      // однажды отправил туриста пересаживаться «у метро Байконур» — такой
+      // пересадки в маршруте нет.
+      options: airport.options.map(({ title, time, price, note, steps }) => ({
+        title,
+        time,
+        price,
+        note,
+        steps: steps ?? [],
+      })),
+      payment: airport.payment,
+      routeGoogle: airport.routeGoogle,
+    },
     eventVenues,
     faq: faqItems,
 
