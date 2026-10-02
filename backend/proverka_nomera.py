@@ -14,7 +14,8 @@
     ./.venv/Scripts/python.exe proverka_nomera.py
 
 Ничего не меняет и гостям не пишет: тестовое сообщение отправляется от имени
-несуществующего номера, а ответ на него никуда не уходит.
+несуществующего номера, а ответ на него никуда не уходит. Тревогу «ответ не
+ушёл» по этому номеру вебхук в отель не шлёт.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import httpx
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 from app.config import get_settings  # noqa: E402
+from app.webhooks_api import ПРОВЕРОЧНЫЙ_НОМЕР  # noqa: E402
 
 #: Куда Green API обязан стучаться. Совпадение проверяется по началу строки:
 #: ключ в адресе у каждого свой, и сравнивать его незачем.
@@ -36,7 +38,9 @@ EXPECTED_WEBHOOK = "https://airisresidence.kz/api/backend/api/webhooks/whatsapp"
 
 #: Номер, от имени которого идёт проверка. Несуществующий: ответ на него
 #: Green API отправить не сможет, и живого человека мы не потревожим.
-TEST_CHAT = "70000000000@c.us"
+#: Берётся из вебхука, а не пишется здесь второй раз: по этому номеру вебхук
+#: не поднимает тревогу в отеле, и расходиться им нельзя.
+TEST_CHAT = f"{ПРОВЕРОЧНЫЙ_НОМЕР}@c.us"
 
 ok_count = 0
 problems: list[str] = []
