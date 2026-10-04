@@ -2,15 +2,13 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-type Language = "ru" | "kk" | "en";
+import { applyLanguageFromUrl, saveLanguage, savedLanguage, type Language } from "@/lib/language";
 
 const languages: { code: Language; label: string; title: string }[] = [
   { code: "ru", label: "RU", title: "Русский" },
   { code: "kk", label: "KZ", title: "Қазақша" },
   { code: "en", label: "EN", title: "English" },
 ];
-
-const languageStorageKey = "airis-language";
 
 declare global {
   interface Window {
@@ -26,32 +24,6 @@ declare global {
   }
 }
 
-function readLanguageCookie(): Language {
-  if (typeof window === "undefined" || typeof document === "undefined") return "ru";
-
-  const savedLanguage = window.localStorage.getItem(languageStorageKey);
-  if (savedLanguage === "kk" || savedLanguage === "en" || savedLanguage === "ru") {
-    return savedLanguage;
-  }
-
-  const cookie = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("googtrans="))
-    ?.split("=")[1];
-
-  const language = cookie?.split("/").filter(Boolean).at(-1);
-  return language === "kk" || language === "en" ? language : "ru";
-}
-
-function setTranslateCookie(language: Language) {
-  const value = language === "ru" ? "/ru/ru" : `/ru/${language}`;
-  const expires = "expires=Fri, 31 Dec 9999 23:59:59 GMT";
-
-  window.localStorage.setItem(languageStorageKey, language);
-  document.cookie = `googtrans=${value}; ${expires}; path=/`;
-  document.cookie = `googtrans=${value}; ${expires}; path=/; domain=.${window.location.hostname}`;
-}
-
 function subscribeToLanguageChange(onStoreChange: () => void) {
   window.addEventListener("storage", onStoreChange);
   return () => window.removeEventListener("storage", onStoreChange);
@@ -64,7 +36,7 @@ export function LanguageSwitcher({
   className?: string;
   withGoogleElement?: boolean;
 }) {
-  const activeLanguage = useSyncExternalStore(subscribeToLanguageChange, readLanguageCookie, () => "ru");
+  const activeLanguage = useSyncExternalStore(subscribeToLanguageChange, savedLanguage, () => "ru");
 
   const buttonClasses = useMemo(
     () =>
@@ -73,6 +45,17 @@ export function LanguageSwitcher({
   );
 
   useEffect(() => {
+    // Ссылка из WhatsApp-бота: ?lang=en — гость пишет по-английски. Язык
+    // ставим до загрузки переводчика: он читает куку при старте, и страница
+    // переводится сразу, без перезагрузки. Делает это один экземпляр — тот,
+    // что держит элемент переводчика, — иначе два переключателя в шапке
+    // сделали бы одно и то же дважды.
+    if (withGoogleElement && applyLanguageFromUrl()) {
+      // Кнопки RU/KZ/EN перечитают язык: событие storage в своей вкладке
+      // само не приходит.
+      window.dispatchEvent(new StorageEvent("storage"));
+    }
+
     window.googleTranslateElementInit = () => {
       if (!window.google?.translate?.TranslateElement) return;
 
@@ -94,10 +77,18 @@ export function LanguageSwitcher({
     script.src = "//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
     script.async = true;
     document.body.appendChild(script);
-  }, []);
+  }, [withGoogleElement]);
 
   const changeLanguage = (language: Language) => {
-    setTranslateCookie(language);
+    saveLanguage(language);
+    // Если страница открыта по ссылке с ?lang=, убираем его: иначе после
+    // перезагрузки адрес снова выставил бы язык из ссылки, а не выбранный.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("lang")) {
+      url.searchParams.delete("lang");
+      window.location.replace(url.toString());
+      return;
+    }
     window.location.reload();
   };
 

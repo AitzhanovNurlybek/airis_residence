@@ -77,6 +77,47 @@ RATE_PLANS: dict[str, tuple[str, bool]] = {
 CODES: dict[str, str] = {slug: code for code, slug in ROOM_TYPES.items()}
 
 
+#: Самое длинное проживание, которое кладём в ссылку. Дальше — разговор со
+#: стойкой о долгом проживании, а не бронь в два клика, и форму на такой
+#: срок мы не проверяли.
+MAX_NIGHTS = 30
+
+#: Языки, на которых сайт открывается по ссылке (`?lang=`): на них переводит
+#: переключатель сайта, и на них же запускается форма Exely.
+LANGUAGES = ("ru", "kk", "en")
+
+
+def _as_date(value: date | str | None) -> date | None:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def stay_for_link(
+    check_in: date | str | None, check_out: date | str | None, today: date
+) -> tuple[date | None, int, str]:
+    """Даты, которые можно положить в ссылку: (заезд, ночей, почему нельзя).
+
+    Прошедшую дату, выезд не позже заезда и слишком долгий срок в ссылку не
+    кладём: форма открылась бы на чужих датах, а гость, увидев уже
+    заполненное поле, их не перепроверит.
+    """
+    start, end = _as_date(check_in), _as_date(check_out)
+    if not start or not end:
+        return None, 0, "даты не названы"
+    if start < today:
+        return None, 0, "дата заезда уже прошла"
+    nights = (end - start).days
+    if nights <= 0:
+        return None, 0, "выезд не позже заезда"
+    if nights > MAX_NIGHTS:
+        return None, 0, f"больше {MAX_NIGHTS} ночей"
+    return start, nights, ""
+
+
 def booking_form_url(
     site_url: str,
     *,
@@ -84,38 +125,57 @@ def booking_form_url(
     check_in: date | str | None = None,
     check_out: date | str | None = None,
     guests: int = 0,
+    children_ages: list[int] | tuple[int, ...] = (),
+    lang: str = "",
+    today: date | None = None,
 ) -> str:
-    """Ссылка на страницу /booking с выбранной категорией.
+    """Ссылка на страницу /booking, где форма открывается уже заполненной.
 
     Бронь через API Exely создать нельзя — такого метода нет вовсе (см.
     docs/EXELY_API.md). Единственный способ довести гостя до брони — форма
     Exely на нашей же странице. Консьерж присылает ссылку, гость подтверждает
     сам.
 
-    **Даты в ссылку не кладём, и это осознанно.** Виджет Exely читает из
-    адреса только `room-type` — на нём построены кнопки «Забронировать» на
-    страницах номеров. Имена `checkin`/`checkout` он игнорирует: проверено на
-    живой брони 2026-08-28, гость получил ссылку на 1–2 сентября, а форма
-    открылась на сегодня-завтра. Перепробованы `checkIn`, `dateFrom`,
-    `arrivalDate` — виджет не реагирует ни на одно написание.
+    **Как виджет читает адрес.** Проверено на живой форме 2026-10-05: виджет
+    переносит параметры со страницы во встроенную форму (`room-type` у него
+    внутри становится `roomTypes`), и форма открывается на этих значениях:
+    `date` — день заезда, `nights` — сколько ночей, `adults` — взрослых,
+    `children` — возраст детей через запятую. `?date=2026-10-20&nights=2&
+    adults=1` показал в форме «20 октября — 22 октября, 2 ночи, 1 гость».
 
-    Класть даты, которые не подставляются, — хуже, чем не класть вовсе: гость
-    видит в форме уже заполненные ЧУЖИЕ даты (по умолчанию сегодняшние) и
-    может забронировать не тот период, не заметив подмены. Поэтому даты
-    консьерж называет словами в самом сообщении, а гость выбирает их в форме
-    сам.
+    В августе 2026 решили, что даты виджет не читает вовсе: перебрали
+    `checkin`, `checkIn`, `dateFrom`, `arrivalDate` — а пару `date`+`nights`
+    из движка TravelLine, на котором стоит Exely, не попробовали. Почти два
+    месяца гость получал ссылку на сегодняшние даты и выставлял свои руками.
 
-    Аргументы `check_in`/`check_out`/`guests` оставлены в сигнатуре: они
-    осмысленны и понадобятся, если Exely когда-нибудь научит виджет их
-    читать. Сейчас не используются намеренно.
+    `lang` читает уже наш сайт, не виджет: переключает перевод страницы и
+    запускает форму Exely на этом языке (см. frontend/lib/language.ts).
+    Тариф через адрес не передаётся — `rate-plan` виджет игнорирует, его гость
+    выбирает в форме сам.
     """
     params: list[tuple[str, str]] = []
     code = CODES.get(room_slug, "")
     if code:
         params.append(("room-type", code))
 
+    if today is None:
+        from ..almaty import today as hotel_today  # noqa: PLC0415
+
+        today = hotel_today()
+    start, nights, _ = stay_for_link(check_in, check_out, today)
+    if start:
+        params += [("date", start.isoformat()), ("nights", str(nights))]
+
+    if 1 <= int(guests or 0) <= 10:
+        params.append(("adults", str(int(guests))))
+    ages = [int(a) for a in children_ages or () if str(a).strip().isdigit() and 0 <= int(a) <= 17]
+    if ages:
+        params.append(("children", ",".join(str(a) for a in ages)))
+    if lang in LANGUAGES:
+        params.append(("lang", lang))
+
     base = site_url.rstrip("/") + "/booking"
-    return f"{base}?{urlencode(params)}" if params else base
+    return f"{base}?{urlencode(params, safe=',')}" if params else base
 
 
 NAMES: dict[str, str] = {

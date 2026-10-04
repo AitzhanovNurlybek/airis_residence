@@ -221,6 +221,28 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
     await _tell_hotel("\n".join(lines), f"бронь {number}")
 
 
+async def notify_front_desk(*, request: str, room: str = "", guest: str = "",
+                            phone: str = "", urgent: bool = False) -> int:
+    """Просьба живущего гостя, которую выполнить может только сотрудник.
+
+    2026-10-04 гость из номера 105 попросил утром переехать в другой номер.
+    Бот ответил вежливо и пообещал, что «стойка всё подтвердит», — а стойка
+    ничего не узнала: передать просьбу, кроме отмены брони, было нечем.
+    Обещание, которое никто не выполнит, хуже честного «позвоните».
+    """
+    lines = ["🛎 Просьба гостя — нужен сотрудник", ""]
+    кто = ", ".join(x for x in (guest, phone) if x)
+    if кто:
+        lines.append(f"Гость: {кто}")
+    if room:
+        lines.append(f"Живёт в номере: {room}")
+    lines.append(f"Просьба: {request}")
+    if urgent:
+        lines.append("Срочно: нужно сегодня")
+    lines += ["", "Свяжитесь с гостем или подойдите в номер — бот этого сделать не может."]
+    return await _tell_hotel("\n".join(lines), "просьба гостя")
+
+
 async def notify_cancel_request(*, ref: str = "", guest: str = "", phone: str = "",
                                 dates: str = "", reason: str = "") -> int:
     """Просьба гостя отменить бронь — отелю, немедленно.

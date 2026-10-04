@@ -3,18 +3,21 @@
 import {useEffect, useRef} from "react";
 import { usePathname } from 'next/navigation';
 import './be-style.css';
+import { bookingEngineLanguage } from "@/lib/language";
 
 export function BeBookingForm() {
     const pathname = usePathname();
     const containerRef = useRef<HTMLDivElement>(null);
-    const observerRef = useRef<MutationObserver>(null);
 
     const initBookingForm = () => {
         if (containerRef.current) {
             containerRef.current.innerHTML = '';
         }
 
-        const beLang = document.documentElement.getAttribute("lang");
+        // Язык — из адреса (?lang= в ссылке бота) или сохранённого выбора, а не
+        // из <html lang>: переводчик меняет атрибут уже после запуска виджета,
+        // а повторный запуск виджет игнорирует. См. lib/language.ts.
+        const beLang = bookingEngineLanguage();
 
         /* eslint-disable */
         // @ts-ignore
@@ -41,23 +44,14 @@ export function BeBookingForm() {
     };
 
     useEffect(() => {
+        // Язык меняется только перезагрузкой страницы (переключатель RU/KZ/EN
+        // перезагружает), поэтому следить за <html lang> незачем: раньше на
+        // его смену форма перезапускалась — и всё равно оставалась русской.
         initBookingForm();
 
-        const targetNode = document.documentElement;
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.attributeName === "lang") {
-                    initBookingForm();
-                }
-            });
-        });
-
-        observer.observe(targetNode, { attributes: true, attributeFilter: ["lang"] });
-        observerRef.current = observer;
-
+        const container = containerRef.current;
         return () => {
-            observer.disconnect();
-            if (containerRef.current) containerRef.current.innerHTML = '';
+            if (container) container.innerHTML = '';
         };
     }, [pathname]);
 

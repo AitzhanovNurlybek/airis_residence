@@ -358,7 +358,8 @@ async def qa_tools() -> None:
     head("Инструменты консьержа")
 
     names = {t["name"] for t in FULL_TOOLS}
-    check("полный набор — пять инструментов", len(FULL_TOOLS) == 5, str(len(FULL_TOOLS)))
+    # Пять своих для шахматки плюс просьба на стойку — она нужна в любом режиме.
+    check("полный набор — шесть инструментов", len(FULL_TOOLS) == 6, str(len(FULL_TOOLS)))
     check("есть проверка наличия", "check_availability" in names)
 
     # Одноместный номер Exely показывает ТОЛЬКО при запросе на одного гостя.
@@ -613,7 +614,7 @@ async def qa_tools() -> None:
     ):
         given = {t["name"] for t in tools}
         for name in ("room_page", "check_availability", "booking_link", "create_booking",
-                     "find_booking", "change_booking", "cancel_booking"):
+                     "find_booking", "change_booking", "cancel_booking", "front_desk_request"):
             promised = name in prompt
             check(
                 f"{label}: «{name}» обещан ровно тогда, когда есть",
@@ -762,6 +763,9 @@ async def qa_tools() -> None:
     check("перед ссылкой обязательно спрашивать число гостей",
           "узнай число гостей" in live_mode)
     check("в правилах сказано, что даты надо назвать словами",
+          "Назови словами даты, категорию и число гостей" in live_mode)
+    check("и что форма откроется уже заполненной", "уже заполненной" in live_mode)
+    check("и что делать, если даты в ссылку не попали",
           "какие даты выбрать в форме" in live_mode)
     # Живой диалог: гость написал «на ближайшие даты какие номера свободные»,
     # а консьерж дважды подряд потребовал точные даты и ничего не показал.
@@ -800,20 +804,65 @@ async def qa_tools() -> None:
 
     # Ссылка ведёт на нашу страницу с кодом категории Exely. Опечатка в коде
     # приводит гостя на пустую форму, и он об этом не сообщит — просто уйдёт.
+    from datetime import date as _d  # noqa: PLC0415
+
+    from app.booking_system.exely import stay_for_link  # noqa: PLC0415
+
+    сегодня = _d(2026, 10, 5)
     link = booking_form_url("https://airisresidence.kz", room_slug="comfort",
-                            check_in="2026-09-12", check_out="2026-09-15", guests=2)
+                            check_in="2026-10-20", check_out="2026-10-22", guests=1,
+                            lang="en", today=сегодня)
     check("ссылка ведёт на форму брони", link.startswith("https://airisresidence.kz/booking?"))
     check("в ссылке код категории Exely", "room-type=5050496" in link)
-    # Дат в ссылке нет намеренно: виджет Exely их не читает (проверено на
-    # живой брони — гость получил ссылку на 1-2 сентября, форма открылась на
-    # сегодня-завтра). Класть параметры, которые игнорируются, опаснее, чем
-    # не класть: гость видит заполненные чужие даты и бронирует не тот период.
-    check("дат в ссылке нет — виджет их не читает",
-          "checkin" not in link and "checkout" not in link, link)
-    check("числа гостей в ссылке тоже нет", "adults" not in link, link)
+    # Даты виджет читает как date + nights — проверено на живой форме
+    # 2026-10-05: «?date=2026-10-20&nights=2&adults=1» открыл форму на
+    # «20 октября — 22 октября, 2 ночи, 1 гость». До этого почти два месяца
+    # считалось, что дат он не читает вовсе, и гость выставлял их руками.
+    check("в ссылке день заезда", "date=2026-10-20" in link, link)
+    check("и число ночей", "nights=2" in link, link)
+    check("и взрослые", "adults=1" in link, link)
+    check("и язык гостя", "lang=en" in link, link)
+    дети = booking_form_url("https://airisresidence.kz", room_slug="standart",
+                            check_in="2026-10-20", check_out="2026-10-23", guests=2,
+                            children_ages=[3, 5], today=сегодня)
+    check("дети — возрастом через запятую", "children=3,5" in дети, дети)
+
+    # Прошедшие и перепутанные даты в ссылку не кладём: форма открылась бы
+    # на чужом периоде, а уже заполненное поле гость не перепроверит.
+    прошлое = booking_form_url("https://airisresidence.kz", room_slug="comfort",
+                               check_in="2026-10-01", check_out="2026-10-03", today=сегодня)
+    check("прошедшую дату в ссылку не кладём", "date=" not in прошлое, прошлое)
+    наоборот = booking_form_url("https://airisresidence.kz", room_slug="comfort",
+                                check_in="2026-10-22", check_out="2026-10-20", today=сегодня)
+    check("выезд раньше заезда — без дат", "date=" not in наоборот, наоборот)
+    check("слишком долгий срок — без дат",
+          stay_for_link("2026-10-20", "2026-12-20", сегодня)[0] is None)
+    check("незнакомый язык не попадает в ссылку",
+          "lang=" not in booking_form_url("https://airisresidence.kz", lang="de", today=сегодня))
     check("неизвестная категория не ломает ссылку",
-          booking_form_url("https://airisresidence.kz", room_slug="нет-такого")
+          booking_form_url("https://airisresidence.kz", room_slug="нет-такого", today=сегодня)
           == "https://airisresidence.kz/booking")
+
+    # Что ответ инструмента говорит модели: при подставленных датах —
+    # что именно подставлено; без них — честное «выбери даты сам».
+    from app.concierge import BOOKING_LINK_TOOL as _ССЫЛКА, ROOM_PAGE_TOOL as _СТРАНИЦА  # noqa: PLC0415
+    from app.concierge import _tool_link as _ссылка  # noqa: PLC0415
+    from app.config import Settings as _Set  # noqa: PLC0415
+
+    факты = {"hotel": {"url": "https://airisresidence.kz"},
+             "rooms": [{"slug": "comfort", "name": "Comfort", "url": "https://airisresidence.kz/nomera/comfort"}]}
+    сказано = _ссылка(_Set(), факты, {"room": "comfort", "check_in": "2099-01-10",
+                                          "check_out": "2099-01-12", "guests": 2, "lang": "kk"})
+    check("модели сказано, что форма заполнена", "уже заполненной" in сказано, сказано[:160])
+    check("и названы подставленные даты", "10.01.2099" in сказано and "12.01.2099" in сказано)
+    без_дат = _ссылка(_Set(), факты, {"room": "comfort", "guests": 2})
+    check("без дат — предупреждение выбрать их в форме",
+          "какие даты выбрать" in без_дат and "date=" not in без_дат, без_дат[:160])
+    свойства = _ССЫЛКА["input_schema"]["properties"]
+    check("инструмент ссылки принимает язык и детей",
+          "lang" in свойства and "children_ages" in свойства)
+    check("страница номера тоже открывается на языке гостя",
+          "lang" in _СТРАНИЦА["input_schema"]["properties"])
 
 
 # ───────────────────────── проверка платёжек ─────────────────────────
@@ -3598,6 +3647,176 @@ async def qa_undelivered() -> None:
           "_сказать_отелю_что_ответ_не_ушёл(" in исходник)
 
 
+async def qa_front_desk() -> None:
+    """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
+
+    2026-10-04 гость из номера 105 попросил утром переехать в другой номер.
+    Бот пообещал, что стойка всё подтвердит, а стойка ничего не узнала.
+    """
+    head("Просьба гостя на стойку")
+
+    import app.notify as _nt  # noqa: PLC0415
+    from app.concierge import READ_ONLY_TOOLS, _tool_front_desk  # noqa: PLC0415
+
+    check("инструмент есть в боевом наборе",
+          any(t["name"] == "front_desk_request" for t in READ_ONLY_TOOLS))
+
+    ушло: list[str] = []
+
+    async def _отелю(text: str, что: str, *, corporate: bool = False) -> int:
+        ушло.append(text)
+        return 1
+
+    было = _nt._tell_hotel
+    _nt._tell_hotel = _отелю
+    try:
+        ответ = await _tool_front_desk(
+            {"name": "tianyue", "phone": "+8615712455710", "chat_id": "8615712455710@c.us"},
+            {"request": "Хочет завтра утром переехать в другой номер, выезд в обычное время",
+             "room_number": "105", "urgent": True})
+        текст = ушло[0] if ушло else ""
+        check("стойке ушло сообщение", len(ушло) == 1)
+        check("в нём суть просьбы", "переехать в другой номер" in текст, текст[:120])
+        check("номер комнаты", "Живёт в номере: 105" in текст)
+        check("кто и как связаться", "+8615712455710" in текст and "tianyue" in текст)
+        check("пометка срочности", "Срочно" in текст)
+        check("модели сказано, что передано, и без обещаний",
+              "передана" in ответ and "не обещай" in ответ, ответ[:120])
+
+        пусто = await _tool_front_desk({}, {"request": "   "})
+        check("пустая просьба никуда не уходит", len(ушло) == 1 and "пустая" in пусто)
+    finally:
+        _nt._tell_hotel = было
+
+    async def _не_ушло(text: str, что: str, *, corporate: bool = False) -> int:
+        return 0
+
+    _nt._tell_hotel = _не_ушло
+    try:
+        ответ = await _tool_front_desk({}, {"request": "полотенца"})
+        check("не ушло — модель не врёт, что передала, и даёт телефон",
+              "Передать не удалось" in ответ and "телефон" in ответ, ответ[:120])
+    finally:
+        _nt._tell_hotel = было
+
+
+async def qa_empty_answer() -> None:
+    """Модель промолчала после инструмента — гость не получает «позвоните».
+
+    Модель нередко пишет ответ рядом с вызовом инструмента и после
+    результата молчит. Раньше код брал текст только из последнего круга и
+    отдавал гостю запасное «не могу свериться, позвоните на стойку» —
+    2026-10-05 так дважды из тридцати прогонов, в том числе посреди брони.
+    """
+    head("Пустой ответ модели")
+
+    import app.concierge as _c  # noqa: PLC0415
+    import app.notify as _nt  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {"name": "Airis", "url": "https://airisresidence.kz"}, "policy": {}, "rooms": []}
+
+    async def _отелю(text: str, что: str, *, corporate: bool = False) -> int:
+        return 1
+
+    def _подмена(ответы: list[dict]):
+        очередь = list(ответы)
+
+        async def _модель(payload, headers, **kw):  # noqa: ANN001
+            return очередь.pop(0) if очередь else {"stop_reason": "end_turn", "content": []}
+        return _модель
+
+    вызов = {"stop_reason": "tool_use", "content": [
+        {"type": "text", "text": "Передали администратору, с вами свяжутся."},
+        {"type": "tool_use", "id": "t1", "name": "front_desk_request",
+         "input": {"request": "Сменить номер завтра утром", "room_number": "105"}},
+    ]}
+    пусто = {"stop_reason": "end_turn", "content": []}
+
+    class _Бронь:
+        """Только чтение, как боевой Exely: инструменты есть, записи нет."""
+        source = "exely"
+
+    было = (_c._call_model, _c.load_facts, _nt._tell_hotel)
+    _c.load_facts, _nt._tell_hotel = _факты, _отелю
+    settings = _gs()
+    гость = {"name": "Гость", "phone": "+77010000000", "chat_id": "77010000099@c.us"}
+    try:
+        _c._call_model = _подмена([вызов, пусто, пусто])
+        r = await _c.answer(settings, message="I'm in room 105, can I change rooms?", history=[],
+                            today="2026-10-05", booking=_Бронь(), guest=гость)
+        check("промолчала дважды — берём сказанное до инструмента",
+              r.get("ok") and r.get("text") == "Передали администратору, с вами свяжутся.", r.get("text", "")[:80])
+
+        _c._call_model = _подмена([вызов, пусто, {"stop_reason": "end_turn",
+                                                   "content": [{"type": "text", "text": "Готово, передали."}]}])
+        r = await _c.answer(settings, message="I'm in room 105, can I change rooms?", history=[],
+                            today="2026-10-05", booking=_Бронь(), guest=гость)
+        check("промолчала раз — переспросили и получили ответ", r.get("text") == "Готово, передали.",
+              r.get("text", "")[:80])
+
+        _c._call_model = _подмена([пусто, пусто])
+        r = await _c.answer(settings, message="?", history=[], today="2026-10-05",
+                            booking=_Бронь(), guest=гость)
+        check("совсем ничего — тогда уже запасной ответ с телефоном",
+              not r.get("ok") and r.get("text") == _c.FALLBACK)
+    finally:
+        _c._call_model, _c.load_facts, _nt._tell_hotel = было
+
+
+async def qa_model_retry() -> None:
+    """Модель споткнулась — пробуем ещё раз, а не отдаём гостю отказ.
+
+    2026-10-05 один ответ из девяти ушёл запасным «не могу свериться,
+    позвоните на стойку» прямо после «беру, пришлите ссылку». Повтор того
+    же запроса проходил.
+    """
+    head("Повтор запроса к модели")
+
+    import app.concierge as _c  # noqa: PLC0415
+
+    def _транспорт(коды: list[int]) -> tuple[httpx.MockTransport, list[int]]:
+        вызовы: list[int] = []
+
+        def _ответ(request: httpx.Request) -> httpx.Response:
+            код = коды[min(len(вызовы), len(коды) - 1)]
+            вызовы.append(код)
+            if код == 200:
+                return httpx.Response(200, json={"content": [{"type": "text", "text": "ок"}]})
+            return httpx.Response(код, json={"error": {"type": "overloaded_error"}})
+
+        return httpx.MockTransport(_ответ), вызовы
+
+    было = _c.ПАУЗЫ_ПОВТОРА
+    _c.ПАУЗЫ_ПОВТОРА = (0.0, 0.0)
+    try:
+        транспорт, вызовы = _транспорт([529, 200])
+        data = await _c._call_model({}, {}, transport=транспорт)
+        check("перегрузка, потом успех — ответ получен",
+              data.get("content", [{}])[0].get("text") == "ок" and вызовы == [529, 200], str(вызовы))
+
+        транспорт, вызовы = _транспорт([529, 529, 529, 529])
+        упало = False
+        try:
+            await _c._call_model({}, {}, transport=транспорт)
+        except Exception:  # noqa: BLE001
+            упало = True
+        check("стойкая перегрузка — честная ошибка после трёх попыток",
+              упало and len(вызовы) == 3, str(вызовы))
+
+        # Ошибка в самом запросе повтором не лечится — не тратим время гостя.
+        транспорт, вызовы = _транспорт([400, 200])
+        упало = False
+        try:
+            await _c._call_model({}, {}, transport=транспорт)
+        except Exception:  # noqa: BLE001
+            упало = True
+        check("ошибка запроса (400) — без повторов", упало and вызовы == [400], str(вызовы))
+    finally:
+        _c.ПАУЗЫ_ПОВТОРА = было
+
+
 async def qa_calls() -> None:
     """Звонок на номер бота.
 
@@ -3854,6 +4073,9 @@ async def main() -> int:
     await qa_reception_notify()
     await qa_annotations()
     await qa_undelivered()
+    await qa_model_retry()
+    await qa_front_desk()
+    await qa_empty_answer()
     await qa_calls()
     await qa_airport()
     await qa_knowledge()

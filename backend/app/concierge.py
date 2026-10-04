@@ -20,14 +20,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
 
 from .booking_system import BookingSystem, BookingSystemUnavailable
-from .booking_system.exely import booking_form_url
+from .booking_system.exely import LANGUAGES, booking_form_url, stay_for_link
 from .config import Settings
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 
@@ -192,8 +193,8 @@ HANDOFF_RULES = """
 
 Когда гость определился с датами, категорией и числом гостей:
 1. Проговори выбор словами: даты, категория, сколько гостей, цена за ночь, входит завтрак или нет.
-2. Вызови booking_link и пришли ссылку, которую он вернул.
-3. **Обязательно напиши, какие даты выбрать в форме.** Форма открывается на нужной категории, но даты в ней стоят сегодняшние — гость должен поставить свои сам. Не написав этого, ты отправишь его бронировать не тот период.
+2. Вызови booking_link — с языком гостя в lang — и пришли ссылку, которую он вернул.
+3. **Назови словами даты, категорию и число гостей.** Форма откроется уже заполненной ими — гость только сверит и введёт свои данные. Если инструмент ответил, что даты в ссылку не попали, тогда прямо напиши, какие даты выбрать в форме, иначе гость забронирует не тот период.
 4. Скажи прямо: номер закрепится за гостем, только когда он заполнит форму. До этого номер свободен для всех.
 
 Ссылку бери исключительно из инструмента. Не набирай её руками и ничего к ней не дописывай: ошибка в одном символе приведёт гостя на пустую страницу.
@@ -378,6 +379,36 @@ CANCEL_REQUEST_TOOL = {
 }
 
 
+
+#: Просьба живущего гостя к стойке: сменить номер, поздний выезд, что-то
+#: сломалось. Сам консьерж этого не сделает, а без инструмента обещал
+#: «стойка подтвердит», и стойка ничего не узнавала (2026-10-04, номер 105).
+FRONT_DESK_TOOL = {
+    "name": "front_desk_request",
+    "description": (
+        "Передать на стойку просьбу гостя, которую выполнить может только сотрудник. "
+        "Обязательно, если гость уже живёт в отеле (назвал номер комнаты) и просит что-то "
+        "поменять. Примеры: сменить номер, поздний выезд или ранний заезд, дополнительная кровать или "
+        "полотенца, что-то не работает в номере, трансфер, жалоба, счёт или закрывающие "
+        "документы. Вызывай, когда гость о чём-то ПРОСИТ, а сделать это может только "
+        "человек. Не вызывай для вопросов, ответ на которые есть в справке, и для отмены "
+        "брони — для неё cancel_request."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "request": {
+                "type": "string",
+                "description": "Суть просьбы по-русски, одной-двумя фразами — как передал бы коллеге",
+            },
+            "room_number": {"type": "string", "description": "Номер комнаты, если гость уже живёт и назвал его"},
+            "guest_name": {"type": "string", "description": "Имя гостя, если известно"},
+            "urgent": {"type": "boolean", "description": "Нужно сегодня или прямо сейчас"},
+        },
+        "required": ["request"],
+    },
+}
+
 CANCEL_TOOL = {
     "name": "cancel_booking",
     "description": "Отменить бронь. Вызывай только после явного подтверждения гостя.",
@@ -427,6 +458,12 @@ ROOM_PAGE_TOOL = {
         "type": "object",
         "properties": {
             "room": {"type": "string", "description": "Код категории (slug) из справки"},
+            "lang": {
+                "type": "string",
+                "enum": list(LANGUAGES),
+                "description": "Язык, на котором пишет гость: ru, kk или en (для любого другого — en). "
+                               "Страница откроется на нём.",
+            },
         },
         "required": ["room"],
     },
@@ -439,10 +476,9 @@ ROOM_PAGE_TOOL = {
 BOOKING_LINK_TOOL = {
     "name": "booking_link",
     "description": (
-        "Ссылка на форму бронирования отеля с выбранной категорией номера. "
+        "Ссылка на форму бронирования, которая откроется уже заполненной: "
+        "категория, даты, число гостей, на языке гостя. "
         "Вызывай, когда гость назвал даты, категорию И число гостей. "
-        "Даты форма НЕ подставляет — их гость выбирает сам, поэтому обязательно "
-        "напиши в сообщении, какие даты ему выбрать. "
         "Пришли гостю ровно ту ссылку, которую вернёт инструмент."
     ),
     "input_schema": {
@@ -451,7 +487,21 @@ BOOKING_LINK_TOOL = {
             "room": {"type": "string", "description": "Код категории (slug) из справки"},
             "check_in": {"type": "string", "description": "Дата заезда, YYYY-MM-DD"},
             "check_out": {"type": "string", "description": "Дата выезда, YYYY-MM-DD"},
-            "guests": {"type": "integer", "description": "Гостей в номере"},
+            "guests": {
+                "type": "integer",
+                "description": "Взрослых в номере. Дети от 6 лет считаются взрослыми — посчитай их здесь.",
+            },
+            "children_ages": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Возраст детей младше 6 лет, если гость едет с ними. Иначе не передавай.",
+            },
+            "lang": {
+                "type": "string",
+                "enum": list(LANGUAGES),
+                "description": "Язык, на котором пишет гость: ru, kk или en (для любого другого языка — en). "
+                               "Страница и форма откроются на нём.",
+            },
         },
         "required": ["room"],
     },
@@ -461,8 +511,9 @@ BOOKING_LINK_TOOL = {
 # Передать просьбу об отмене можно всегда: это сообщение отелю, а не
 # запись в систему бронирования.
 READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL, CANCEL_REQUEST_TOOL,
-                   REMEMBER_NAME_TOOL]
-FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL]
+                   REMEMBER_NAME_TOOL, FRONT_DESK_TOOL]
+FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL,
+              FRONT_DESK_TOOL]
 
 
 #: Последнее, что модель читает перед сообщением гостя.
@@ -487,6 +538,7 @@ FIRST_ACTION = """
 Ни числа гостей, ни даты выезда, ни категории до этого не спрашивай: гость задал вопрос и ждёт ответа, а не анкеты.
 Пишет отель, а не приятель. Как бы ни писал гость — со смайликами, сленгом, «хаха» — ты отвечаешь ровно и по делу. Не смеёшься в ответ, не подхватываешь «кайф», «круто», «класс», «огонь», не ставишь несколько восклицательных знаков подряд. Тёплым быть можно, фамильярным нельзя.
 Перед тем как дать ссылку на бронирование, спроси, на чьё имя оформляем, и вызови remember_name. Имя всё равно понадобится в форме, так что лишнего вопроса это не добавляет, — а нам оно нужно, чтобы потом напомнить гостю о его же броне, если оплата не придёт. Про запоминание гостю говорить не надо.
+Гость о чём-то просит, а сделать это может только сотрудник (сменить номер, поздний выезд, что-то сломалось, полотенца, трансфер) — СНАЧАЛА вызови front_desk_request, потом отвечай. Особенно если гость уже живёт в отеле: назвал номер комнаты, пишет «я заселился», «I checked in», «my room». На любом языке «передам», «передал», «I'll pass your request», «the front desk will help» без вызова front_desk_request — ложь: стойка ничего не узнает.
 Гость сказал, что хочет отменить бронь, — ПЕРВЫМ ДЕЙСТВИЕМ вызови cancel_request, не дожидаясь номера брони. Номер уточнишь потом, а отель должен узнать сразу: без этого просьба остаётся в переписке, и о пустом номере узнают в день заезда.
 Спросили про возврат денег — назови срок сразу, до всяких уточнений: возврат оформляется в день отмены, на карту приходит за 1–7 рабочих дней, зависит от банка гостя. Это и есть ответ на «когда». Номер брони спрашивай потом и только если он для чего-то нужен.
 Цену бери из тарифа и не объясняй, почему она такая. Ни «скидка», ни «на выходные дешевле», ни «акция» — почему тариф такой, ты не знаешь, а гость на выдуманное условие потом сошлётся.
@@ -612,11 +664,16 @@ def _tool_room_page(facts: dict[str, Any], args: dict[str, Any],
     равно туда.
     """
     slug = str(args.get("room") or "").strip()
+    язык = str(args.get("lang") or "").strip().lower()
     for room in facts.get("rooms", []):
         if str(room.get("slug")) == slug:
             url = room.get("url")
             if not url:
                 break
+            # Гостю, который пишет по-английски, страница откроется
+            # по-английски: сайт читает ?lang= и включает перевод.
+            if язык in LANGUAGES:
+                url = f"{url}{'&' if '?' in str(url) else '?'}lang={язык}"
             images = [str(i) for i in (room.get("images") or [])
                       if str(i).startswith("http")]
             if photos is not None:
@@ -694,6 +751,35 @@ async def _tool_cancel_request(settings: Any, guest: dict[str, Any] | None,
             "звонком на стойку, и дай телефон.")
 
 
+async def _tool_front_desk(guest: dict[str, Any] | None, args: dict[str, Any]) -> str:
+    """Передать стойке просьбу, которую консьерж выполнить не может.
+
+    Сам консьерж ничего не меняет — ни номер, ни время выезда: доставка
+    просьбы человеку, и только. Ради того, чтобы «стойка подтвердит» в
+    ответе гостю стало правдой.
+    """
+    from .notify import notify_front_desk  # локально: notify тянет каналы
+
+    просьба = " ".join(str(args.get("request") or "").split())
+    if not просьба:
+        return "Просьба пустая — уточни у гостя, что нужно, и вызови снова."
+    who = dict(guest or {})
+    ушло = await notify_front_desk(
+        request=просьба[:500],
+        room=str(args.get("room_number") or "").strip()[:20],
+        guest=str(args.get("guest_name") or who.get("name") or "").strip()[:80],
+        phone=str(who.get("phone") or ""),
+        urgent=bool(args.get("urgent")),
+    )
+    if ушло:
+        return ("Просьба передана на стойку. Гостю скажи так и есть — «передали "
+                "администратору, с вами свяжутся», а не «я передал». Результат и "
+                "время не обещай: решает стойка. Если просьба срочная — дай и "
+                "телефон стойки из справки.")
+    return ("Передать не удалось. Скажи гостю, что с этим поможет стойка, и дай "
+            "её телефон из справки — не обещай, что передал.")
+
+
 def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any],
                *, corporate: dict[str, Any] | None = None) -> str:
     """Собрать ссылку на форму брони.
@@ -745,22 +831,47 @@ def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any],
         guests = int(args.get("guests") or 0)
     except (TypeError, ValueError):
         guests = 0
+    дети = [a for a in (args.get("children_ages") or []) if isinstance(a, int) and 0 <= a <= 17]
+    язык = str(args.get("lang") or "").strip().lower()
 
+    from .almaty import today as hotel_today  # noqa: PLC0415
+
+    сегодня = hotel_today()
     url = booking_form_url(
         site,
         room_slug=slug,
         check_in=args.get("check_in"),
         check_out=args.get("check_out"),
         guests=guests,
+        children_ages=дети,
+        lang=язык,
+        today=сегодня,
     )
-    # Напоминание идёт вместе со ссылкой, а не только в правилах: правила
-    # модель читает один раз в начале, а ответ инструмента видит прямо перед
-    # тем, как писать гостю.
+
+    # Что именно подставлено, говорим прямо: модель называет это гостю, и
+    # гость сверяет с формой. Напоминание идёт вместе со ссылкой, а не
+    # только в правилах: ответ инструмента модель читает прямо перед тем,
+    # как писать гостю.
+    заезд, ночей, почему = stay_for_link(args.get("check_in"), args.get("check_out"), сегодня)
+    if not заезд:
+        return (
+            f"Ссылка на форму брони: {url}\n"
+            f"ВАЖНО: даты в ссылку не попали ({почему}) — форма откроется на "
+            "сегодняшних датах. Обязательно напиши гостю, какие даты выбрать в "
+            "форме, иначе он забронирует не тот период."
+        )
+    выезд = заезд + timedelta(days=ночей)
+    название = next((str(r.get("name")) for r in facts.get("rooms", [])
+                     if str(r.get("slug")) == slug), slug)
+    кто = f"взрослых: {guests}" if 1 <= guests <= 10 else "число гостей не указано — в форме по умолчанию двое"
+    if дети:
+        кто += f", дети (возраст): {', '.join(map(str, дети))}"
     return (
         f"Ссылка на форму брони: {url}\n"
-        "ВАЖНО: форма откроется на нужной категории, но даты в ней будут "
-        "сегодняшние — виджет не умеет их подставлять. Обязательно напиши "
-        "гостю, какие даты выбрать в форме, иначе он забронирует не тот период."
+        f"Форма откроется уже заполненной: {название}, заезд {заезд:%d.%m.%Y}, "
+        f"выезд {выезд:%d.%m.%Y} (ночей: {ночей}), {кто}. Гостю остаётся "
+        "выбрать тариф и ввести свои данные. Назови ему даты и категорию "
+        "словами, чтобы он сверил с формой, и пришли ссылку как есть."
     )
 
 
@@ -1193,6 +1304,43 @@ def _language_note(message: str) -> str:
     return ""
 
 
+#: Ответы модели, после которых стоит попробовать ещё раз: перегрузка (529),
+#: лимит запросов (429) и сбои на её стороне. Таймаут сюда не входит: после
+#: минуты ожидания второй минуты гость уже не дождётся.
+ПОВТОРЯЕМЫЕ = {429, 500, 502, 503, 504, 529}
+ПАУЗЫ_ПОВТОРА: tuple[float, ...] = (1.0, 2.5)
+
+
+async def _call_model(payload: dict[str, Any], headers: dict[str, str], *,
+                      transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
+    """Запрос к модели с двумя повторами на кратковременных сбоях.
+
+    2026-10-05 на проверке ссылки на бронь один ответ из девяти ушёл
+    запасным «не могу свериться, позвоните на стойку» — посреди оформления,
+    после «беру, пришлите ссылку». Тот же запрос через минуту проходил
+    четыре раза из четырёх. Сдаваться с первой ошибки — значит отдавать
+    гостю отказ там, где хватило бы секунды подождать.
+    """
+    последняя: Exception | None = None
+    for пауза in (0.0, *ПАУЗЫ_ПОВТОРА):
+        if пауза:
+            await asyncio.sleep(пауза)
+        try:
+            async with httpx.AsyncClient(timeout=60.0, transport=transport) as client:
+                response = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as error:
+            последняя = error
+            logger.warning("Модель: сбой соединения (%s) — пробую ещё раз", error)
+            continue
+        if response.status_code in ПОВТОРЯЕМЫЕ:
+            последняя = RuntimeError(f"HTTP {response.status_code}: {response.text[:120]}")
+            logger.warning("Модель ответила %s — пробую ещё раз", response.status_code)
+            continue
+        response.raise_for_status()
+        return response.json()
+    raise последняя or RuntimeError("модель не ответила")
+
+
 def _with_note(messages: list[dict[str, Any]], index: int, note: str) -> list[dict[str, Any]]:
     """Копия сообщений, где к реплике `index` спереди приложена пометка.
 
@@ -1355,6 +1503,9 @@ async def answer(
     spent_cache_write = 0
     spent_cache_read = 0
 
+    сказано_раньше = ""
+    переспросили = False
+
     # Пять кругов: хватает на «посмотреть наличие → оформить → назвать номер».
     # Предел нужен на случай, если модель зациклится на уточнении, — в
     # мессенджере это выглядело бы как молчание, а стоило бы денег.
@@ -1381,11 +1532,9 @@ async def answer(
             payload["tools"] = tools
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+            data = await _call_model(payload, headers)
         except Exception as error:  # noqa: BLE001
+            logger.warning("Модель недоступна, гостю уходит запасной ответ: %s", error)
             return {"text": FALLBACK, "ok": False, "reason": f"модель недоступна: {error}"}
 
         usage = data.get("usage", {})
@@ -1396,6 +1545,13 @@ async def answer(
         content = data.get("content", [])
 
         if data.get("stop_reason") == "tool_use" and booking is not None:
+            # Модель нередко пишет ответ гостю прямо рядом с вызовом
+            # инструмента. Запоминаем: если после результата она промолчит,
+            # это и есть её ответ.
+            перед_инструментом = "".join(
+                b.get("text", "") for b in content if b.get("type") == "text").strip()
+            if перед_инструментом:
+                сказано_раньше = перед_инструментом
             results = []
             for block in content:
                 if block.get("type") != "tool_use":
@@ -1408,6 +1564,8 @@ async def answer(
                     output = await _tool_remember_name(guest, args)
                 elif name == "cancel_request":
                     output = await _tool_cancel_request(settings, guest, args)
+                elif name == "front_desk_request":
+                    output = await _tool_front_desk(guest, args)
                 elif name == "room_page":
                     output = _tool_room_page(facts, args, photos)
                 elif name == "booking_link":
@@ -1438,7 +1596,19 @@ async def answer(
             block.get("text", "") for block in content if block.get("type") == "text"
         ).strip()
 
+        if not text and not переспросили:
+            # Пустой ответ после инструмента — модель сочла, что всё сказала
+            # раньше. Один раз переспрашиваем тем же запросом: ответ модели
+            # не повторяется, и второй раз она обычно пишет.
+            переспросили = True
+            logger.warning("Пустой ответ модели (stop=%s) — переспрашиваю",
+                           data.get("stop_reason"))
+            continue
+        if not text and сказано_раньше:
+            logger.warning("Модель промолчала после инструмента — беру её текст до него")
+            text = сказано_раньше
         if not text:
+            logger.warning("Пустой ответ модели дважды, гостю уходит запасной ответ")
             return {"text": FALLBACK, "ok": False, "reason": "пустой ответ модели"}
 
         return {
@@ -1456,4 +1626,15 @@ async def answer(
             },
         }
 
+    logger.warning("Модель не сошлась за пять кругов, инструменты: %s",
+                   [t.get("name") for t in tool_calls])
+    if сказано_раньше:
+        # Лучше то, что модель уже успела сказать гостю, чем «позвоните».
+        return {
+            "text": сказано_раньше, "ok": True, "photos": photos, "availability": mode,
+            "toolCalls": tool_calls,
+            "messages": messages + [{"role": "assistant", "content": сказано_раньше}],
+            "usage": {"in": spent_in, "out": spent_out,
+                      "cacheWrite": spent_cache_write, "cacheRead": spent_cache_read},
+        }
     return {"text": FALLBACK, "ok": False, "reason": "модель не сошлась за пять кругов"}
