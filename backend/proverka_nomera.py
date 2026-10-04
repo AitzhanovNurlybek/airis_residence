@@ -6,9 +6,10 @@
 если сбросился адрес вебхука, гости пишут в пустоту, и узнаётся это по
 жалобе через сутки.
 
-Скрипт отвечает на четыре вопроса: какой номер привязан, цел ли адрес
-вебхука, не осталось ли настроек, которые мешают отвечать быстро, и
-проходит ли сообщение весь путь от вебхука до ответа.
+Скрипт отвечает на вопросы: какой номер привязан, цел ли адрес вебхука,
+не осталось ли настроек, которые мешают отвечать быстро, проходит ли
+сообщение весь путь от вебхука до ответа, распознаются ли голосовые и
+разбирается ли непринятый звонок.
 
 Запуск:
     ./.venv/Scripts/python.exe proverka_nomera.py
@@ -35,6 +36,8 @@ from app.webhooks_api import ПРОВЕРОЧНЫЙ_НОМЕР  # noqa: E402
 #: Куда Green API обязан стучаться. Совпадение проверяется по началу строки:
 #: ключ в адресе у каждого свой, и сравнивать его незачем.
 EXPECTED_WEBHOOK = "https://airisresidence.kz/api/backend/api/webhooks/whatsapp"
+#: Проверка здоровья того же сайта: по ней видно, задан ли ключ распознавания.
+HEALTH = "https://airisresidence.kz/api/backend/health"
 
 #: Номер, от имени которого идёт проверка. Несуществующий: ответ на него
 #: Green API отправить не сможет, и живого человека мы не потревожим.
@@ -135,6 +138,40 @@ async def main() -> int:
         check("сообщение дошло до обработки",
               bool(body.get("replied") or body.get("error") == "send failed"),
               str(body)[:120])
+
+    print("\n== Голосовые и звонки ==")
+    async with httpx.AsyncClient(timeout=60) as client:
+        health = (await client.get(HEALTH)).json()
+    # Без ключа бот на каждое голосовое отвечает «пока не распознаю», и
+    # снаружи это не отличить от работающего бота.
+    check("голосовые распознаются (ключ задан на сайте)",
+          health.get("speech_configured") is True, str(health.get("speech_configured")))
+    check("уведомления о звонках включены",
+          str(live.get("incomingCallWebhook")) == "yes", str(live.get("incomingCallWebhook")))
+    if secret:
+        async with httpx.AsyncClient(timeout=120) as client:
+            try:
+                answer = await client.post(
+                    EXPECTED_WEBHOOK,
+                    params={"key": secret},
+                    json={
+                        "typeWebhook": "incomingCall",
+                        "status": "declined",
+                        "from": TEST_CHAT,
+                        "idMessage": f"PROVERKA-ZVONKA-{int(time.time())}",
+                        "instanceData": {"wid": wid},
+                    },
+                )
+                body = answer.json()
+            except Exception as error:  # noqa: BLE001
+                answer, body = None, {"error": str(error)}
+        code = answer.status_code if answer is not None else 0
+        # Ответ на выдуманный номер не уйдёт, а второй прогон за день упрётся
+        # в «раз в день на гостя» — оба исхода значат, что звонок разобран.
+        check("вебхук отвечает на непринятый звонок",
+              code == 200 and (body.get("call") == "declined"
+                               or "звонок" in str(body.get("reason", ""))),
+              f"HTTP {code} {str(body)[:120]}")
 
     print("\n== Итог ==")
     if problems:

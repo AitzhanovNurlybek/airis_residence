@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
@@ -43,6 +44,8 @@ from .concierge import FALLBACK
 from .db import ExelyEvent, SessionLocal, get_session
 from .notify import notify_hotel_booking
 from .dialogs import answered_same_recently, save_turn, seen_before
+from .guest_messages import CALL_NOT_ANSWERED, render
+from .knowledge import KnowledgeUnavailable, load_facts
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +253,94 @@ async def _сказать_отелю_что_ответ_не_ушёл(
         logger.error("Не удалось сообщить отелю о недоставленном ответе: %s", error)
 
 
+#: Чем кончился звонок, если его никто не принял. «offer» — ещё звонит, и
+#: трубку могут взять с телефона; «pickUp» — взяли, писать незачем.
+#: «missed» Green API заменил на «declined», но старые инстансы шлют и его.
+ЗВОНОК_НЕ_ПРИНЯТ = {"declined", "hungUp", "missed"}
+
+ALMATY = timezone(timedelta(hours=5))
+
+
+async def _звонок(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    """Гость позвонил по WhatsApp на номер бота, и звонок не приняли.
+
+    Ответить голосом бот не может, а Green API не умеет ни принять звонок,
+    ни сбросить — только сообщить о нём. Без реакции гость слушает гудки и
+    решает, что отель не работает. Поэтому пишем ему в тот же чат, как
+    связаться, а отелю — что был звонок: позвонивший обычно горячий гость,
+    и перезвонить ему со стойки стоит.
+    """
+    статус = str(payload.get("status") or "")
+    chat_id = str(payload.get("from") or "")
+    if статус not in ЗВОНОК_НЕ_ПРИНЯТ:
+        return {"ok": True, "skipped": f"звонок: {статус or 'без статуса'}"}
+    if not chat_id or chat_id.endswith("@g.us"):
+        return {"ok": True, "skipped": "звонок не от гостя"}
+    own = str((payload.get("instanceData") or {}).get("wid") or "")
+    if own and chat_id == own:
+        return {"ok": True, "skipped": "звонок самому себе"}
+    цифры = "".join(ch for ch in chat_id.split("@")[0] if ch.isdigit())
+
+    # Один ответ на гостя в день. Кто не дозвонился, набирает ещё и ещё —
+    # и на каждый сброс получал бы то же сообщение, а отель — то же
+    # уведомление.
+    день = datetime.now(ALMATY).date().isoformat()
+    if await seen_before(SessionLocal, WA_CHANNEL, f"call:{цифры}:{день}"):
+        return {"ok": True, "duplicate": True, "reason": "звонок: сегодня уже ответили"}
+
+    телефон = "+7 (777) 531-00-09"
+    try:
+        факты = await load_facts(settings)
+        телефон = факты.get("hotel", {}).get("contacts", {}).get("phonePrimary") or телефон
+    except KnowledgeUnavailable:
+        pass
+    текст = render(CALL_NOT_ANSWERED, phone=телефон)
+
+    try:
+        channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+    except WhatsAppError as error:
+        logger.warning("Звонок от %s: канал не создан: %s", цифры, error)
+        return {"ok": False, "error": "green api is not configured"}
+    причина = await _отправить_с_повтором(channel, chat_id, for_whatsapp(текст))
+
+    # Проверочный номер выдуман: ответ на него не уйдёт, и тревожить отель
+    # про несуществующего гостя нельзя.
+    if цифры == ПРОВЕРОЧНЫЙ_НОМЕР:
+        return {"ok": True, "call": статус, "replied": not причина, "test": True}
+
+    if not причина:
+        # В историю разговора — чтобы на «я вам звонил» бот понимал, о чём
+        # речь, а не переспрашивал.
+        await save_turn(SessionLocal, WA_CHANNEL, chat_id, [
+            {"role": "user", "content": "(Гость позвонил по WhatsApp, звонок не принят.)"},
+            {"role": "assistant", "content": текст},
+        ], 0)
+
+    from .notify import _tell_hotel
+
+    итог = (
+        "Гостю написали: звонки здесь не принимаем, можно написать сюда или "
+        "позвонить на стойку."
+        if not причина else
+        f"Написать гостю не получилось: {причина[:150]}"
+    )
+    try:
+        await _tell_hotel(
+            "\n".join([
+                "📞 Пропущенный звонок на WhatsApp бота",
+                "",
+                f"От: +{цифры}",
+                итог,
+                "",
+                "Если нужно — перезвоните гостю со стойки.",
+            ]),
+            "пропущенный звонок",
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error("Не удалось сообщить отелю о звонке: %s", error)
+    return {"ok": not причина, "call": статус, "replied": not причина}
+
+
 @router.post("/exely")
 async def exely_webhook(
     request: Request,
@@ -381,6 +472,9 @@ async def whatsapp_webhook(
         payload = {}
     if not isinstance(payload, dict):
         return {"ok": True, "skipped": "не объект"}
+
+    if payload.get("typeWebhook") == "incomingCall":
+        return await _звонок(settings, payload)
 
     # Green API присылает и исходящие, и статусы доставки, и события групп.
     # _parse отбирает только входящие сообщения от людей и возвращает None

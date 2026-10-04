@@ -40,6 +40,7 @@ from .schemas import (
     PaymentInitOut,
 )
 from .seed_rooms import SEED_ROOMS
+from .speech import configured as speech_configured
 from .throttle import (
     ADMIN_ATTEMPTS,
     ADMIN_BLOCK_SECONDS,
@@ -219,6 +220,10 @@ async def health():
         # проверить настройку иначе нечем — переменные окружения снаружи не
         # видны, и «я вписал» против «оно работает» проверяется только так.
         "corp_notify_configured": bool(settings.corp_notify_numbers),
+        # Распознаются ли голосовые. Без ключа бот на каждое голосовое
+        # отвечает «пока не распознаю — напишите текстом», и снаружи это не
+        # отличить от работающего бота, пока гость не пожалуется.
+        "speech_configured": speech_configured(settings),
     }
 
 

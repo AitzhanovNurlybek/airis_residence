@@ -3590,6 +3590,90 @@ async def qa_undelivered() -> None:
           "_сказать_отелю_что_ответ_не_ушёл(" in исходник)
 
 
+async def qa_calls() -> None:
+    """Звонок на номер бота.
+
+    Green API не умеет ни принять звонок, ни сбросить — только сообщить о
+    нём. Без реакции гость слушает гудки и решает, что отель не работает.
+    Спросили 2026-10-04: «а когда звонки приходят, что делать?»
+    """
+    head("Звонки на номер бота")
+
+    import inspect as _insp  # noqa: PLC0415
+    import time as _t  # noqa: PLC0415
+
+    import app.notify as _nt  # noqa: PLC0415
+    import app.webhooks_api as _wh  # noqa: PLC0415
+    from app.dialogs import load_history  # noqa: PLC0415
+
+    отправлено: list[tuple[str, str]] = []
+    отелю: list[str] = []
+
+    class _Канал:
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        async def send(self, chat_id: str, text: str) -> str:
+            отправлено.append((chat_id, text))
+            return "ok"
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {"contacts": {"phonePrimary": "+7 (777) 531-00-09"}}}
+
+    async def _отелю(text: str, что: str, *, corporate: bool = False) -> int:
+        отелю.append(text)
+        return 1
+
+    from app.config import get_settings as _gs  # noqa: PLC0415
+
+    settings = _gs()
+    было = (_wh.WhatsAppChannel, _wh.load_facts, _nt._tell_hotel)
+    _wh.WhatsAppChannel, _wh.load_facts, _nt._tell_hotel = _Канал, _факты, _отелю
+    # Номер свой на каждый прогон: ответ — раз в день на гостя, и со
+    # вчерашним номером второй прогон за день упёрся бы в эту защиту.
+    гость = f"7701{int(_t.time()) % 10_000_000:07d}"
+    звонок = lambda статус, кто=гость: {  # noqa: E731
+        "typeWebhook": "incomingCall", "status": статус, "from": f"{кто}@c.us",
+        "idMessage": f"CALL-{кто}-{статус}", "instanceData": {"wid": "77003002526@c.us"},
+    }
+    try:
+        r = await _wh._звонок(settings, звонок("offer"))
+        check("пока звонит — молчим: трубку могут взять", not отправлено and "skipped" in r, str(r))
+        r = await _wh._звонок(settings, звонок("pickUp"))
+        check("трубку взяли — не пишем", not отправлено and "skipped" in r, str(r))
+
+        r = await _wh._звонок(settings, звонок("declined"))
+        check("звонок не приняли — гостю написали", len(отправлено) == 1, str(r))
+        текст = отправлено[0][1] if отправлено else ""
+        check("написали в чат звонившего", bool(отправлено) and отправлено[0][0] == f"{гость}@c.us")
+        check("в сообщении телефон стойки", "531-00-09" in текст, текст[:120])
+        check("и по-английски — по звонку язык не узнать", "Hello" in текст)
+        check("отелю сообщили о звонке", len(отелю) == 1, str(len(отелю)))
+        check("в уведомлении номер гостя с одним плюсом",
+              bool(отелю) and f"От: +{гость}" in отелю[0] and "++" not in отелю[0])
+        # Читаем тем же подключением, каким пишет вебхук: раздел о схеме
+        # перезагружает app.db, и свежий SessionLocal оттуда смотрит в другую
+        # базу — проверка падала в общем прогоне и проходила в одиночку.
+        история = await load_history(_wh.SessionLocal, _wh.WA_CHANNEL, f"{гость}@c.us")
+        check("звонок записан в историю — на «я звонил» бот поймёт",
+              any("звонок не принят" in str(m.get("content")) for m in история))
+
+        r = await _wh._звонок(settings, звонок("hungUp"))
+        check("второй звонок за день — без повторного сообщения",
+              len(отправлено) == 1 and len(отелю) == 1 and r.get("duplicate"), str(r))
+
+        r = await _wh._звонок(settings, звонок("declined", _wh.ПРОВЕРОЧНЫЙ_НОМЕР))
+        check("проверочный номер отель не тревожит", len(отелю) == 1, str(r))
+
+        r = await _wh._звонок(settings, {**звонок("declined"), "from": "120363000000@g.us"})
+        check("групповой звонок пропускаем", "skipped" in r, str(r))
+    finally:
+        _wh.WhatsAppChannel, _wh.load_facts, _nt._tell_hotel = было
+
+    check("вебхук отдаёт звонки сюда",
+          "_звонок(settings, payload)" in _insp.getsource(_wh.whatsapp_webhook))
+
+
 async def qa_airport() -> None:
     """Из аэропорта — и на языке гостя.
 
@@ -3762,6 +3846,7 @@ async def main() -> int:
     await qa_reception_notify()
     await qa_annotations()
     await qa_undelivered()
+    await qa_calls()
     await qa_airport()
     await qa_knowledge()
 
