@@ -139,6 +139,21 @@ async def main() -> int:
               bool(body.get("replied") or body.get("error") == "send failed"),
               str(body)[:120])
 
+    # Тариф. Бесплатный Developer пишет только в 3 чата за месяц, на
+    # остальных Green API отвечает 466. Узнать тариф через API нельзя, но
+    # каждый такой сбой оставляет в журнале исходящих тревогу отелю — по ней
+    # и смотрим. 2026-10-04 так без ответа остались 4 сообщения.
+    print("\n== Тариф Green API ==")
+    async with httpx.AsyncClient(timeout=60) as client:
+        исходящие = (await client.get(
+            f"{base}/lastOutgoingMessages/{settings.green_api_token}",
+            params={"minutes": 3 * 24 * 60})).json()
+    лимит = [o for o in исходящие if isinstance(o, dict)
+             and "НЕ УШЁЛ" in str(o.get("textMessage") or "")
+             and ("466" in str(o.get("textMessage")) or "лимит тарифа" in str(o.get("textMessage")))]
+    check("лимит тарифа не упирался последние 3 дня", not лимит,
+          f"{len(лимит)} ответов гостям не ушли — оплатите тариф Business в console.green-api.com")
+
     print("\n== Голосовые и звонки ==")
     async with httpx.AsyncClient(timeout=60) as client:
         health = (await client.get(HEALTH)).json()

@@ -3582,6 +3582,14 @@ async def qa_undelivered() -> None:
     check("сказано, что отвечать надо вручную", "вручную" in текст)
     check("названа причина сбоя", "timeout" in текст)
 
+    # Ошибка тарифа приходит JSON-ом, и ресепшн его не прочтёт. 2026-10-04
+    # так прошли незамеченными четыре сообщения гостей, один жил в отеле.
+    тариф = _wh._понятная_причина(
+        'HTTP 466: {"invokeStatus":{"method":"sendmessage","used":21,"total":0,'
+        '"status":"QUOTE_ALLOWED","description":"Monthly quota has been exceeded."}}')
+    check("кончился тариф Green API — сказано словами", "тариф" in тариф and "{" not in тариф, тариф)
+    check("и что делать — оплатить Business", "Business" in тариф)
+
     # Обработчик вебхука обязан этим пользоваться: без вызова всё
     # вышесказанное — мёртвый код.
     исходник = _insp.getsource(_wh)
