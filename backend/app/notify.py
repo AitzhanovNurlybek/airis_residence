@@ -276,6 +276,60 @@ async def notify_cancel_request(*, ref: str = "", guest: str = "", phone: str = 
     return await _tell_hotel("\n".join(lines), "просьба об отмене")
 
 
+async def _telegram(text: str, что: str, chat_id: str = "") -> bool:
+    """Отправить простой текст в Telegram. True — ушло.
+
+    Без разметки: в технических тревогах встречаются подчёркивания и
+    звёздочки (имена переменных, ответы API), и Markdown на них падает.
+    """
+    settings = get_settings()
+    chat_id = chat_id or settings.telegram_chat_id
+    if not (settings.telegram_bot_token and chat_id):
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": text[:4000],
+                      "disable_web_page_preview": True},
+            )
+        if response.status_code == 200:
+            return True
+        logger.warning("Telegram не принял %s: HTTP %s", что, response.status_code)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Telegram недоступен, %s не ушло: %s", что, error)
+    return False
+
+
+async def tell_developer(text: str, что: str) -> int:
+    """Техническая тревога разработчику: WhatsApp и Telegram. Возвращает, скольким ушло.
+
+    Два канала нарочно. 4 октября 2026 закончился тариф Green API, и через
+    WhatsApp не уходило уже ничего — в том числе тревоги о том, что не
+    уходит. Telegram от Green API не зависит. Если не настроен ни один
+    канал, остаётся письмо GitHub о красном запуске ежедневной проверки.
+    """
+    settings = get_settings()
+    sent = 0
+    if settings.dev_alert_numbers:
+        try:
+            from .channels.whatsapp import WhatsAppChannel, for_whatsapp
+
+            channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
+            for phone in settings.dev_alert_numbers:
+                try:
+                    await channel.send(phone if phone.endswith("@g.us") else f"{phone}@c.us",
+                                       for_whatsapp(text))
+                    sent += 1
+                except Exception as error:  # noqa: BLE001
+                    logger.warning("Разработчику в WhatsApp %s не ушло: %s", что, error)
+        except Exception as error:  # noqa: BLE001
+            logger.warning("WhatsApp не настроен, %s разработчику не ушло: %s", что, error)
+    if settings.dev_telegram_chat_id and await _telegram(text, что, settings.dev_telegram_chat_id):
+        sent += 1
+    return sent
+
+
 async def notify_telegram(lead: Lead) -> None:
     """Шлёт заявку в Telegram. Ошибка доставки не должна ронять запрос."""
     settings = get_settings()

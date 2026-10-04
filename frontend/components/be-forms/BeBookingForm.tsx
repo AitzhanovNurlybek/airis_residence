@@ -4,6 +4,7 @@ import {useEffect, useRef} from "react";
 import { usePathname } from 'next/navigation';
 import './be-style.css';
 import { bookingEngineLanguage } from "@/lib/language";
+import { restoreUtm } from "@/lib/utm";
 
 export function BeBookingForm() {
     const pathname = usePathname();
@@ -18,6 +19,9 @@ export function BeBookingForm() {
         // из <html lang>: переводчик меняет атрибут уже после запуска виджета,
         // а повторный запуск виджет игнорирует. См. lib/language.ts.
         const beLang = bookingEngineLanguage();
+        // Метка источника визита (бот в WhatsApp) — в адрес до запуска виджета:
+        // он переносит её в бронь. См. lib/utm.ts.
+        restoreUtm();
 
         /* eslint-disable */
         // @ts-ignore

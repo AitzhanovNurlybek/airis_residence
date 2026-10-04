@@ -71,7 +71,7 @@ BEFORE_ARRIVAL = (
 AFTER_DEPARTURE = (
     "{name}, спасибо, что выбрали Airis Residence!\n\n"
     "Если всё понравилось — будем благодарны за короткий отзыв, он помогает "
-    "нам больше, чем кажется.\n"
+    "нам больше, чем кажется: {review_url}\n"
     "А если что-то было не так, напишите прямо сюда: разберёмся."
 )
 
@@ -82,6 +82,80 @@ BOOKING_CANCELLED = (
     "Если передумаете или понадобятся другие даты — напишите, подберём номер."
 )
 
+
+
+# ───────────── иностранным гостям — то же по-английски ─────────────
+#
+# Отель бронирует Европа, а все сообщения по брони уходили по-русски:
+# «спасибо за бронирование», «завтра ждём», «оставьте отзыв». Язык выбираем
+# по номеру: +7 — Казахстан и Россия, им по-русски; остальным — по-английски.
+# Номер — единственное, что Exely надёжно отдаёт о госте.
+
+BOOKING_CREATED_EN = (
+    "{name}, thank you for booking with Airis Residence!\n\n"
+    "Booking {number}{room}, check-in {check_in}, check-out {check_out}.\n"
+    "Check-in from {check_in_time}, breakfast included.\n\n"
+    "If your plans change, just write here or call: {phone}."
+)
+
+BEFORE_ARRIVAL_EN = (
+    "{name}, we look forward to seeing you at Airis Residence tomorrow.\n\n"
+    "Booking {number}, check-in from {check_in_time}. The front desk is open "
+    "24/7 — arrive whenever suits you.\n\n"
+    "Need an airport transfer or help with parking? Write here and we'll arrange it."
+)
+
+AFTER_DEPARTURE_EN = (
+    "{name}, thank you for staying at Airis Residence!\n\n"
+    "If you enjoyed your stay, a short review would mean a lot to us: {review_url}\n"
+    "And if anything wasn't right, write here — we'll sort it out."
+)
+
+BOOKING_CANCELLED_EN = (
+    "{name}, booking {number} has been cancelled.\n\n"
+    "If you change your mind or need other dates, write here and we'll find a room."
+)
+
+_EN = {
+    BOOKING_CREATED: BOOKING_CREATED_EN,
+    BEFORE_ARRIVAL: BEFORE_ARRIVAL_EN,
+    AFTER_DEPARTURE: AFTER_DEPARTURE_EN,
+    BOOKING_CANCELLED: BOOKING_CANCELLED_EN,
+}
+
+
+def _digits(phone: str) -> str:
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def for_guest(template: str, phone: str) -> str:
+    """Шаблон на языке гостя: +7 — по-русски, остальные — по-английски."""
+    if not template or _digits(phone).startswith("7"):
+        return template
+    return _EN.get(template, template)
+
+
+#: Куда звать гостя с отзывом. Одна ссылка, а не три: выбор из трёх — повод
+#: не выбрать ничего. Казахстанский номер (+7 7…) — 2ГИС: там больше всего
+#: отзывов местных и там отель ищут в Алматы. Российский — Яндекс Карты.
+#: Иностранный — TripAdvisor. Когда профиль Google будет подтверждён,
+#: иностранцам лучше давать ссылку «оставить отзыв» Google (план работ с
+#: картами — docs/КАРТЫ_И_ПРОФИЛИ.md).
+REVIEW_URLS = {
+    "kz": "https://2gis.kz/almaty/firm/70000001102242831/tab/reviews",
+    "ru": "https://yandex.kz/maps/org/airis_residence/124423358417/reviews/",
+    "other": "https://www.tripadvisor.com/Hotel_Review-g298251-d34059859-Reviews-AIRIS_RESIDENCE_hotel-Almaty.html",
+}
+
+
+def review_url(phone: str) -> str:
+    """Ссылка на отзыв под гостя — по стране номера."""
+    цифры = _digits(phone)
+    if цифры.startswith("77"):
+        return REVIEW_URLS["kz"]
+    if цифры.startswith("7"):
+        return REVIEW_URLS["ru"]
+    return REVIEW_URLS["other"]
 
 #: Гость позвонил по WhatsApp на номер бота, и звонок никто не принял.
 #:

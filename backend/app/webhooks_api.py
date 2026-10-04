@@ -267,6 +267,16 @@ async def _сказать_отелю_что_ответ_не_ушёл(
     except Exception as error:  # noqa: BLE001
         logger.error("Не удалось сообщить отелю о недоставленном ответе: %s", error)
 
+    # Копия разработчику: сбой отправки — технический, и ресепшн его не
+    # починит. А если сломан сам WhatsApp (4 октября 2026 — кончился тариф),
+    # тревога ресепшну тоже не уйдёт, и останется только Telegram.
+    from .notify import tell_developer
+
+    try:
+        await tell_developer(текст, "ответ гостю не доставлен")
+    except Exception as error:  # noqa: BLE001
+        logger.error("Не удалось сообщить разработчику о недоставленном ответе: %s", error)
+
 
 #: Чем кончился звонок, если его никто не принял. «offer» — ещё звонит, и
 #: трубку могут взять с телефона; «pickUp» — взяли, писать незачем.
@@ -651,6 +661,38 @@ async def followup_tick(
     dry = request.query_params.get("dry_run") in ("1", "true", "yes")
     result = await followup_run(session, settings, dry_run=dry)
     return {"ok": True, **result}
+
+
+@router.post("/daily-check")
+async def daily_check(
+    request: Request,
+    response: Response,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Ежедневная проверка бота. Дёргается планировщиком раз в сутки.
+
+    Только чтение: гостям ничего не уходит. При проблемах — сообщение
+    разработчику, а в ответе `ok: false`, и запуск в GitHub краснеет (GitHub
+    присылает письмо — канал, не зависящий от WhatsApp).
+
+    `?quiet=1` — проверить, ничего никому не отправляя.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .daily_check import describe, run as check_run
+    from .notify import tell_developer
+
+    result = await check_run(settings)
+    тихо = request.query_params.get("quiet") in ("1", "true", "yes")
+    if not result["ok"] and not тихо:
+        result["notified"] = await tell_developer(describe(result), "ежедневная проверка")
+    return result
 
 
 @router.post("/unpaid")

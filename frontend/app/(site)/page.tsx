@@ -6,6 +6,7 @@ import { Hero } from "@/components/sections/Hero";
 import { About } from "@/components/sections/About";
 import { EventsNearby } from "@/components/sections/EventsNearby";
 import { Rooms } from "@/components/sections/Rooms";
+import { Reviews } from "@/components/sections/Reviews";
 import { Amenities } from "@/components/sections/Amenities";
 import { Gallery } from "@/components/sections/Gallery";
 import { Tour3D } from "@/components/sections/Tour3D";
@@ -38,7 +39,7 @@ export default async function HomePage() {
     <>
       <JsonLd data={faqJsonLd(faqItems.map((i) => ({ q: i.q, a: i.a })))} />
       {/* Порядок блоков — порядок вопросов гостя: какие номера и почём →
-          почему здесь → как выглядит на самом деле → что входит → где это
+          что пишут другие гости → почему здесь → как выглядит на самом деле → что входит → где это
           и как добраться → что рядом → условия → бронь.
 
           Раньше под первым экраном стояли события рядом, потом рассказ об
@@ -48,6 +49,7 @@ export default async function HomePage() {
           они теперь рядом с картой, где и отвечают на вопрос «что рядом». */}
       <Hero priceFrom={priceFrom} />
       <Rooms rooms={rooms} />
+      <Reviews />
       <About />
       <Gallery />
       <VideoShowcase />

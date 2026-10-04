@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { faqItems } from "@/lib/faq";
 import { getRoomsWithSource } from "@/lib/rooms";
-import { airport, amenities, eventVenues, nearby, site } from "@/lib/site";
+import { airport, amenities, eventVenues, nearby, reviews, site } from "@/lib/site";
 
 /**
  * Машиночитаемая выжимка всего, что отель рассказывает о себе.
@@ -110,6 +110,16 @@ export async function GET() {
       })),
       payment: airport.payment,
       routeGoogle: airport.routeGoogle,
+    },
+    // Оценка гостей и ссылки на отзывы — то же, что в блоке на главной.
+    // Гость спрашивает «а какие отзывы?», и бот отвечает фактом со ссылкой,
+    // а не «у нас хорошие отзывы».
+    reviews: {
+      rating: reviews.rating.value,
+      count: reviews.rating.count,
+      source: reviews.rating.source,
+      checked: reviews.checked,
+      links: reviews.links,
     },
     eventVenues,
     faq: faqItems,

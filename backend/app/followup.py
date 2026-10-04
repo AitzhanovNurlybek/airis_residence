@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .almaty import now as hotel_now
 from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
-from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION
+from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION, model_request
 from .db import DialogFollowup, DialogMessage, utcnow
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 from .lifecycle import quiet_hours
@@ -294,6 +294,9 @@ async def _decide(settings: Any, talk: list[dict[str, str]], hours: int,
         "anthropic-version": ANTHROPIC_VERSION,
         "content-type": "application/json",
     }
+    # Мышление, предел и резервная модель — как у консьержа: на Opus 5.5
+    # мышление идёт в предел токенов, и с прежними 700 JSON обрезался бы.
+    body, headers = model_request(settings, body, headers)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             answer = await client.post(ANTHROPIC_URL, json=body, headers=headers)
@@ -346,8 +349,16 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
         logger.warning("Дожим без справки не делаем: %s", error)
         return []
 
+    # Свои номера — не гости. Ресепшн проверял бота шаблонами «Уважаемый
+    # гость…» (2026-10-04), и дожим ответил бы ему «вы так и не
+    # забронировали». Номера отеля и разработчика пропускаем всегда.
+    свои = {*settings.lead_notify_numbers, *settings.corp_notify_numbers,
+            *getattr(settings, "dev_alert_numbers", [])}
+
     out: list[Nudge] = []
     for chat_id, hours in await _stale_chats(session, stale_hours=stale_hours, since=since):
+        if chat_id.split("@")[0] in свои:
+            continue
         step = await _step_for(session, chat_id, final_hours=final_hours)
         if step is None:
             continue

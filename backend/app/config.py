@@ -215,10 +215,20 @@ class Settings(BaseSettings):
         ))
 
     anthropic_api_key: str = ""
-    concierge_model: str = "claude-sonnet-5"
+    # Opus 5.5 на низком усилии. Сравнение 2026-10-05 на одних и тех же
+    # диалогах (бронь на трёх языках, просьбы на стойку, аэропорт,
+    # приветствия; по два прогона): Haiku 4.5 — 23 из 28 и казахский с
+    # грубыми ошибками; Sonnet 5 — 27 из 28; Sonnet 5.5 — 25 из 28;
+    # Opus 5.5 — 28 из 28 и естественный казахский. Ответ ≈ $0.014 против
+    # $0.005–0.009 у остальных, то есть около $14 на тысячу ответов.
+    concierge_model: str = "claude-opus-5-5"
     # Предел на ответ. Консьерж в мессенджере пишет коротко: длинную простыню
     # в WhatsApp не читают, а токены она жжёт на каждом сообщении.
     concierge_max_tokens: int = 700
+    # Уровень усилия для моделей с «мышлением» (Sonnet 5 / 5.5, Opus 5.5):
+    # для переписки с гостем Anthropic советует low — на простых репликах
+    # модель тогда не думает вовсе. На Haiku не действует.
+    concierge_effort: str = "low"
     # Сколько прошлых сообщений диалога подкладывать в запрос.
     concierge_history_depth: int = 12
 
@@ -300,6 +310,22 @@ class Settings(BaseSettings):
     def corp_notify_numbers(self) -> list[str]:
         """Кому дополнительно слать корпоративные уведомления."""
         return _recipients(self.corp_notify_phone)
+
+    # Разработчик — для технических тревог: ежедневная проверка, упор в
+    # лимит тарифа, неушедшие ответы. Ресепшн этого не починит, а узнать
+    # должен тот, кто может. Пусто — только Telegram (если настроен) и
+    # письмо GitHub о красном запуске.
+    dev_alert_phone: str = ""
+    # Чат Telegram для технических тревог разработчику — запасной канал на
+    # случай, когда сломан сам WhatsApp. Отдельно от telegram_chat_id: тот
+    # получает заявки с сайта, и смешивать их с тревогами незачем. Бот тот
+    # же (telegram_bot_token). Как узнать номер чата — telegram_chat_id.py.
+    dev_telegram_chat_id: str = ""
+
+    @property
+    def dev_alert_numbers(self) -> list[str]:
+        """Кому слать технические тревоги в WhatsApp."""
+        return _recipients(self.dev_alert_phone)
 
     followup_after_hours: int = 2
     followup_final_hours: int = 24

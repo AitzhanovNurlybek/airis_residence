@@ -56,7 +56,9 @@ from .guest_messages import (
     AFTER_DEPARTURE,
     BEFORE_ARRIVAL,
     EVENT_MESSAGES,
+    for_guest,
     render,
+    review_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,6 +175,7 @@ def _values(event: ExelyEvent, settings: Any) -> dict[str, Any]:
         "room": f" ({_room_name(data)})" if _room_name(data) else "",
         "phone": getattr(settings, "hotel_phone", "") or "+7 (777) 531-00-09",
         "check_in_time": "14:00",
+        "review_url": review_url(event.guest_phone or ""),
     }
 
 
@@ -216,7 +219,7 @@ async def plan_from_events(session: AsyncSession, settings: Any) -> list[Planned
         planned.append(
             Planned(
                 phone=event.guest_phone,
-                text=render(template, **values),
+                text=render(for_guest(template, event.guest_phone or ""), **values),
                 reason=f"{event.kind} по броне {event.booking_number}",
                 event_id=event.id,
             )
@@ -267,10 +270,12 @@ async def plan_from_calendar(session: AsyncSession, settings: Any) -> list[Plann
         values = _values(event, settings)
 
         if check_in == today + timedelta(days=1) and f"напоминание:{number}" not in already:
-            planned.append(Planned(event.guest_phone, render(BEFORE_ARRIVAL, **values),
+            planned.append(Planned(event.guest_phone,
+                                   render(for_guest(BEFORE_ARRIVAL, event.guest_phone), **values),
                                    f"завтра заезд по броне {number}"))
         if check_out == today - timedelta(days=1) and f"отзыв:{number}" not in already:
-            planned.append(Planned(event.guest_phone, render(AFTER_DEPARTURE, **values),
+            planned.append(Planned(event.guest_phone,
+                                   render(for_guest(AFTER_DEPARTURE, event.guest_phone), **values),
                                    f"вчера выезд по броне {number}"))
     return planned
 

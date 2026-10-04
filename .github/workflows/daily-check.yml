@@ -1,0 +1,40 @@
+# Ежедневная проверка бота.
+#
+# 4 октября 2026 бот сутки не отвечал гостям — кончился бесплатный тариф
+# Green API. Узнали по жалобе. Скрипт проверки был, но его запускают руками,
+# то есть уже после жалобы.
+#
+# Здесь то же, но раз в сутки и само: номер привязан, вебхук на месте, лимит
+# тарифа не держит, модель, распознавание голосовых, Exely и справка
+# отвечают. Только чтение — гостям ничего не уходит.
+#
+# При проблеме сервер пишет разработчику (WhatsApp и Telegram), а этот запуск
+# падает красным — и GitHub присылает письмо. Письмо доходит даже тогда,
+# когда сломан сам WhatsApp.
+name: Ежедневная проверка бота
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 09:00 по Алматы — до утреннего потока гостей
+  workflow_dispatch:      # и кнопкой, когда надо проверить
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверить бота
+        run: |
+          code=$(curl -s -o check.json -w "%{http_code}" --max-time 120 \
+            -X POST "https://airisresidence.kz/api/backend/api/webhooks/daily-check" \
+            -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "HTTP $code"
+          cat check.json
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Проверка не запустилась, код $code"
+            exit 1
+          fi
+          if ! grep -q '"ok":true' check.json; then
+            echo "::error::Бот не в порядке — подробности выше"
+            exit 1
+          fi

@@ -127,6 +127,7 @@ def booking_form_url(
     guests: int = 0,
     children_ages: list[int] | tuple[int, ...] = (),
     lang: str = "",
+    utm_source: str = "",
     today: date | None = None,
 ) -> str:
     """Ссылка на страницу /booking, где форма открывается уже заполненной.
@@ -147,6 +148,11 @@ def booking_form_url(
     `checkin`, `checkIn`, `dateFrom`, `arrivalDate` — а пару `date`+`nights`
     из движка TravelLine, на котором стоит Exely, не попробовали. Почти два
     месяца гость получал ссылку на сегодняшние даты и выставлял свои руками.
+
+    `utm_source` — откуда гость: виджет передаёт метки внутрь формы Exely
+    (проверено 2026-10-05 по адресу встроенной формы), и бронь из ссылки бота
+    видно по источнику. На сайте своей аналитики нет, так что это
+    единственное место, где источник брони вообще записывается.
 
     `lang` читает уже наш сайт, не виджет: переключает перевод страницы и
     запускает форму Exely на этом языке (см. frontend/lib/language.ts).
@@ -173,6 +179,9 @@ def booking_form_url(
         params.append(("children", ",".join(str(a) for a in ages)))
     if lang in LANGUAGES:
         params.append(("lang", lang))
+    if utm_source:
+        params += [("utm_source", utm_source), ("utm_medium", "bot"),
+                   ("utm_campaign", "concierge")]
 
     base = site_url.rstrip("/") + "/booking"
     return f"{base}?{urlencode(params, safe=',')}" if params else base

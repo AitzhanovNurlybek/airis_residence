@@ -428,6 +428,28 @@ async def qa_tools() -> None:
     check("при свободных номерах подсказки про телефон нет",
           "Не заканчивай разговор отказом" not in вывод2, вывод2[-160:])
 
+    # Троих взрослых Exely в один номер не продаёт ни в одной категории, и
+    # ответ выглядел как «всё занято». Семья «двое взрослых и ребёнок 4 лет»,
+    # посчитанная как трое, слышала «занято» (замерено 2026-10-05).
+    class _ТолькоНаДвоих(_ВсёЗанято):
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            сколько = 4 if guests <= 2 else 0
+            return Availability(check_in, check_out, 1, [
+                RoomOffer(room_slug="comfort", room_name="Comfort", rooms_left=сколько,
+                          price_per_night=45000, source="exely", rates=())], "exely")
+
+    на_троих = await _tool_availability(
+        _ТолькоНаДвоих(), {"check_in": "2026-11-20", "check_out": "2026-11-21", "guests": 3}, факты)
+    check("троим взрослым — не «всё занято», а честно про двоих в номере",
+          "НЕ «всё занято»" in на_троих and "свободно 4" in на_троих
+          and "СВОБОДНЫХ НЕТ НИ В ОДНОЙ" not in на_троих, на_троих[:160])
+    check("и подсказка пересчитать без детей до 6 лет", "младше 6" in на_троих)
+    на_двоих = await _tool_availability(
+        _ТолькоНаДвоих(), {"check_in": "2026-11-20", "check_out": "2026-11-21", "guests": 2}, факты)
+    check("на двоих — обычный список без пометки", "НЕ «всё занято»" not in на_двоих)
+    гости = AVAILABILITY_TOOL["input_schema"]["properties"]["guests"]["description"]
+    check("детей младше 6 в число гостей не считать", "младше 6 НЕ считай" in гости)
+
     # Правила должны говорить то же самое: подсказка в выводе сильнее, но
     # разговор заканчивается телефоном и там, где инструмент не звучал.
     правила = build_system_prompt("", "2026-09-02", availability="exely")
@@ -767,6 +789,14 @@ async def qa_tools() -> None:
     check("и что форма откроется уже заполненной", "уже заполненной" in live_mode)
     check("и что делать, если даты в ссылку не попали",
           "какие даты выбрать в форме" in live_mode)
+    # Имя спрашивали ДО ссылки — лишний шаг между «беру» и формой, на котором
+    # гость может уйти. Теперь ссылка сразу, вопрос об имени — в том же
+    # сообщении (решение 2026-10-05).
+    check("ссылка сразу, без вопросов перед ней", "ссылку на бронирование давай сразу" in live_mode)
+    check("имя — последней строкой того же сообщения",
+          "В том же сообщении, последней строкой, спроси, на чьё имя" in live_mode)
+    check("старого «спроси имя перед ссылкой» больше нет",
+          "Перед тем как дать ссылку на бронирование, спроси" not in live_mode)
     # Живой диалог: гость написал «на ближайшие даты какие номера свободные»,
     # а консьерж дважды подряд потребовал точные даты и ничего не показал.
     check("неопределённые даты не повод для допроса",
@@ -822,6 +852,11 @@ async def qa_tools() -> None:
     check("и число ночей", "nights=2" in link, link)
     check("и взрослые", "adults=1" in link, link)
     check("и язык гостя", "lang=en" in link, link)
+    с_метками = booking_form_url("https://airisresidence.kz", room_slug="comfort",
+                                 utm_source="whatsapp", today=сегодня)
+    check("метки источника, когда переданы",
+          "utm_source=whatsapp&utm_medium=bot&utm_campaign=concierge" in с_метками, с_метками)
+    check("без источника — без меток", "utm_" not in link, link)
     дети = booking_form_url("https://airisresidence.kz", room_slug="standart",
                             check_in="2026-10-20", check_out="2026-10-23", guests=2,
                             children_ages=[3, 5], today=сегодня)
@@ -854,6 +889,11 @@ async def qa_tools() -> None:
     сказано = _ссылка(_Set(), факты, {"room": "comfort", "check_in": "2099-01-10",
                                           "check_out": "2099-01-12", "guests": 2, "lang": "kk"})
     check("модели сказано, что форма заполнена", "уже заполненной" in сказано, сказано[:160])
+    check("ссылка бота с меткой WhatsApp", "utm_source=whatsapp" in сказано, сказано[:160])
+    # Opus 5.5 на казахском дважды из двух прислал ссылку без вопроса об
+    # имени: правило в своде проиграло, напоминание в ответе инструмента —
+    # то место, которое модель читает перед ответом.
+    check("вместе со ссылкой напомнить спросить имя", "на чьё имя будет бронь" in сказано)
     check("и названы подставленные даты", "10.01.2099" in сказано and "12.01.2099" in сказано)
     без_дат = _ссылка(_Set(), факты, {"room": "comfort", "guests": 2})
     check("без дат — предупреждение выбрать их в форме",
@@ -3647,6 +3687,187 @@ async def qa_undelivered() -> None:
           "_сказать_отелю_что_ответ_не_ушёл(" in исходник)
 
 
+async def qa_guest_messages_language() -> None:
+    """Сообщения по брони — на языке гостя и с ссылкой на отзыв.
+
+    Отель бронирует Европа, а «спасибо за бронирование», «завтра ждём» и
+    просьба об отзыве уходили всем по-русски. А в просьбе об отзыве не было
+    ссылки — гость не знал, куда его писать (найдено 2026-10-05).
+    """
+    head("Сообщения по брони: язык и отзыв")
+
+    import inspect as _insp  # noqa: PLC0415
+
+    import app.lifecycle as _lc  # noqa: PLC0415
+    from app.guest_messages import (  # noqa: PLC0415
+        AFTER_DEPARTURE, BEFORE_ARRIVAL, BOOKING_CANCELLED, BOOKING_CREATED, for_guest,
+        render, review_url,
+    )
+
+    check("казахстанскому номеру — по-русски", for_guest(BOOKING_CREATED, "+77019300370") == BOOKING_CREATED)
+    check("российскому — тоже", for_guest(BEFORE_ARRIVAL, "79161234567") == BEFORE_ARRIVAL)
+    for имя, шаблон in (("подтверждение", BOOKING_CREATED), ("накануне", BEFORE_ARRIVAL),
+                        ("после выезда", AFTER_DEPARTURE), ("отмена", BOOKING_CANCELLED)):
+        англ = for_guest(шаблон, "+8615712455710")
+        check(f"иностранцу «{имя}» — по-английски",
+              англ != шаблон and not any("а" <= ch <= "я" for ch in англ.lower()), англ[:60])
+
+    check("отзыв: Казахстан → 2ГИС", "2gis.kz" in review_url("+77019300370"))
+    check("отзыв: Россия → Яндекс", "yandex" in review_url("+79161234567"))
+    check("отзыв: иностранец → TripAdvisor", "tripadvisor" in review_url("+447700900123"))
+    после = render(AFTER_DEPARTURE, name="Анна", review_url=review_url("+77019300370"))
+    check("в просьбе об отзыве есть ссылка", "https://2gis.kz/" in после, после[-140:])
+
+    исходник = _insp.getsource(_lc)
+    check("рассылка выбирает язык по номеру", исходник.count("for_guest(") >= 3)
+    check("и подставляет ссылку на отзыв", "review_url(" in исходник)
+
+
+async def qa_followup_own() -> None:
+    """Дожим не пишет на свои номера — ресепшну, Айнур, разработчику."""
+    head("Дожим и свои номера")
+
+    import app.followup as _fu  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+
+    settings = _gs()
+    было = (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
+            settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone)
+
+    async def _залежались(_session, *, stale_hours, since):  # noqa: ANN001
+        return [("77775310009@c.us", 3), ("77087241460@c.us", 3), ("77010000001@c.us", 3)]
+
+    async def _шаг(_session, _chat, **_kw):  # noqa: ANN001
+        return 1
+
+    async def _история(_session, _chat):  # noqa: ANN001
+        return [{"role": "user", "text": "Уважаемый гость, ждём вас"}]
+
+    async def _решение(*_a, **_kw):  # noqa: ANN001
+        return True, "пропал после цены", "Мы смотрели для вас Comfort…"
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {}, "policy": {}, "rooms": []}
+
+    _fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts = (
+        _залежались, _шаг, _история, _решение, _факты)
+    settings.followup_since = "2026-10-05T12:00"
+    settings.lead_notify_phone = "+7 777 531 00 09"
+    settings.dev_alert_phone = "+77087241460"
+    try:
+        nudges = await _fu.plan(None, settings)
+        кому = {n.chat_id for n in nudges}
+        check("ресепшну дожим не пишет", "77775310009@c.us" not in кому)
+        check("разработчику — тоже", "77087241460@c.us" not in кому)
+        check("а гостю пишет", "77010000001@c.us" in кому, str(кому))
+    finally:
+        (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
+         settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone) = было
+
+
+async def qa_daily_check() -> None:
+    """Ежедневная проверка бота находит то, что ломалось молча.
+
+    4 октября 2026 бот сутки не отвечал гостям — кончился тариф Green API, —
+    и узнали по жалобе. Проверка должна поймать это сама.
+    """
+    head("Ежедневная проверка бота")
+
+    import time as _t  # noqa: PLC0415
+
+    import app.daily_check as _dc  # noqa: PLC0415
+    import app.knowledge as _kn  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.booking_system.base import Availability as _Av, RoomOffer as _Ro  # noqa: PLC0415
+
+    сейчас = int(_t.time())
+
+    def _зелёный(исходящие: list[dict]) -> httpx.MockTransport:
+        def _ответ(request: httpx.Request) -> httpx.Response:
+            путь = request.url.path
+            if "getStateInstance" in путь:
+                return httpx.Response(200, json={"stateInstance": "authorized"})
+            if "getSettings" in путь:
+                return httpx.Response(200, json={
+                    "wid": "77003002526@c.us", "incomingWebhook": "yes", "incomingCallWebhook": "yes",
+                    "webhookUrl": "https://airisresidence.kz/api/backend/api/webhooks/whatsapp?key=x"})
+            if "lastOutgoingMessages" in путь:
+                return httpx.Response(200, json=исходящие)
+            if "count_tokens" in путь:
+                return httpx.Response(200, json={"input_tokens": 9})
+            if путь.endswith("/models"):
+                return httpx.Response(200, json={"data": []})
+            return httpx.Response(404)
+        return httpx.MockTransport(_ответ)
+
+    class _Exely:
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            return _Av(check_in, check_out, 1, [_Ro(room_slug="comfort", room_name="Comfort",
+                                                    rooms_left=3, price_per_night=45000,
+                                                    source="exely")], "exely")
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"rooms": [{"slug": "comfort"}]}
+
+    настоящий_клиент = _dc.httpx.AsyncClient
+    было_факты = _kn.load_facts
+    settings = _gs()
+    было_настройки = (settings.green_api_id, settings.green_api_token, settings.lead_notify_phone,
+                      settings.anthropic_api_key, settings.speech_api_key)
+    settings.green_api_id, settings.green_api_token = "1", "t"
+    settings.lead_notify_phone, settings.anthropic_api_key = "77775310009", "k"
+    settings.speech_api_key = "s"
+    _kn.load_facts = _факты
+    try:
+        def _клиент(исходящие):
+            транспорт = _зелёный(исходящие)
+            return lambda **kw: настоящий_клиент(transport=транспорт, **{k: v for k, v in kw.items() if k != "transport"})
+
+        _dc.httpx.AsyncClient = _клиент([])
+        r = await _dc.run(settings, booking=_Exely())
+        check("здоровый бот — без замечаний", r["ok"] and not r["problems"], str(r["problems"])[:160])
+
+        # Тариф кончился: тревога с 466 и после неё — ни одного сообщения наружу.
+        тревога = {"chatId": "77003002526@c.us", "timestamp": сейчас - 600, "statusMessage": "sent",
+                   "textMessage": "🔴 Гость написал, а ответ НЕ УШЁЛ ... HTTP 466: quota"}
+        _dc.httpx.AsyncClient = _клиент([тревога])
+        r = await _dc.run(settings, booking=_Exely())
+        check("упор в лимит тарифа пойман", any("лимит тарифа" in p for p in r["problems"]),
+              str(r["problems"])[:160])
+
+        # После оплаты ответы снова уходят — старые тревоги уже не проблема.
+        ответ = {"chatId": "77019300370@c.us", "timestamp": сейчас - 60, "statusMessage": "delivered",
+                 "textMessage": "Здравствуйте!"}
+        _dc.httpx.AsyncClient = _клиент([тревога, ответ])
+        r = await _dc.run(settings, booking=_Exely())
+        check("после оплаты лимит не считается проблемой",
+              not any("лимит тарифа" in p for p in r["problems"]), str(r["problems"])[:160])
+
+        settings.lead_notify_phone = ""
+        _dc.httpx.AsyncClient = _клиент([])
+        r = await _dc.run(settings, booking=_Exely())
+        check("без получателя уведомлений — замечание",
+              any("LEAD_NOTIFY_PHONE" in p for p in r["problems"]))
+        текст = _dc.describe(r)
+        check("сообщение разработчику перечисляет проблемы",
+              "LEAD_NOTIFY_PHONE" in текст and "proverka_nomera.py" in текст)
+    finally:
+        _dc.httpx.AsyncClient = настоящий_клиент
+        _kn.load_facts = было_факты
+        (settings.green_api_id, settings.green_api_token, settings.lead_notify_phone,
+         settings.anthropic_api_key, settings.speech_api_key) = было_настройки
+
+    import inspect as _insp  # noqa: PLC0415
+
+    import app.webhooks_api as _wh  # noqa: PLC0415
+
+    исходник = _insp.getsource(_wh.daily_check)
+    check("точка проверки защищена ключом", "_presented(request) != secret" in исходник)
+    check("и пишет разработчику при проблемах", "tell_developer(" in исходник)
+    check("тревога о неушедшем ответе идёт и разработчику",
+          "tell_developer(" in _insp.getsource(_wh._сказать_отелю_что_ответ_не_ушёл))
+
+
 async def qa_front_desk() -> None:
     """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
 
@@ -3953,6 +4174,13 @@ async def qa_airport() -> None:
     check("казахский — пометка по-казахски",
           "по-казахски" in _language_note("Әуежайдан қалай жетуге болады?"))
     check("русский — без пометки", _language_note("как добраться из аэропорта?") == "")
+    # Приветствие — только в первом ответе. Пометка требовала его всегда, и на
+    # казахском бот начинал «Сәлеметсіз бе!» каждый ответ (2026-10-05).
+    check("в середине разговора — без нового приветствия",
+          "Сәлеметсіз" not in _language_note("Жақсы, аламын", first=False)
+          and "Hello" not in _language_note("Great, thanks", first=False))
+    check("в первом ответе приветствие названо",
+          "Сәлеметсіз" in _language_note("Сәлем", first=True))
     # Русский гость пишет латиницей названия — это не повод переходить на
     # английский.
     check("русский с латиницей — без пометки", _language_note("Comfort Plus на 20-е") == "")
@@ -4006,6 +4234,10 @@ async def qa_knowledge() -> None:
     автобусы = [o for o in аэропорт.get("options", []) if o.get("steps")]
     check("справка отдаёт маршруты из аэропорта с шагами", len(автобусы) >= 2, str(len(автобусы)))
     check("и они попадают в бриф", "КАК ДОБРАТЬСЯ ИЗ АЭРОПОРТА" in brief and "Путь:" in brief)
+    # Оценка гостей — та же, что в блоке на главной.
+    отзывы = facts.get("reviews") or {}
+    check("справка отдаёт оценку гостей", bool(отзывы.get("rating")), str(отзывы)[:80])
+    check("и она попадает в бриф", "ОТЗЫВЫ:" in brief)
     check("бриф не разбух", len(brief) < 12000, f"{len(brief)} символов")
     # Код категории нужен инструментам: по нему проверяется наличие и
     # собирается ссылка на форму. Без кода в справке модель подставляет
@@ -4050,6 +4282,15 @@ async def main() -> int:
     _notify._tell_hotel_настоящий = _notify._tell_hotel
     _notify._tell_hotel = _вместо_отправки
 
+    # Разработчику — тоже никуда: канал завёлся 2026-10-05 и шлёт в WhatsApp
+    # и Telegram напрямую, мимо _tell_hotel.
+    async def _вместо_разработчику(text: str, что: str) -> int:
+        отправлено_наружу.append((что, text))
+        return 1
+
+    _notify.tell_developer_настоящий = _notify.tell_developer
+    _notify.tell_developer = _вместо_разработчику
+
     qa_time()
     qa_exely_parsing()
     qa_modes()
@@ -4075,6 +4316,9 @@ async def main() -> int:
     await qa_undelivered()
     await qa_model_retry()
     await qa_front_desk()
+    await qa_daily_check()
+    await qa_followup_own()
+    await qa_guest_messages_language()
     await qa_empty_answer()
     await qa_calls()
     await qa_airport()

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { applyLanguageFromUrl, saveLanguage, savedLanguage, type Language } from "@/lib/language";
+import { rememberUtm } from "@/lib/utm";
 
 const languages: { code: Language; label: string; title: string }[] = [
   { code: "ru", label: "RU", title: "Русский" },
@@ -50,6 +51,10 @@ export function LanguageSwitcher({
     // переводится сразу, без перезагрузки. Делает это один экземпляр — тот,
     // что держит элемент переводчика, — иначе два переключателя в шапке
     // сделали бы одно и то же дважды.
+    // Метку источника (ссылка из бота) запоминаем на визит — на случай,
+    // если бронировать гость пойдёт с другой страницы. См. lib/utm.ts.
+    if (withGoogleElement) rememberUtm();
+
     if (withGoogleElement && applyLanguageFromUrl()) {
       // Кнопки RU/KZ/EN перечитают язык: событие storage в своей вкладке
       // само не приходит.

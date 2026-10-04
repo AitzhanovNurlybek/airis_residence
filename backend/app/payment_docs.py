@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 
 from .booking_system import BookingSystem
-from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION
+from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION, model_request
 from .config import Settings
 from .almaty import today as hotel_today
 
@@ -169,6 +169,9 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
         "content-type": "application/json",
     }
 
+    # Те же настройки модели, что у консьержа (см. model_request), но усилие
+    # среднее: здесь ищут признаки подделки чека, а не болтают с гостем.
+    payload, headers = model_request(settings, payload, headers, effort="medium")
     async with httpx.AsyncClient(timeout=90.0) as client:
         response = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
         response.raise_for_status()
