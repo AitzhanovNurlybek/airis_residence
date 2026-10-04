@@ -148,19 +148,42 @@ async def main() -> int:
         исходящие = (await client.get(
             f"{base}/lastOutgoingMessages/{settings.green_api_token}",
             params={"minutes": 3 * 24 * 60})).json()
-    лимит = [o for o in исходящие if isinstance(o, dict)
-             and "НЕ УШЁЛ" in str(o.get("textMessage") or "")
+    исходящие = [o for o in исходящие if isinstance(o, dict)]
+    упоры = [int(o.get("timestamp", 0)) for o in исходящие
+             if "НЕ УШЁЛ" in str(o.get("textMessage") or "")
              and ("466" in str(o.get("textMessage")) or "лимит тарифа" in str(o.get("textMessage")))]
-    check("лимит тарифа не упирался последние 3 дня", not лимит,
-          f"{len(лимит)} ответов гостям не ушли — оплатите тариф Business в console.green-api.com")
+    if упоры:
+        последний = max(упоры)
+        когда = time.strftime("%d.%m %H:%M", time.gmtime(последний + 5 * 3600))
+        # После оплаты лимит снимается сразу, а старые тревоги лежат в журнале
+        # ещё три дня. Если после последней ушло хоть одно сообщение в чужой
+        # чат (тревоги идут в свой) — тариф уже не держит.
+        ушло_после = [o for o in исходящие
+                      if int(o.get("timestamp", 0)) > последний
+                      and str(o.get("chatId")) != wid
+                      and str(o.get("statusMessage")) in ("sent", "delivered", "read")]
+        check("лимит тарифа не держит отправку", bool(ушло_после),
+              f"{len(упоры)} ответов гостям не ушли, последний раз {когда}, и после этого "
+              f"наружу не ушло ни одного сообщения — оплатите тариф Business в console.green-api.com")
+        if ушло_после:
+            print(f"  (в лимит упирался до {когда}, после ушло {len(ушло_после)} — тариф уже не держит)")
+    else:
+        check("лимит тарифа не упирался последние 3 дня", True)
 
-    print("\n== Голосовые и звонки ==")
+    print("\n== Голосовые, звонки, уведомления ==")
     async with httpx.AsyncClient(timeout=60) as client:
         health = (await client.get(HEALTH)).json()
     # Без ключа бот на каждое голосовое отвечает «пока не распознаю», и
     # снаружи это не отличить от работающего бота.
     check("голосовые распознаются (ключ задан на сайте)",
           health.get("speech_configured") is True, str(health.get("speech_configured")))
+    # Без получателя уведомления уходят в «сообщение себе» на телефоне бота,
+    # где их никто не читает. 2026-10-04 так незамеченными прошли четыре
+    # тревоги «ответ гостю не ушёл».
+    check("уведомления отелю идут людям, а не на сам номер бота",
+          health.get("lead_notify_configured") is True,
+          "не задан LEAD_NOTIFY_PHONE в Vercel" if health.get("lead_notify_configured") is False
+          else str(health.get("lead_notify_configured")))
     check("уведомления о звонках включены",
           str(live.get("incomingCallWebhook")) == "yes", str(live.get("incomingCallWebhook")))
     if secret:
