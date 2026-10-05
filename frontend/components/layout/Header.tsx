@@ -73,7 +73,7 @@ export function Header() {
               href={`tel:${site.contacts.phonePrimaryRaw}`}
               className="hidden items-center gap-2 text-sm whitespace-nowrap text-cream/80 transition-colors hover:text-sand-300 md:flex xl:hidden 2xl:flex"
             >
-              <IconPhone className="size-4" />
+              <IconPhone className="size-4 shrink-0" />
               {site.contacts.phonePrimary}
             </a>
 
@@ -156,7 +156,7 @@ export function Header() {
                 href={`tel:${site.contacts.phonePrimaryRaw}`}
                 className={buttonClass("outline", "lg", "w-full")}
               >
-                <IconPhone className="size-4" />
+                <IconPhone className="size-4 shrink-0" />
                 {site.contacts.phonePrimary}
               </a>
             </div>
