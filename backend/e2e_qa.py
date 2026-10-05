@@ -4608,6 +4608,20 @@ async def qa_staff_images_facts() -> None:
     settings = _gs()
     чат = f"44{int(_t.time() * 1000) % 10_000_000_000:010d}@c.us"
 
+    # Сотрудник сам начинает разговор («сообщите время приезда») — бот не
+    # уступает: гость ответит, когда смены уже не будет.
+    чат_рассылки = f"44{int(_t.time() * 1000 + 3) % 10_000_000_000:010d}@c.us"
+    from app.dialogs import remember_staff as _rs, guest_wrote_recently as _gwr  # noqa: PLC0415
+
+    check("гость ещё не писал — разговор начинает сотрудник",
+          not await _gwr(SessionLocal, "whatsapp", чат_рассылки))
+    await _rs(SessionLocal, "whatsapp", чат_рассылки, "Dear Guest, please let us know your arrival time",
+              pauses_bot=False)
+    check("на рассылку сотрудника бот не замолкает",
+          not await staff_active(SessionLocal, "whatsapp", чат_рассылки, 60))
+    async with SessionLocal() as ses:
+        check("но дожим туда всё равно не пишет", await _fu._staff_spoke(ses, чат_рассылки))
+
     # 1. Сообщение с телефона отеля — сотрудник.
     исходящее = {"typeWebhook": "outgoingMessageReceived", "idMessage": f"STAFF-{_t.time()}",
                  "senderData": {"chatId": чат, "sender": "77003002526@c.us"},
@@ -4636,6 +4650,9 @@ async def qa_staff_images_facts() -> None:
         вызван_ответ.append(message.text)
         return _fl.Reply("Hello!")
 
+    from app.dialogs import remember_guest as _rg  # noqa: PLC0415
+
+    await _rg(SessionLocal, "whatsapp", чат, "It has a sofa bed too, right?")
     было = (_wh.WhatsAppChannel, _wh.reply_for)
     _wh.WhatsAppChannel, _wh.reply_for = _Канал, _ответ
     ключ = {"X-Api-Key": settings.whatsapp_webhook_secret}

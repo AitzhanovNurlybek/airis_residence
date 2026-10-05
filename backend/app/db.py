@@ -722,6 +722,11 @@ class StaffMessage(Base):
     channel: Mapped[str] = mapped_column(String(20), index=True)
     chat_id: Mapped[str] = mapped_column(String(80), index=True)
     text: Mapped[str] = mapped_column(Text, default="")
+    #: Молчит ли бот после этого сообщения. Ответ сотрудника в живом
+    #: разговоре — да. Сообщение, которым сотрудник сам начинает разговор
+    #: («сообщите время приезда» накануне заезда), — нет: гость ответит, когда
+    #: смена уже закончится, и без бота останется без ответа.
+    pauses_bot: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -810,6 +815,10 @@ class GuestName(Base):
 
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
+    "staff_messages": {
+        # TRUE, а не 1: Postgres не принимает число для BOOLEAN (см. ниже).
+        "pauses_bot": "BOOLEAN NOT NULL DEFAULT TRUE",
+    },
     "rooms": {
         "video": "VARCHAR(500) DEFAULT ''",
         "video_poster": "VARCHAR(500) DEFAULT ''",

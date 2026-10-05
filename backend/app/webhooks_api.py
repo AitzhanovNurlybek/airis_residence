@@ -46,6 +46,7 @@ from .dialogs import (
     answered_same_recently,
     chat_turn,
     guest_texts,
+    guest_wrote_recently,
     remember_guest,
     remember_staff,
     save_turn,
@@ -510,10 +511,16 @@ async def whatsapp_webhook(
     if сотрудник is not None:
         if await seen_before(SessionLocal, "staff", сотрудник.message_id):
             return {"ok": True, "duplicate": True}
-        await remember_staff(SessionLocal, WA_CHANNEL, сотрудник.chat_id, сотрудник.text)
-        logger.info("Вебхук WhatsApp: сотрудник ответил в %s — бот молчит %d мин",
-                    сотрудник.chat_id, settings.staff_pause_minutes)
-        return {"ok": True, "staff": True}
+        # Гость писал за сутки — это ответ в живом разговоре, и бот уступает.
+        # Не писал — сотрудник сам начал разговор (накануне заезда просит
+        # время приезда), и ответ гостя подхватит бот: смена может закончиться.
+        уступить = await guest_wrote_recently(SessionLocal, WA_CHANNEL, сотрудник.chat_id)
+        await remember_staff(SessionLocal, WA_CHANNEL, сотрудник.chat_id, сотрудник.text,
+                             pauses_bot=уступить)
+        logger.info("Вебхук WhatsApp: сотрудник написал в %s — %s", сотрудник.chat_id,
+                    f"бот молчит {settings.staff_pause_minutes} мин" if уступить
+                    else "сам начал разговор, бот остаётся")
+        return {"ok": True, "staff": True, "pauses_bot": уступить}
 
     # Green API присылает и исходящие, и статусы доставки, и события групп.
     # _parse отбирает только входящие сообщения от людей и возвращает None

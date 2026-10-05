@@ -227,11 +227,13 @@ STAFF_MARK = "[Ответил сотрудник отеля] "
 
 
 async def remember_staff(
-    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, text: str
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, text: str,
+    *, pauses_bot: bool = True,
 ) -> None:
     """Сотрудник написал гостю сам: отметить, что в чате человек, и запомнить сказанное."""
     async with sessions() as session:
-        session.add(StaffMessage(channel=channel, chat_id=chat_id, text=text))
+        session.add(StaffMessage(channel=channel, chat_id=chat_id, text=text,
+                                 pauses_bot=pauses_bot))
         session.add(DialogMessage(channel=channel, chat_id=chat_id, role="assistant",
                                   content=STAFF_MARK + text))
         await session.commit()
@@ -250,7 +252,31 @@ async def staff_active(
                 select(StaffMessage.id)
                 .where(StaffMessage.channel == channel)
                 .where(StaffMessage.chat_id == chat_id)
+                .where(StaffMessage.pauses_bot.is_(True))
                 .where(StaffMessage.created_at >= since)
+                .limit(1)
+            )
+        ).scalar()
+    return found is not None
+
+
+async def guest_wrote_recently(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, hours: int = 24
+) -> bool:
+    """Писал ли гость в этот чат за последние `hours` часов.
+
+    Нужно, чтобы отличить ответ сотрудника в живом разговоре (бот молчит) от
+    сообщения, которым сотрудник сам начинает разговор (бот остаётся в чате).
+    """
+    since = utcnow() - timedelta(hours=hours)
+    async with sessions() as session:
+        found = (
+            await session.execute(
+                select(DialogMessage.id)
+                .where(DialogMessage.channel == channel)
+                .where(DialogMessage.chat_id == chat_id)
+                .where(DialogMessage.role == "user")
+                .where(DialogMessage.created_at >= since)
                 .limit(1)
             )
         ).scalar()
