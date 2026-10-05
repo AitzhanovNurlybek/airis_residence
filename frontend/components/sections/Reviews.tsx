@@ -24,7 +24,11 @@ function Stars({ count }: { count: number }) {
 
 export function Reviews() {
   return (
-    <section aria-labelledby="otzyvy-title" className="border-y border-white/8 bg-ink-900/40">
+    <section
+      id="otzyvy"
+      aria-labelledby="otzyvy-title"
+      className="scroll-mt-24 border-y border-white/8 bg-ink-900/40"
+    >
       <div className="container-page py-14 md:py-20">
         <Reveal>
           <p className="eyebrow">Отзывы гостей</p>
@@ -88,6 +92,34 @@ export function Reviews() {
             {new Date(reviews.checked).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
           </span>
         </div>
+
+        {/* Гость, который уже жил у нас, ищет, где оставить отзыв, — и
+            чаще всего не находит. Кнопки ведут прямо на форму площадки. */}
+        <Reveal>
+          <div className="mt-12 rounded-2xl border border-sand-400/20 bg-ink-950/50 p-6 md:p-8">
+            <h3 className="font-display text-xl font-semibold text-cream">Жили у нас? Оставьте отзыв</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+              Пара строк о том, что понравилось и что стоит улучшить, помогает другим гостям выбрать, а
+              нам — стать лучше. Выберите, где вам удобнее.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {reviews.write.map((place) => (
+                <a
+                  key={place.url}
+                  href={place.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex flex-col rounded-xl border border-white/10 px-5 py-4 transition-colors hover:border-sand-400/50 hover:bg-white/5"
+                >
+                  <span className="font-medium text-cream">
+                    {place.name} <span className="text-sand-300 transition-transform group-hover:translate-x-0.5">→</span>
+                  </span>
+                  <span className="mt-1 text-xs text-muted">{place.note}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );

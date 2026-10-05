@@ -518,6 +518,15 @@ export const reviews = {
     { name: "Отзывы на Яндекс Картах", url: "https://yandex.kz/maps/org/airis_residence/124423358417/reviews/" },
     { name: "Отзывы в 2ГИС", url: "https://2gis.kz/almaty/firm/70000001102242831/tab/reviews" },
   ],
+  // «Оставить отзыв» — сразу на форму площадки. Отзывы о компании на её же
+  // сайте Google не засчитывает, поэтому своей формы нет: гость пишет туда,
+  // где отзыв увидят другие. Google — добавить ссылку «Попросить оставить
+  // отзыв» из профиля компании (g.page/r/…), когда её пришлют.
+  write: [
+    { name: "2ГИС", note: "читают в Алматы", url: "https://2gis.kz/almaty/firm/70000001102242831/tab/reviews" },
+    { name: "Яндекс Карты", note: "читают в России и Казахстане", url: "https://yandex.kz/maps/org/airis_residence/124423358417/reviews/?add-review=true" },
+    { name: "TripAdvisor", note: "читают иностранцы", url: "https://www.tripadvisor.com/UserReviewEdit-g298251-d34059859" },
+  ],
   items: [
     {
       author: "Людмила Н.",
@@ -566,6 +575,7 @@ export const eventVenues = [
 
 export const navLinks = [
   { href: "/#nomera", label: "Номера" },
+  { href: "/#otzyvy", label: "Отзывы" },
   { href: "/#otel", label: "Об отеле" },
   { href: "/#tur", label: "3D-тур" },
   { href: "/#raspolozhenie", label: "Расположение" },
