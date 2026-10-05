@@ -85,7 +85,7 @@ export function ReviewForm() {
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <input name="name" required minLength={2} maxLength={80} placeholder="Ваше имя" className={field} />
-        <input name="stay" maxLength={60} placeholder="Когда жили, например «сентябрь 2026»" className={field} />
+        <input name="stay" maxLength={60} placeholder="Когда жили: «сентябрь 2026»" className={field} />
       </div>
       <textarea
         name="text"
@@ -99,7 +99,7 @@ export function ReviewForm() {
       <input
         name="contact"
         maxLength={120}
-        placeholder="Телефон или почта — не публикуется, если захотите ответа"
+        placeholder="Телефон или почта (не публикуется)"
         className={field}
       />
       {/* Ловушка для ботов: человек это поле не видит. */}
