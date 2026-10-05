@@ -3687,6 +3687,67 @@ async def qa_undelivered() -> None:
           "_сказать_отелю_что_ответ_не_ушёл(" in исходник)
 
 
+async def qa_chat_turn() -> None:
+    """Два сообщения одного чата — по очереди, а не параллельно.
+
+    2026-10-05 гость написал «будем к обеду» и через 20 секунд «около 12:00».
+    Ответы собирались одновременно, второй не видел первого, и гость дважды
+    подряд услышал про ранний заезд и про номер брони.
+    """
+    head("Очередь ответов в чате")
+
+    import asyncio as _aio  # noqa: PLC0415
+
+    import app.dialogs as _dl  # noqa: PLC0415
+    from app.concierge import build_system_prompt  # noqa: PLC0415
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.knowledge import render_brief  # noqa: PLC0415
+
+    журнал: list[str] = []
+    чат = f"7701{int(_aio.get_event_loop().time() * 1000) % 10_000_000:07d}@c.us"
+
+    async def _ответ(имя: str, пауза: float) -> None:
+        async with _dl.chat_turn(SessionLocal, "whatsapp", чат):
+            журнал.append(f"начал {имя}")
+            await _aio.sleep(пауза)
+            журнал.append(f"кончил {имя}")
+
+    было = _dl.TURN_WAIT_SECONDS
+    try:
+        await _aio.gather(_ответ("первый", 1.0), _ответ("второй", 0.1))
+    finally:
+        _dl.TURN_WAIT_SECONDS = было
+    check("второе сообщение ждёт, пока отвечено первое",
+          журнал in (["начал первый", "кончил первый", "начал второй", "кончил второй"],
+                     ["начал второй", "кончил второй", "начал первый", "кончил первый"]), str(журнал))
+
+    # Другой чат не ждёт: очередь — внутри одного разговора.
+    журнал.clear()
+    async def _в_чате(чат_id: str) -> None:
+        async with _dl.chat_turn(SessionLocal, "whatsapp", чат_id):
+            журнал.append("вошёл")
+            await _aio.sleep(0.5)
+    t0 = _aio.get_event_loop().time()
+    await _aio.gather(_в_чате(чат), _в_чате(чат.replace("7701", "7702")))
+    check("разные чаты не ждут друг друга", _aio.get_event_loop().time() - t0 < 0.9)
+
+    import inspect as _insp  # noqa: PLC0415
+    import app.webhooks_api as _wh  # noqa: PLC0415
+    check("вебхук отвечает по очереди", "chat_turn(" in _insp.getsource(_wh.whatsapp_webhook))
+
+    правила = build_system_prompt("", "2026-10-05", availability="exely")
+    check("вопрос в конце — только когда есть следующий шаг",
+          "Но вопрос — только когда есть следующий шаг" in правила)
+    check("сказанное не повторять", "Не повторяй сказанное в этом разговоре" in правила)
+    check("номер брони — только когда без него не обойтись",
+          "Номер брони спрашивай, только если" in правила)
+    бриф = render_brief({"hotel": {}, "policy": {}})
+    check("про хранение багажа — прямая строка, не обещать",
+          "Хранение багажа: в справке НЕ указано" in бриф)
+    check("подтверждённое хранение багажа попадает в бриф",
+          "Хранение багажа: бесплатно" in render_brief({"hotel": {}, "policy": {"luggage": "бесплатно"}}))
+
+
 async def qa_guest_messages_language() -> None:
     """Сообщения по брони — на языке гостя и с ссылкой на отзыв.
 
@@ -4319,6 +4380,7 @@ async def main() -> int:
     await qa_daily_check()
     await qa_followup_own()
     await qa_guest_messages_language()
+    await qa_chat_turn()
     await qa_empty_answer()
     await qa_calls()
     await qa_airport()

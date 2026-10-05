@@ -232,6 +232,11 @@ async def health():
         # 2026-10-05 выяснилось, что локально тесты шли на одной модели, а
         # какая стоит на боевом, снаружи было не узнать.
         "concierge_model": settings.concierge_model,
+        # Признаки настроек, которые 2026-10-05 не применились после смены в
+        # Vercel: снаружи их не видно, и «я вписал» против «работает»
+        # проверяется только так. Дата дожима — не секрет.
+        "dev_alert_configured": bool(settings.dev_alert_numbers or settings.dev_telegram_chat_id),
+        "followup_since": str(settings.followup_from or ""),
     }
 
 

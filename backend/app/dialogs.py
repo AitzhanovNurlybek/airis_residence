@@ -24,9 +24,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from datetime import timedelta
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import timedelta, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -291,3 +295,63 @@ async def forget_old(
         )
         await session.commit()
         return result.rowcount or 0
+
+
+#: Сколько ждать своей очереди и когда считать чужую блокировку брошенной.
+#: Ответ Opus с инструментами — до ~40 с; брошенная блокировка (функция
+#: упала посреди ответа) не должна держать чат дольше пары минут.
+TURN_WAIT_SECONDS = 90
+TURN_STALE_SECONDS = 150
+
+
+@asynccontextmanager
+async def chat_turn(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str
+) -> AsyncIterator[bool]:
+    """Отвечать гостю по очереди: одно сообщение чата — один ответ за раз.
+
+    Гость часто пишет двумя сообщениями подряд: «будем к обеду» — и через
+    20 секунд «около 12:00». Каждое приходит отдельным вебхуком, и раньше оба
+    ответа собирались параллельно: второй не видел первого и повторял его —
+    2026-10-05 гость дважды подряд услышал про ранний заезд за 20 000 ₸ и
+    просьбу прислать номер брони.
+
+    Теперь второе сообщение ждёт, пока первое отвечено и записано в историю,
+    и отвечается уже с ним перед глазами. Блокировка — строка в той же
+    таблице, что и отметки об обработке: уникальный ключ делает её атомарной
+    и в Postgres, и в SQLite. Не дождались — отвечаем всё равно: молчание
+    хуже повтора. Возвращает, удалось ли занять очередь.
+    """
+    key = f"lock:{channel}:{chat_id}"[:120]
+    deadline = time.monotonic() + TURN_WAIT_SECONDS
+    held = False
+    while True:
+        async with sessions() as session:
+            session.add(ChannelReceipt(message_id=key, channel="lock"))
+            try:
+                await session.commit()
+                held = True
+                break
+            except IntegrityError:
+                await session.rollback()
+                row = await session.get(ChannelReceipt, key)
+                created = row.created_at if row else None
+                if created is not None and created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                if row is None or (created and created < utcnow() - timedelta(seconds=TURN_STALE_SECONDS)):
+                    if row is not None:
+                        await session.delete(row)
+                        await session.commit()
+                    continue
+        if time.monotonic() > deadline:
+            logger.warning("Очередь чата %s не освободилась за %d с — отвечаю без неё",
+                           chat_id[-6:], TURN_WAIT_SECONDS)
+            break
+        await asyncio.sleep(1.5)
+    try:
+        yield held
+    finally:
+        if held:
+            async with sessions() as session:
+                await session.execute(delete(ChannelReceipt).where(ChannelReceipt.message_id == key))
+                await session.commit()

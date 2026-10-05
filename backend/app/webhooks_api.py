@@ -43,7 +43,7 @@ from .config import Settings, get_settings
 from .concierge import FALLBACK
 from .db import ExelyEvent, SessionLocal, get_session
 from .notify import notify_hotel_booking
-from .dialogs import answered_same_recently, save_turn, seen_before
+from .dialogs import answered_same_recently, chat_turn, save_turn, seen_before
 from .guest_messages import CALL_NOT_ANSWERED, render
 from .knowledge import KnowledgeUnavailable, load_facts
 
@@ -562,14 +562,18 @@ async def whatsapp_webhook(
         return {"ok": False, "error": "green api is not configured"}
 
     booking = get_booking_system(settings)
-    try:
-        reply = await reply_for(settings, booking, channel, message)
-    except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём
-        logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
-        reply = Reply(FALLBACK)
+    # По очереди внутри чата: второе сообщение гостя ждёт, пока первое
+    # отвечено и легло в историю (см. chat_turn). Иначе оба ответа
+    # собираются параллельно и повторяют друг друга.
+    async with chat_turn(SessionLocal, WA_CHANNEL, message.chat_id):
+        try:
+            reply = await reply_for(settings, booking, channel, message)
+        except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём
+            logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
+            reply = Reply(FALLBACK)
 
-    причина = await _отправить_с_повтором(
-        channel, message.chat_id, for_whatsapp(reply.text))
+        причина = await _отправить_с_повтором(
+            channel, message.chat_id, for_whatsapp(reply.text))
     if причина:
         logger.error("Вебхук WhatsApp: ответ гостю %s не доставлен: %s",
                      message.phone, причина)
