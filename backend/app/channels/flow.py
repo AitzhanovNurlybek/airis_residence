@@ -19,16 +19,26 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field, replace
 
 from ..almaty import today as hotel_today
 from ..concierge import answer
 from ..db import SessionLocal
 from ..corp_guest import find_corporate
-from ..dialogs import last_message_at, load_history, pause_hours, save_turn
+from ..dialogs import guest_texts, last_message_at, load_history, pause_hours, save_turn, seen_before
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
-from ..guest_messages import VOICE_NOT_SUPPORTED, render
+from ..guest_messages import (
+    FILE_RECEIVED,
+    FRONT_DESK_PHONE,
+    PAYMENT_APPLIED,
+    PAYMENT_DUPLICATE,
+    PAYMENT_NEEDS_CHECK,
+    VOICE_NOT_SUPPORTED,
+    guest_language,
+    in_language,
+)
 from ..speech import SpeechUnavailable, configured as speech_ready, transcribe
 from .whatsapp import Incoming, WhatsAppChannel
 
@@ -53,17 +63,39 @@ class Reply:
     text: str
     photos: list[dict[str, str]] = field(default_factory=list)
 
-#: Что ответить на присланный файл, который не оказался платёжкой.
-NOT_A_RECEIPT = (
-    "Получили ваш файл, спасибо. Похоже, это не платёжный документ — передам его "
-    "менеджеру, он посмотрит и свяжется с вами."
-)
+#: Окно, в котором несколько файлов подряд получают один ответ. 2026-10-05
+#: гость прислал три снимка брони и получил три одинаковых «Получили ваш
+#: файл» подряд — по-русски.
+FILE_WINDOW = 600
 
-#: И на платёжку, которую нельзя засчитать автоматически.
-NEEDS_MANAGER = (
-    "Спасибо, платёж получили. Он требует проверки менеджером — он посмотрит "
-    "сегодня и подтвердит. Если срочно, позвоните на стойку: +7 (777) 531-00-09."
-)
+
+async def _language(message: Incoming) -> str:
+    """Язык гостя для ответов без модели: по подписи, прошлым репликам, номеру."""
+    try:
+        earlier = await guest_texts(SessionLocal, CHANNEL, message.chat_id)
+    except Exception:  # noqa: BLE001 — без истории язык решит номер
+        earlier = []
+    return guest_language(message.text or "", message.phone, earlier)
+
+
+async def _hand_to_front_desk(message: Incoming, what: str, *, once: bool = True) -> bool:
+    """Передать файл гостя на стойку. False — уже передавали в этом окне.
+
+    Ответ гостю «передали на стойку» — обещание. Раньше его давали, а стойка
+    ничего не получала (как и с просьбами гостей до front_desk_request).
+    """
+    from ..notify import notify_front_desk  # noqa: PLC0415 — notify тянет каналы
+
+    if once and await seen_before(
+            SessionLocal, "file-ack", f"{message.chat_id}:{int(time.time() // FILE_WINDOW)}"):
+        return False
+    try:
+        await notify_front_desk(
+            request=f"Гость прислал файл в WhatsApp бота: {what}. Посмотрите его в чате и ответьте гостю.",
+            guest=message.sender_name or "", phone=message.phone)
+    except Exception as error:  # noqa: BLE001 — гостю всё равно ответим
+        log.warning("стойка не узнала о файле: %s", error)
+    return True
 
 
 async def handle_text(settings, booking, message: Incoming) -> Reply:
@@ -119,24 +151,36 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
 
 
 async def handle_file(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:
-    """Гость прислал файл — скорее всего чек."""
+    """Гость прислал файл — чек, снимок брони, документ.
+
+    Ответ — на языке гостя и один на несколько файлов подряд; всё, что бот
+    не засчитал сам, уходит на стойку.
+    """
+    язык = await _language(message)
+
+    async def _передали(what: str) -> Reply:
+        # Второй и третий снимок подряд — без нового ответа: стойка уже знает.
+        if not await _hand_to_front_desk(message, what):
+            return Reply("")
+        return Reply(in_language(FILE_RECEIVED, язык))
+
     try:
         data = await channel.download(message.file_url)
     except Exception as error:  # noqa: BLE001
         log.warning("файл не скачался: %s", error)
-        return Reply(NEEDS_MANAGER)
+        return await _передали("файл не скачался, бот его не видел")
 
     try:
         doc = await read_document(settings, data, message.file_name or "document.pdf")
     except ValueError as error:
         log.info("файл не разобран: %s", error)
-        return Reply(NOT_A_RECEIPT)
+        return await _передали("бот его не разобрал")
     except Exception as error:  # noqa: BLE001
         log.warning("разбор файла упал: %s", error)
-        return Reply(NEEDS_MANAGER)
+        return await _передали("разобрать не получилось")
 
     if not doc.is_payment:
-        return Reply(NOT_A_RECEIPT)
+        return await _передали("это не платёжный документ (возможно, снимок брони)")
 
     try:
         facts = await load_facts(settings)
@@ -147,15 +191,15 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
     log.info("платёжка: %s — %s", result.verdict, result.reason)
 
     if result.verdict == "applied":
-        return Reply(
-            f"Оплата получена и записана по брони {result.booking_ref}: "
-            f"{result.applied_amount} ₸. Спасибо!"
-        )
+        return Reply(in_language(PAYMENT_APPLIED, язык, ref=result.booking_ref,
+                                 amount=result.applied_amount))
     if result.verdict == "duplicate":
-        return Reply("Этот платёж мы уже получили раньше — всё в порядке, повторно ничего не нужно.")
-    if result.verdict == "rejected" and not doc.is_payment:
-        return Reply(NOT_A_RECEIPT)
-    return Reply(NEEDS_MANAGER)
+        return Reply(in_language(PAYMENT_DUPLICATE, язык))
+    # Засчитать сам бот не смог — проверит человек. Раньше гостю обещали
+    # «менеджер посмотрит», а менеджер ничего не получал.
+    await _hand_to_front_desk(
+        message, f"платёжку нужно проверить вручную ({result.reason})", once=False)
+    return Reply(in_language(PAYMENT_NEEDS_CHECK, язык, phone=FRONT_DESK_PHONE))
 
 
 async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:
@@ -188,13 +232,13 @@ async def handle_voice(settings, booking, channel: WhatsAppChannel, message: Inc
             log.info("← %s (голосом): %s", message.phone, spoken[:120])
             return await handle_text(settings, booking, heard)
 
-    phone = "+7 (777) 531-00-09"
+    phone = FRONT_DESK_PHONE
     try:
         facts = await load_facts(settings)
         phone = facts.get("hotel", {}).get("contacts", {}).get("phonePrimary") or phone
     except KnowledgeUnavailable:
         pass
-    return Reply(render(VOICE_NOT_SUPPORTED, phone=phone))
+    return Reply(in_language(VOICE_NOT_SUPPORTED, await _language(message), phone=phone))
 
 
 async def reply_for(settings, booking, channel: WhatsAppChannel, message: Incoming) -> Reply:

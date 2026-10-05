@@ -210,6 +210,49 @@ async def save_turn(
         await session.commit()
 
 
+async def guest_texts(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, limit: int = 6
+) -> list[str]:
+    """Последние реплики гостя текстом, от свежих к старым.
+
+    Нужны, чтобы понять язык гостя там, где в самом сообщении букв нет:
+    файл, голосовое, номер брони цифрами. Результаты инструментов, которые
+    тоже лежат в истории с ролью user, сюда не попадают.
+    """
+    if not chat_id:
+        return []
+    async with sessions() as session:
+        rows = (
+            await session.execute(
+                select(DialogMessage.content)
+                .where(DialogMessage.channel == channel)
+                .where(DialogMessage.chat_id == chat_id)
+                .where(DialogMessage.role == "user")
+                .order_by(DialogMessage.id.desc())
+                .limit(limit * 3)
+            )
+        ).scalars().all()
+
+    out: list[str] = []
+    for raw in rows:
+        try:
+            content = json.loads(raw)
+        except (TypeError, ValueError):
+            content = raw
+        if isinstance(content, list):
+            text = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            text = str(content or "")
+        if text.strip():
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def seen_before(
     sessions: async_sessionmaker[AsyncSession], channel: str, message_id: str
 ) -> bool:

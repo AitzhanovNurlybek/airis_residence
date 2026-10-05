@@ -40,11 +40,18 @@ from .channels import WhatsAppChannel, WhatsAppError
 from .channels.flow import CHANNEL as WA_CHANNEL, Reply, reply_for
 from .channels.whatsapp import _parse, for_whatsapp
 from .config import Settings, get_settings
-from .concierge import FALLBACK
 from .db import ExelyEvent, SessionLocal, get_session
 from .notify import notify_hotel_booking
-from .dialogs import answered_same_recently, chat_turn, save_turn, seen_before
-from .guest_messages import CALL_NOT_ANSWERED, render
+from .dialogs import answered_same_recently, chat_turn, guest_texts, save_turn, seen_before
+from .guest_messages import (
+    CALL_NOT_ANSWERED,
+    CANT_ANSWER,
+    FRONT_DESK_PHONE,
+    UNREADABLE,
+    guest_language,
+    in_language,
+    render,
+)
 from .knowledge import KnowledgeUnavailable, load_facts
 
 logger = logging.getLogger(__name__)
@@ -55,19 +62,6 @@ router = APIRouter(prefix="/api/webhooks", tags=["вебхуки"])
 #: разных установках отличается, а увидеть живой запрос мы пока не могли.
 #: Поэтому смотрим во все привычные места; лишнее не мешает, а недостающее
 #: означало бы отказ настоящему уведомлению.
-#: Что ответить на сообщение, содержимое которого мы прочитать не смогли.
-#:
-#: Гость прислал что-то, чего мы не разбираем: геопозицию, визитку, стикер
-#: или тип, которого у мессенджера вчера ещё не было. Раньше такое уходило в
-#: тишину, а тишина в переписке читается как «меня игнорируют».
-UNREADABLE = (
-    "Получили ваше сообщение, но прочитать его содержимое не смог — напишите, "
-    "пожалуйста, текстом."
-    "\n\n"
-    "Подскажу свободные номера и цены на ваши даты, расскажу про отель или найду "
-    "вашу бронь."
-)
-
 SECRET_HEADERS = (
     # В кабинете Exely имя заголовка задаётся вручную, полем «Имя ключа».
     # У нас оно указано как EXELY_WEBHOOK_SECRET — то же самое имя, что и у
@@ -530,8 +524,13 @@ async def whatsapp_webhook(
             return {"ok": True, "skipped": f"без ответа: {message.kind}"}
         logger.info("Вебхук WhatsApp: не прочитал «%s» от %s", message.kind, message.phone)
         try:
+            earlier = await guest_texts(SessionLocal, WA_CHANNEL, message.chat_id)
+        except Exception:  # noqa: BLE001 — без истории язык решит номер
+            earlier = []
+        try:
             channel = WhatsAppChannel(settings.green_api_id, settings.green_api_token)
-            await channel.send(message.chat_id, for_whatsapp(UNREADABLE))
+            await channel.send(message.chat_id, for_whatsapp(in_language(
+                UNREADABLE, guest_language("", message.phone, earlier))))
         except WhatsAppError as error:
             logger.warning("Вебхук WhatsApp: ответ не ушёл: %s", error)
             return {"ok": False, "error": "send failed"}
@@ -570,10 +569,22 @@ async def whatsapp_webhook(
             reply = await reply_for(settings, booking, channel, message)
         except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём
             logger.exception("Вебхук WhatsApp: обработка упала: %s", error)
-            reply = Reply(FALLBACK)
+            from .concierge import _сказать_о_запасном_ответе  # noqa: PLC0415
 
-        причина = await _отправить_с_повтором(
-            channel, message.chat_id, for_whatsapp(reply.text))
+            await _сказать_о_запасном_ответе(
+                f"обработка упала: {error}",
+                {"phone": message.phone, "name": message.sender_name, "chat_id": message.chat_id},
+                message.text or "")
+            reply = Reply(in_language(CANT_ANSWER, guest_language(message.text or "", message.phone),
+                                      phone=FRONT_DESK_PHONE))
+
+        # Пустой ответ — решение, а не сбой: на второй снимок подряд гость
+        # уже получил «передали на стойку», третий такой же ни к чему.
+        причина = (await _отправить_с_повтором(channel, message.chat_id, for_whatsapp(reply.text))
+                   if reply.text.strip() else "")
+    if not reply.text.strip() and not reply.photos:
+        logger.info("Вебхук WhatsApp: %s — ответ не нужен", message.phone)
+        return {"ok": True, "replied": False}
     if причина:
         logger.error("Вебхук WhatsApp: ответ гостю %s не доставлен: %s",
                      message.phone, причина)

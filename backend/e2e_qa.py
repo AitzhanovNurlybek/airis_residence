@@ -1659,9 +1659,9 @@ async def qa_channels() -> None:
     check("заметка самому себе разбирается как обычное сообщение",
           self_note is not None and self_note.chat_id == own)
     check("текст ответа на нечитаемое зовёт написать текстом",
-          "текстом" in UNREADABLE.lower())
+          "текстом" in UNREADABLE["ru"].lower())
     check("текст ответа говорит, чем можно помочь",
-          "свободные номера" in UNREADABLE)
+          "свободные номера" in UNREADABLE["ru"])
 
     # Заявки с сайта уходили только в Telegram, а он у отеля не настроен.
     # Шесть штук пролежали в базе непрочитанными, у четырёх дата заезда
@@ -4225,6 +4225,295 @@ async def qa_credits_alert() -> None:
     check("и только одна за час, а не на каждое сообщение", len(ушло) <= 1, str(len(ушло)))
 
 
+async def qa_guest_language_everywhere() -> None:
+    """Язык гостя — во всех ответах, и в тех, что уходят без модели.
+
+    2026-10-05 гость из Великобритании писал по-английски, а запасные ответы
+    («не могу свериться с ценами») и ответы на его снимки брони («не
+    платёжный документ») приходили по-русски — семь раз за двадцать минут.
+    Он перешёл на «Spasibo» и казахский, в чат вмешался сотрудник. Тревоги
+    при этом не было: она срабатывала только на кончившиеся деньги.
+    """
+    head("Язык гостя во всех ответах и тревога о запасном ответе")
+
+    import re as _re  # noqa: PLC0415
+    import time as _t  # noqa: PLC0415
+    from types import SimpleNamespace as _NS  # noqa: PLC0415
+
+    import app.channels.flow as _fl  # noqa: PLC0415
+    import app.concierge as _c  # noqa: PLC0415
+    import app.dialogs as _dl  # noqa: PLC0415
+    import app.followup as _fu  # noqa: PLC0415
+    import app.notify as _nt  # noqa: PLC0415
+    import app.webhooks_api as _wh  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.guest_messages import (  # noqa: PLC0415
+        CANT_ANSWER, FILE_RECEIVED, PAYMENT_APPLIED, PAYMENT_DUPLICATE, PAYMENT_NEEDS_CHECK,
+        UNREADABLE, VOICE_NOT_SUPPORTED, guest_language, in_language,
+    )
+
+    кириллица = _re.compile("[а-яёА-ЯЁәғқңөұүһіӘҒҚҢӨҰҮҺІ]")
+
+    # 1. Как понимается язык.
+    check("английская фраза — английский",
+          guest_language("We will be there at mid day", "+447542253459") == "en")
+    check("русская — русский", guest_language("Будем к обеду", "+77010000000") == "ru")
+    check("казахская — казахский",
+          guest_language("Сағат 14:00-де кездесеміз", "+77010000000") == "kk")
+    check("номер брони цифрами — по прошлым репликам гостя",
+          guest_language("6359909102", "+447542253459", ["It’s for today"]) == "en")
+    check("цифры без истории, иностранный номер — английский",
+          guest_language("6359909102", "+447542253459") == "en")
+    check("цифры без истории, номер +7 — русский",
+          guest_language("6359909102", "+77010000000") == "ru")
+    check("«ok» в русском разговоре — русский",
+          guest_language("ok", "+77010000000", ["Есть номер на завтра?"]) == "ru")
+    check("«Comfort Plus» в русском разговоре — русский",
+          guest_language("Comfort Plus", "+77010000000", ["Какие номера есть?"]) == "ru")
+    check("длинная английская фраза меняет язык разговора",
+          guest_language("Could you please send me the link to book it",
+                         "+77010000000", ["Какие номера есть?"]) == "en")
+
+    # 2. Все тексты без модели — на трёх языках, английский без кириллицы.
+    тексты = {"запасной ответ": CANT_ANSWER, "нечитаемое": UNREADABLE, "файл": FILE_RECEIVED,
+              "платёж на проверке": PAYMENT_NEEDS_CHECK, "платёж записан": PAYMENT_APPLIED,
+              "платёж повтором": PAYMENT_DUPLICATE, "голосовое": VOICE_NOT_SUPPORTED}
+    for имя, варианты in тексты.items():
+        check(f"«{имя}» — на русском, английском и казахском", set(варианты) >= {"ru", "en", "kk"})
+        английский = in_language(варианты, "en", phone="+7 (777) 531-00-09", ref="R-1", amount=1000)
+        check(f"«{имя}» по-английски — без единой русской буквы", not кириллица.search(английский),
+              английский[:80])
+        check(f"«{имя}» — подстановки раскрыты", "{" not in английский)
+
+    # 3. Запасной ответ модели — на языке гостя, и о нём узнают люди.
+    разработчику: list[str] = []
+    стойке: list[str] = []
+    виденные: set[str] = set()
+
+    async def _разработчику(text: str, что: str) -> int:
+        разработчику.append(text)
+        return 1
+
+    async def _отелю(text: str, что: str, *, corporate: bool = False) -> int:
+        стойке.append(text)
+        return 1
+
+    async def _seen(_sessions, channel: str, message_id: str) -> bool:
+        ключ = f"{channel}:{message_id}"
+        if ключ in виденные:
+            return True
+        виденные.add(ключ)
+        return False
+
+    async def _нет_модели(payload, headers, **_kw):  # noqa: ANN001
+        raise RuntimeError("HTTP 529: Overloaded")
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {}, "policy": {}, "rooms": [{"slug": "comfort", "name": "Comfort",
+                                                       "price": 45000, "capacity": 2}]}
+
+    отправлено: list[tuple[str, str]] = []
+
+    class _Канал:
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        async def send(self, chat_id: str, text: str) -> str:
+            отправлено.append((chat_id, text))
+            return "ok"
+
+        async def download(self, url: str) -> bytes:
+            return b"image"
+
+    settings = _gs()
+    было = (settings.anthropic_api_key, _c._call_model, _c.load_facts, _dl.seen_before,
+            _nt.tell_developer, _nt._tell_hotel, _fl.seen_before, _fl.guest_texts,
+            _fl.read_document, _fl.match_and_apply)
+    settings.anthropic_api_key = "k"
+    _c._call_model, _c.load_facts, _dl.seen_before = _нет_модели, _факты, _seen
+    _nt.tell_developer, _nt._tell_hotel = _разработчику, _отелю
+    try:
+        джеймс = {"phone": "+447542253459", "name": "James", "chat_id": "447542253459@c.us"}
+        r1 = await _c.answer(settings, message="Do I have a booking for today then?",
+                             history=[], today="2026-10-05", guest=джеймс)
+        check("запасной ответ англоязычному гостю — по-английски",
+              not r1["ok"] and not кириллица.search(r1["text"]), r1["text"][:80])
+        r2 = await _c.answer(settings, message="6359909102",
+                             history=[{"role": "user", "content": "It’s for today"},
+                                      {"role": "assistant", "content": "Thank you."}],
+                             today="2026-10-05", guest=джеймс)
+        check("и на номер брони цифрами — по-английски", not кириллица.search(r2["text"]),
+              r2["text"][:80])
+        r3 = await _c.answer(settings, message="Есть номер на завтра?", history=[],
+                             today="2026-10-05",
+                             guest={"phone": "+77010000000", "chat_id": "77010000000@c.us"})
+        check("русскому гостю — по-русски", r3["text"] == _c.FALLBACK, r3["text"][:80])
+        check("разработчик узнаёт о запасном ответе вместе с причиной",
+              any("529" in t for t in разработчику), str(разработчику)[:160])
+        check("разработчику — раз в час на вид причины, а не на каждое сообщение",
+              len(разработчику) == 1, str(len(разработчику)))
+        check("стойка узнаёт, что гостю надо ответить самим",
+              any("447542253459" in t and "ответьте" in t for t in стойке), str(стойке)[:160])
+        check("стойке — раз в час на гостя",
+              sum("447542253459" in t for t in стойке) == 1, str(len(стойке)))
+
+        # Пометка о языке ставится и тогда, когда в сообщении одни цифры.
+        запросы: list[dict] = []
+
+        async def _модель(payload, headers, **_kw):  # noqa: ANN001
+            запросы.append(payload)
+            return {"content": [{"type": "text", "text": "Thank you."}], "stop_reason": "end_turn",
+                    "usage": {}}
+
+        _c._call_model = _модель
+        await _c.answer(settings, message="6359909102",
+                        history=[{"role": "user", "content": "It’s for today"},
+                                 {"role": "assistant", "content": "Thank you."}],
+                        today="2026-10-05", guest=джеймс)
+        последняя = запросы[-1]["messages"][-1]["content"] if запросы else ""
+        текст = " ".join(b.get("text", "") for b in последняя) if isinstance(последняя, list) else str(последняя)
+        check("номер брони цифрами получает пометку «гость пишет не по-русски»",
+              "НЕ по-русски" in текст, текст[:120])
+
+        # 4. Снимки и файлы: один ответ на несколько подряд, на языке гостя,
+        # а стойка правда получает сообщение.
+        стойке.clear()
+
+        async def _истории(_sessions, _channel, _chat, limit: int = 6):  # noqa: ANN001
+            return ["Do I have a booking for today then?"]
+
+        async def _не_платёжка(_settings, _data, _name):  # noqa: ANN001
+            return _NS(is_payment=False)
+
+        _fl.seen_before, _fl.guest_texts, _fl.read_document = _seen, _истории, _не_платёжка
+        снимок = _parse({"typeWebhook": "incomingMessageReceived", "idMessage": f"IMG-{_t.time()}",
+                         "senderData": {"chatId": "447542253459@c.us", "senderName": "James"},
+                         "messageData": {"typeMessage": "imageMessage", "fileMessageData": {
+                             "downloadUrl": "https://example/1.jpg", "fileName": "1.jpg"}}})
+        ответы = [await _fl.handle_file(settings, None, _Канал(), снимок) for _ in range(3)]
+        check("на три снимка подряд — один ответ, а не три",
+              sum(bool(r.text) for r in ответы) == 1, str([r.text[:30] for r in ответы]))
+        check("ответ на снимок — по-английски",
+              bool(ответы[0].text) and not кириллица.search(ответы[0].text), ответы[0].text[:80])
+        check("стойка узнаёт о снимке, и один раз",
+              sum("файл" in t for t in стойке) == 1, str(стойке)[:160])
+
+        # Платёжка, которую не засчитать автоматически: обещание «менеджер
+        # проверит» теперь выполняется — стойка получает сообщение.
+        стойке.clear()
+
+        async def _платёжка(_settings, _data, _name):  # noqa: ANN001
+            return _NS(is_payment=True)
+
+        async def _на_проверку(_booking, _doc, facts=None):  # noqa: ANN001
+            return _NS(verdict="needs_manager", reason="сумма не совпала", booking_ref="",
+                       applied_amount=0)
+
+        _fl.read_document, _fl.match_and_apply = _платёжка, _на_проверку
+        чек = _parse({"typeWebhook": "incomingMessageReceived", "idMessage": f"PAY-{_t.time()}",
+                      "senderData": {"chatId": "447542253459@c.us", "senderName": "James"},
+                      "messageData": {"typeMessage": "documentMessage", "fileMessageData": {
+                          "downloadUrl": "https://example/r.pdf", "fileName": "r.pdf"}}})
+        ответ = await _fl.handle_file(settings, None, _Канал(), чек)
+        check("платёжка на проверку — ответ по-английски",
+              not кириллица.search(ответ.text), ответ.text[:80])
+        check("и стойка правда получает её на проверку",
+              any("проверить вручную" in t for t in стойке), str(стойке)[:160])
+
+        # 5. Пустой ответ (второй снимок подряд) в WhatsApp не уходит.
+        from httpx import ASGITransport  # noqa: PLC0415
+
+        from app.main import app as _app  # noqa: PLC0415
+
+        было_канал, было_ответ = _wh.WhatsAppChannel, _wh.reply_for
+        отправлено.clear()
+
+        async def _пусто(*_a, **_k):  # noqa: ANN002, ANN003
+            return _fl.Reply("")
+
+        _wh.WhatsAppChannel, _wh.reply_for = _Канал, _пусто
+        try:
+            async with httpx.AsyncClient(transport=ASGITransport(app=_app), base_url="http://qa") as cl:
+                ответ_вебхука = await cl.post(
+                    "/api/webhooks/whatsapp",
+                    headers={"X-Api-Key": settings.whatsapp_webhook_secret},
+                    json={"typeWebhook": "incomingMessageReceived", "idMessage": f"EMPTY-{_t.time()}",
+                          "senderData": {"chatId": "447542253459@c.us", "senderName": "James"},
+                          "messageData": {"typeMessage": "imageMessage", "fileMessageData": {
+                              "downloadUrl": "https://example/2.jpg", "fileName": "2.jpg"}}})
+        finally:
+            _wh.WhatsAppChannel, _wh.reply_for = было_канал, было_ответ
+        check("пустой ответ гостю не отправляется", ответ_вебхука.status_code == 200 and not отправлено,
+              f"HTTP {ответ_вебхука.status_code} {отправлено[:1]}")
+    finally:
+        (settings.anthropic_api_key, _c._call_model, _c.load_facts, _dl.seen_before,
+         _nt.tell_developer, _nt._tell_hotel, _fl.seen_before, _fl.guest_texts,
+         _fl.read_document, _fl.match_and_apply) = было
+
+    # 6. Дожим пишет на языке гостя.
+    system_prompts: list[str] = []
+    настоящий = _fu.httpx.AsyncClient
+
+    def _отвечает(request: httpx.Request) -> httpx.Response:
+        import json as _json  # noqa: PLC0415
+
+        system_prompts.append(str(_json.loads(request.content).get("system")))
+        return httpx.Response(200, json={"content": [{"type": "text", "text":
+                                                      '{"write": false, "why": "qa", "text": ""}'}]})
+
+    было_ключ = settings.anthropic_api_key
+    settings.anthropic_api_key = "k"
+    _fu.httpx.AsyncClient = lambda **kw: настоящий(
+        transport=httpx.MockTransport(_отвечает), **{k: v for k, v in kw.items() if k != "transport"})
+    try:
+        await _fu._decide(settings, [{"role": "Гость", "text": "Is it free on Friday?"}], 5, 1,
+                          "бриф", "en")
+    finally:
+        _fu.httpx.AsyncClient = настоящий
+        settings.anthropic_api_key = было_ключ
+    check("дожим англоязычному гостю просит писать по-английски",
+          bool(system_prompts) and "по-английски (English)" in system_prompts[-1])
+    import inspect as _insp  # noqa: PLC0415
+
+    check("дожим определяет язык гостя по переписке",
+          "guest_language(" in _insp.getsource(_fu.plan))
+
+    # 7. Лимит запросов: ждём столько, сколько просит сервер, но не дольше 20 секунд.
+    паузы: list[float] = []
+
+    class _Шим:
+        @staticmethod
+        async def sleep(секунд: float) -> None:
+            паузы.append(секунд)
+
+    for просит, ждём in (("7", 7.0), ("120", 20.0)):
+        паузы.clear()
+        очередь = [httpx.Response(429, headers={"retry-after": просит}, text="rate_limit_error"),
+                   httpx.Response(200, json={"content": [], "stop_reason": "end_turn"})]
+        было_asyncio = _c.asyncio
+        _c.asyncio = _Шим
+        try:
+            await _c._call_model({"model": "m"}, {}, transport=httpx.MockTransport(
+                lambda request: очередь.pop(0)))
+        finally:
+            _c.asyncio = было_asyncio
+        check(f"retry-after {просит} → пауза {ждём:g} с", паузы == [ждём], str(паузы))
+
+    # Сервер раз за разом просит ждать по 20 секунд — сдаёмся раньше минуты.
+    паузы.clear()
+    было_asyncio = _c.asyncio
+    _c.asyncio = _Шим
+    try:
+        await _c._call_model({"model": "m"}, {}, transport=httpx.MockTransport(
+            lambda request: httpx.Response(429, headers={"retry-after": "20"}, text="rate")))
+        сдались = False
+    except RuntimeError:
+        сдались = True
+    finally:
+        _c.asyncio = было_asyncio
+    check("всего пауз за ответ — не больше 25 секунд", сдались and sum(паузы) <= 25, str(паузы))
+
+
 async def qa_front_desk() -> None:
     """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
 
@@ -4676,6 +4965,7 @@ async def main() -> int:
     await qa_front_desk()
     await qa_daily_check()
     await qa_credits_alert()
+    await qa_guest_language_everywhere()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()

@@ -51,6 +51,7 @@ from .almaty import now as hotel_now
 from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
 from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION, model_request
 from .db import DialogFollowup, DialogMessage, utcnow
+from .guest_messages import guest_language
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 from .lifecycle import quiet_hours
 
@@ -123,6 +124,7 @@ DECIDE_PROMPT = """Ты помогаешь отелю не терять гост
 — О наличии и ценах говори только в прошедшем времени, как о том, что прозвучало в разговоре: «мы смотрели Standart на 2–3 сентября за 36 000 ₸». Это правда в любом случае, а «свободен» — только пока не занят.
 — Если хочешь подтолкнуть к брони, зови проверить заново: «посмотреть, свободно ли ещё?» Это и честно, и возвращает гостя в разговор.
 — Не здоровайся заново: вы уже разговариваете.
+— {language_line}
 
 {final_note}
 
@@ -270,15 +272,26 @@ async def _history(session: AsyncSession, chat_id: str) -> list[dict[str, str]]:
     return out
 
 
+#: Язык сообщения вдогонку. Промпт и справка — по-русски, и без прямого
+#: указания модель пишет иностранцу по-русски: 2026-10-05 так уходили все
+#: ответы без модели гостю из Великобритании, и в чат вмешался сотрудник.
+LANGUAGE_LINES = {
+    "ru": "Пиши по-русски: гость пишет по-русски.",
+    "en": "Пиши по-английски (English): гость пишет по-английски. Ни одного русского слова.",
+    "kk": "Пиши по-казахски: гость пишет по-казахски.",
+}
+
+
 async def _decide(settings: Any, talk: list[dict[str, str]], hours: int,
-                  step: int, brief: str) -> tuple[bool, str, str]:
+                  step: int, brief: str, language: str = "ru") -> tuple[bool, str, str]:
     """Спросить модель, дожимать ли этот разговор. Возвращает (писать, почему, текст)."""
     if not settings.anthropic_api_key:
         return False, "нет ключа Anthropic", ""
 
     lines = "\n".join(f"{m['role']}: {m['text']}" for m in talk)
     system = DECIDE_PROMPT.format(
-        hours=hours, final_note=FINAL_NOTE if step >= MAX_STEPS else ""
+        hours=hours, final_note=FINAL_NOTE if step >= MAX_STEPS else "",
+        language_line=LANGUAGE_LINES.get(language, LANGUAGE_LINES["ru"]),
     )
     body = {
         "model": settings.concierge_model,
@@ -365,7 +378,10 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
         talk = await _history(session, chat_id)
         if not talk:
             continue
-        write, why, text = await _decide(settings, talk, hours, step, brief)
+        язык = guest_language(
+            "", chat_id.split("@")[0],
+            [m["text"] for m in reversed(talk) if m["role"] == "Гость"])
+        write, why, text = await _decide(settings, talk, hours, step, brief, язык)
         if not write:
             logger.info("Дожим %s: не пишем — %s", _who(chat_id), why or "разговор закончен")
             continue

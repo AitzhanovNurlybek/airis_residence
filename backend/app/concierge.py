@@ -31,6 +31,14 @@ import httpx
 from .booking_system import BookingSystem, BookingSystemUnavailable
 from .booking_system.exely import LANGUAGES, booking_form_url, stay_for_link
 from .config import Settings
+from .guest_messages import (
+    CANT_ANSWER,
+    FRONT_DESK_PHONE,
+    KAZAKH_LETTERS,
+    guest_language,
+    in_language,
+    language_of,
+)
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 
 logger = logging.getLogger(__name__)
@@ -38,11 +46,11 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
-#: Ответ, когда факты не загрузились. Лучше признаться, чем сочинить цену.
-FALLBACK = (
-    "Извините, сейчас не могу свериться с актуальными ценами и наличием. "
-    "Позвоните, пожалуйста, на стойку: +7 (777) 531-00-09 — там ответят сразу, круглосуточно."
-)
+#: Ответ, когда модель не ответила или факты не загрузились. Лучше
+#: признаться, чем сочинить цену. Это русский вариант: гостю уходит текст на
+#: его языке (guest_messages.CANT_ANSWER), а это имя оставлено для тех, кто
+#: сравнивает с ним ответ.
+FALLBACK = in_language(CANT_ANSWER, "ru", phone=FRONT_DESK_PHONE)
 
 RULES = """Ты — консьерж отеля Airis Residence в Алматы. Ты переписываешься с гостем в мессенджере от лица отеля.
 
@@ -1322,10 +1330,10 @@ async def _belongs_to_guest(booking: BookingSystem, ref: str, guest: dict[str, s
 
 
 #: Буквы, которых нет в русском, — по ним казахский отличается уверенно.
-_KAZAKH_LETTERS = set("әғқңөұүһіӘҒҚҢӨҰҮҺІ")
+_KAZAKH_LETTERS = KAZAKH_LETTERS
 
 
-def _language_note(message: str, first: bool = True) -> str:
+def _language_note(message: str, first: bool = True, language: str = "") -> str:
     """Пометка о языке гостя, если он пишет не по-русски.
 
     Правило «отвечай на языке гостя» в своде есть, но проигрывает брифу: тот
@@ -1343,22 +1351,23 @@ def _language_note(message: str, first: bool = True) -> str:
     Приветствие — только в первом сообщении разговора (`first`). Пока
     пометка требовала его всегда, бот на казахском начинал «Сәлеметсіз бе!»
     каждый ответ подряд — замерено 2026-10-05 в трёхходовом диалоге брони.
+
+    `language` — язык, уже понятый по всему разговору (guest_language). Без
+    него язык берётся по одному сообщению, а в сообщении из одних цифр (номер
+    брони) букв нет, и пометка не ставилась вовсе — при русской справке это
+    русский ответ иностранцу.
     """
-    текст = message or ""
-    if any(ch in _KAZAKH_LETTERS for ch in текст):
+    язык = language or language_of(message)
+    if язык == "kk":
         начало = ("начиная с приветствия «Сәлеметсіз бе»" if first
                   else "без нового приветствия — разговор уже идёт")
         return ("[Служебная пометка, гостю не пересказывай: гость пишет по-казахски. "
                 f"Весь ответ — по-казахски, {начало}.]")
-    буквы = [ch for ch in текст if ch.isalpha()]
-    if not буквы:
-        return ""
-    русских = sum(1 for ch in буквы if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
-    if русских == 0:
+    if язык == "en":
         начало = ("начиная с приветствия: не «Здравствуйте», а «Hello»" if first
                   else "без нового приветствия — разговор уже идёт")
         return ("[Служебная пометка, гостю не пересказывай: гость пишет НЕ по-русски. "
-                f"Весь ответ — на языке его сообщения (английский — по-английски), {начало}. "
+                f"Весь ответ — на языке, на котором пишет гость (английский — по-английски), {начало}. "
                 "Ни одного русского слова — факты выше переведи сам.]")
     return ""
 
@@ -1455,7 +1464,66 @@ def _без_мышления(history: list[dict[str, Any]]) -> list[dict[str, An
 #: лимит запросов (429) и сбои на её стороне. Таймаут сюда не входит: после
 #: минуты ожидания второй минуты гость уже не дождётся.
 ПОВТОРЯЕМЫЕ = {429, 500, 502, 503, 504, 529}
-ПАУЗЫ_ПОВТОРА: tuple[float, ...] = (1.0, 2.5)
+ПАУЗЫ_ПОВТОРА: tuple[float, ...] = (1.0, 3.0, 8.0)
+
+#: Дольше этого между попытками не ждём, даже если сервер просит больше
+#: (заголовок retry-after): гость в переписке ждёт ответа, а не минуту тишины.
+ПОТОЛОК_ОЖИДАНИЯ = 20.0
+
+#: И всего пауз за один ответ — не больше этого. Пока ответ ждёт, следующие
+#: сообщения того же гостя стоят в очереди (chat_turn), и минута ожидания
+#: превращается в несколько минут тишины.
+ВСЕГО_ЖДАТЬ = 25.0
+
+
+def _подождать_просят(response: httpx.Response) -> float:
+    """Сколько секунд сервер просит подождать перед повтором (retry-after)."""
+    try:
+        return min(max(float(response.headers.get("retry-after") or 0), 0.0), ПОТОЛОК_ОЖИДАНИЯ)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _вид_причины(причина: str) -> str:
+    """Короткий вид причины — для «одна тревога в час на вид»."""
+    return (причина or "").split(":")[0].strip()[:40] or "неизвестно"
+
+
+async def _сказать_о_запасном_ответе(причина: str, guest: dict[str, Any] | None,
+                                     message: str) -> None:
+    """Гость получил запасную фразу вместо ответа — сказать людям.
+
+    2026-10-05 модель отказала посреди разговора с гостем из Великобритании, и
+    он получил «позвоните на стойку» четыре раза, по-русски. Тревога была
+    только на кончившиеся деньги, а причина была другая, — о сбое узнали от
+    сотрудника, который вмешался в чат. Теперь о каждом таком ответе знают:
+    - стойка — чтобы ответить гостю самим, пока бот молчит (раз в час на гостя);
+    - разработчик — чтобы починить, с причиной (раз в час на вид причины).
+    """
+    from .almaty import now as hotel_now  # noqa: PLC0415
+    from .db import SessionLocal  # noqa: PLC0415
+    from .dialogs import seen_before  # noqa: PLC0415
+    from .notify import notify_front_desk, tell_developer  # noqa: PLC0415
+
+    guest = guest or {}
+    час = f"{hotel_now():%Y%m%d%H}"
+    телефон = str(guest.get("phone") or "")
+    чат = str(guest.get("chat_id") or телефон)
+    try:
+        if "credit balance" in (причина or "").lower():
+            await _сказать_что_кончились_кредиты(причина)
+        elif not await seen_before(SessionLocal, "alert", f"fallback:{_вид_причины(причина)}:{час}"):
+            await tell_developer(
+                f"⚠️ Бот Airis не ответил гостю {телефон or 'без номера'} — ушла запасная "
+                f"фраза «позвоните на стойку».\n\nПричина: {(причина or '')[:300]}",
+                "запасной ответ гостю")
+        if телефон and not await seen_before(SessionLocal, "alert", f"fallback-guest:{чат}:{час}"):
+            await notify_front_desk(
+                request=("Бот не смог ответить гостю — ответьте ему сами в WhatsApp бота. "
+                         f"Гость написал: «{(message or '')[:200]}»"),
+                guest=str(guest.get("name") or ""), phone=телефон)
+    except Exception as error:  # noqa: BLE001 — тревога не должна ронять ответ гостю
+        logger.error("Не удалось сообщить о запасном ответе: %s", error)
 
 
 async def _сказать_что_кончились_кредиты(error: str) -> None:
@@ -1493,8 +1561,17 @@ async def _call_model(payload: dict[str, Any], headers: dict[str, str], *,
     гостю отказ там, где хватило бы секунды подождать.
     """
     последняя: Exception | None = None
+    просят = 0.0
+    прождали = 0.0
     for пауза in (0.0, *ПАУЗЫ_ПОВТОРА):
+        # Сервер сам говорит, сколько ждать (retry-after при лимите запросов):
+        # 2026-10-05 гость присылал сообщения и снимки очередью, а пауза в
+        # одну-две секунды против лимита «в минуту» не помогала.
+        пауза = max(пауза, просят) if пауза else 0.0
+        if прождали + пауза > ВСЕГО_ЖДАТЬ:
+            break
         if пауза:
+            прождали += пауза
             await asyncio.sleep(пауза)
         try:
             async with httpx.AsyncClient(timeout=60.0, transport=transport) as client:
@@ -1504,7 +1581,8 @@ async def _call_model(payload: dict[str, Any], headers: dict[str, str], *,
             logger.warning("Модель: сбой соединения (%s) — пробую ещё раз", error)
             continue
         if response.status_code in ПОВТОРЯЕМЫЕ:
-            последняя = RuntimeError(f"HTTP {response.status_code}: {response.text[:120]}")
+            последняя = RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+            просят = _подождать_просят(response)
             logger.warning("Модель ответила %s — пробую ещё раз", response.status_code)
             continue
         if response.status_code >= 400:
@@ -1532,6 +1610,23 @@ def _with_note(messages: list[dict[str, Any]], index: int, note: str) -> list[di
     return out
 
 
+def _guest_texts(history: list[dict[str, Any]] | None) -> list[str]:
+    """Реплики гостя текстом из истории, от свежих к старым — для его языка."""
+    out: list[str] = []
+    for реплика in reversed(history or []):
+        if реплика.get("role") != "user":
+            continue
+        content = реплика.get("content")
+        if isinstance(content, list):
+            text = " ".join(b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text")
+        else:
+            text = str(content or "")
+        if text.strip():
+            out.append(text)
+    return out
+
+
 async def answer(
     settings: Settings,
     *,
@@ -1556,13 +1651,22 @@ async def answer(
     канала, а не из разговора. Именно по нему решается, чьи брони видны:
     сказанному в переписке «это моя бронь L-0007» верить нельзя.
     """
+    # Язык гостя — по всему разговору, а не по одной реплике: в номере брони
+    # цифрами букв нет. По нему и пометка для модели, и запасной ответ.
+    язык = guest_language(message, (guest or {}).get("phone", ""), _guest_texts(history))
+
+    async def _запасной(причина: str) -> dict[str, Any]:
+        await _сказать_о_запасном_ответе(причина, guest, message)
+        return {"text": in_language(CANT_ANSWER, язык, phone=FRONT_DESK_PHONE),
+                "ok": False, "reason": причина}
+
     if not settings.anthropic_api_key:
-        return {"text": FALLBACK, "ok": False, "reason": "нет ключа Anthropic"}
+        return await _запасной("нет ключа Anthropic")
 
     try:
         facts = await load_facts(settings)
     except KnowledgeUnavailable as error:
-        return {"text": FALLBACK, "ok": False, "reason": f"нет фактов: {error}"}
+        return await _запасной(f"нет фактов: {error}")
 
     guest = guest or {}
     mode = booking.source if booking else "none"
@@ -1727,7 +1831,8 @@ async def answer(
             ],
             "messages": _with_note(
                 messages, новая_реплика,
-                " ".join(x for x in (пометка_паузы, _language_note(message, first=not history)) if x)),
+                " ".join(x for x in (пометка_паузы, _language_note(
+                    message, first=not history, language=язык)) if x)),
         }
         if tools:
             payload["tools"] = tools
@@ -1736,9 +1841,7 @@ async def answer(
             data = await _call_model(payload, headers)
         except Exception as error:  # noqa: BLE001
             logger.warning("Модель недоступна, гостю уходит запасной ответ: %s", error)
-            if "credit balance" in str(error).lower():
-                await _сказать_что_кончились_кредиты(str(error))
-            return {"text": FALLBACK, "ok": False, "reason": f"модель недоступна: {error}"}
+            return await _запасной(f"модель недоступна: {error}")
 
         usage = data.get("usage", {})
         spent_in += usage.get("input_tokens") or 0
@@ -1754,7 +1857,7 @@ async def answer(
             logger.warning("Модель отказалась отвечать: %s", data.get("stop_details"))
             if сказано_раньше:
                 return _ответ(сказано_раньше)
-            return {"text": FALLBACK, "ok": False, "reason": "отказ модели"}
+            return await _запасной("отказ модели")
 
         if data.get("stop_reason") == "tool_use" and booking is not None:
             # Модель нередко пишет ответ гостю прямо рядом с вызовом
@@ -1821,7 +1924,7 @@ async def answer(
             text = сказано_раньше
         if not text:
             logger.warning("Пустой ответ модели дважды, гостю уходит запасной ответ")
-            return {"text": FALLBACK, "ok": False, "reason": "пустой ответ модели"}
+            return await _запасной("пустой ответ модели")
 
         return _ответ(text)
 
@@ -1830,4 +1933,4 @@ async def answer(
     if сказано_раньше:
         # Лучше то, что модель уже успела сказать гостю, чем «позвоните».
         return _ответ(сказано_раньше)
-    return {"text": FALLBACK, "ok": False, "reason": "модель не сошлась за пять кругов"}
+    return await _запасной("модель не сошлась за пять кругов")
