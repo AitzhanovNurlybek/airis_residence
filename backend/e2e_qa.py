@@ -4781,6 +4781,103 @@ async def save_turn_qa(chat_id: str, messages: list[dict]) -> None:
     await save_turn(SessionLocal, "whatsapp", chat_id, messages, 0)
 
 
+async def qa_price_sync() -> None:
+    """Цены на сайте — как в Exely, по ближайшей продаваемой дате.
+
+    2026-10-05: прайс ресепшена, Exely и сайт показывали разные цены. Владелец
+    решил, что сайт берёт цены из Exely. Цены в Exely сезонные (одноместный в
+    октябре 35 000, с ноября 25 000), поэтому берётся ближайшая дата.
+    """
+    head("Цены сайта из Exely")
+
+    from datetime import date as _d, timedelta as _td  # noqa: PLC0415
+    from types import SimpleNamespace as _NS  # noqa: PLC0415
+    import inspect as _insp  # noqa: PLC0415
+
+    from sqlalchemy import delete as _del  # noqa: PLC0415
+
+    import app.webhooks_api as _wh  # noqa: PLC0415
+    from app.db import Room as _Room  # noqa: PLC0415
+    from app.price_sync import base_price, exely_prices, sync_prices  # noqa: PLC0415
+
+    check("обычная цена — прежняя у тарифа со скидкой",
+          base_price([{"price": 45000, "was": 50000}, {"price": 50000}]) == 50000)
+    check("тарифы объектами тоже читаются",
+          base_price([_NS(price=31500, was=35000), _NS(price=33129, was=None)]) == 35000)
+    check("скидок нет — самый дорогой тариф", base_price([{"price": 30000}, {"price": 32000}]) == 32000)
+    check("продано — цены нет", base_price(()) is None)
+
+    сегодня = _d(2026, 10, 5)
+    # QA-номер: на 1-й день продан, на 4-й — 30 000 / 33 000, на 7-й (новый
+    # сезон) — 20 000. Ближайшая продаваемая дата — 4-й день.
+    def _offer(slug, price):  # noqa: ANN001, ANN202
+        rates = (_NS(price=price - 1000, was=price),) if price else ()
+        return _NS(room_slug=slug, rates=rates)
+
+    class _Exely:
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            день = (check_in - сегодня).days
+            if день < 4:
+                return _NS(offers=[_offer("qa-price-room", None), _offer("qa-price-single", None)])
+            if день < 7:
+                return _NS(offers=[_offer("qa-price-room", 30000 if guests == 1 else 33000),
+                                   _offer("qa-price-single", 25000 if guests == 1 else None)])
+            return _NS(offers=[_offer("qa-price-room", 20000), _offer("qa-price-single", 15000)])
+
+    цены = await exely_prices(_Exely(), сегодня)
+    check("цена — на ближайшую продаваемую дату, а не следующего сезона",
+          цены.get("qa-price-room") == {1: 30000, 2: 33000}, str(цены.get("qa-price-room")))
+
+    async with SessionLocal() as ses:
+        await ses.execute(_del(_Room).where(_Room.slug.in_(["qa-price-room", "qa-price-single"])))
+        ses.add(_Room(slug="qa-price-room", name="QA", short_name="QA", price=1, price_double=0,
+                      area="1 м²", capacity=2, is_published=False))
+        ses.add(_Room(slug="qa-price-single", name="QA1", short_name="QA1", price=1, price_double=0,
+                      area="1 м²", capacity=1, is_published=False))
+        await ses.commit()
+    try:
+        async with SessionLocal() as ses:
+            проба = await sync_prices(ses, _Exely(), today=сегодня, dry_run=True)
+        async with SessionLocal() as ses:
+            номер = await ses.get(_Room, (await ses.execute(
+                __import__("sqlalchemy").select(_Room.id).where(_Room.slug == "qa-price-room"))).scalar())
+            check("пробный прогон ничего не меняет", номер.price == 1 and bool(проба["changes"]),
+                  str(проба["changes"])[:120])
+        async with SessionLocal() as ses:
+            итог = await sync_prices(ses, _Exely(), today=сегодня)
+        async with SessionLocal() as ses:
+            rows = {r.slug: r for r in (await ses.execute(__import__("sqlalchemy").select(_Room).where(
+                _Room.slug.in_(["qa-price-room", "qa-price-single"])))).scalars()}
+        check("цена за одного и за двоих — как в Exely",
+              (rows["qa-price-room"].price, rows["qa-price-room"].price_double) == (30000, 33000),
+              str((rows["qa-price-room"].price, rows["qa-price-room"].price_double)))
+        check("у одноместного цена за двоих та же, что за одного",
+              (rows["qa-price-single"].price, rows["qa-price-single"].price_double) == (25000, 25000))
+        async with SessionLocal() as ses:
+            повтор = await sync_prices(ses, _Exely(), today=сегодня)
+        check("повторный прогон ничего не меняет", not повтор["changes"], str(повтор["changes"])[:100])
+
+        class _Молчит:
+            async def availability(self, *_a, **_k):  # noqa: ANN002, ANN003
+                return _NS(offers=[])
+
+        async with SessionLocal() as ses:
+            пусто = await sync_prices(ses, _Молчит(), today=сегодня)
+        check("Exely не отдал цен — на сайте ничего не трогаем", not пусто["ok"])
+    finally:
+        async with SessionLocal() as ses:
+            await ses.execute(_del(_Room).where(_Room.slug.in_(["qa-price-room", "qa-price-single"])))
+            await ses.commit()
+
+    check("точка переноса цен защищена ключом",
+          "_presented(request) != secret" in _insp.getsource(_wh.sync_prices_endpoint))
+    import pathlib as _pl  # noqa: PLC0415
+
+    check("перенос цен запускается каждый день",
+          "sync-prices" in (_pl.Path(__file__).parent.parent / ".github/workflows/daily-check.yml")
+          .read_text(encoding="utf-8"))
+
+
 async def qa_front_desk() -> None:
     """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
 
@@ -5235,6 +5332,7 @@ async def main() -> int:
     await qa_numeric_history()
     await qa_guest_language_everywhere()
     await qa_staff_images_facts()
+    await qa_price_sync()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()

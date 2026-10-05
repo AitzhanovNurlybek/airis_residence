@@ -22,6 +22,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Цены на сайте — как в Exely (решение владельца 2026-10-05): сайт
+      # показывает обычную цену Exely на ближайшую продаваемую дату. Сбой здесь
+      # не должен валить проверку бота — поэтому отдельным шагом.
+      - name: Цены сайта — как в Exely
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o prices.json -w "%{http_code}" --max-time 120 \
+            -X POST "https://airisresidence.kz/api/backend/api/webhooks/sync-prices" \
+            -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "HTTP $code"; cat prices.json; echo
+
       - name: Проверить бота
         run: |
           code=$(curl -s -o check.json -w "%{http_code}" --max-time 120 \

@@ -105,6 +105,12 @@ export function RoomEditor({ room: initial }: { room: AdminRoom }) {
         {/* ---------- Цена и параметры ---------- */}
         <section>
           <h2 className="font-display text-xl text-cream">Цена и параметры</h2>
+          {/* Цены переносятся из Exely каждое утро (backend/app/price_sync.py) —
+              правка здесь продержится только до следующего переноса. */}
+          <p className="mt-2 text-sm text-muted">
+            Цены каждое утро подтягиваются из Exely — менять их нужно в Exely, здесь правка
+            продержится только до утра.
+          </p>
           <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Цена за ночь, ₸" hint={`${formatPrice(room.price)} за одного гостя`}>
               <input
