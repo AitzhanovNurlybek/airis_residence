@@ -44,13 +44,13 @@ export function Header() {
             <Logo className="h-8 w-auto md:h-9" />
           </Link>
 
-          <nav className="hidden items-center gap-7 lg:flex" aria-label="Основная навигация">
+          <nav className="hidden items-center gap-5 xl:flex 2xl:gap-7" aria-label="Основная навигация">
             {navLinks.map((link) =>
               "accent" in link && link.accent ? (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="rounded-full border border-sand-400/40 px-4 py-1.5 text-sm text-sand-200 transition-colors hover:border-sand-300/70 hover:bg-sand-300/8 hover:text-cream"
+                  className="rounded-full border border-sand-400/40 px-4 py-1.5 text-sm whitespace-nowrap text-sand-200 transition-colors hover:border-sand-300/70 hover:bg-sand-300/8 hover:text-cream"
                 >
                   {link.label}
                 </Link>
@@ -58,7 +58,7 @@ export function Header() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="relative py-2 text-sm text-cream/75 transition-colors hover:text-cream after:absolute after:inset-x-0 after:-bottom-0.5 after:h-px after:origin-left after:scale-x-0 after:bg-sand-300 after:transition-transform after:duration-300 hover:after:scale-x-100"
+                  className="relative py-2 text-sm whitespace-nowrap text-cream/75 transition-colors hover:text-cream after:absolute after:inset-x-0 after:-bottom-0.5 after:h-px after:origin-left after:scale-x-0 after:bg-sand-300 after:transition-transform after:duration-300 hover:after:scale-x-100"
                 >
                   {link.label}
                 </Link>
@@ -71,7 +71,7 @@ export function Header() {
 
             <a
               href={`tel:${site.contacts.phonePrimaryRaw}`}
-              className="hidden items-center gap-2 text-sm text-cream/80 transition-colors hover:text-sand-300 md:flex"
+              className="hidden items-center gap-2 text-sm whitespace-nowrap text-cream/80 transition-colors hover:text-sand-300 md:flex xl:hidden 2xl:flex"
             >
               <IconPhone className="size-4" />
               {site.contacts.phonePrimary}
@@ -90,7 +90,7 @@ export function Header() {
               type="button"
               onClick={() => setOpen(true)}
               aria-label="Открыть меню"
-              className="glass grid size-11 place-items-center rounded-full text-cream lg:hidden"
+              className="glass grid size-11 place-items-center rounded-full text-cream xl:hidden"
             >
               <IconMenu className="size-5" />
             </button>
@@ -101,7 +101,7 @@ export function Header() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="fixed inset-0 z-60 overflow-y-auto overscroll-contain bg-ink-950/97 pb-10 backdrop-blur-2xl lg:hidden"
+            className="fixed inset-0 z-60 overflow-y-auto overscroll-contain bg-ink-950/97 pb-10 backdrop-blur-2xl xl:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
