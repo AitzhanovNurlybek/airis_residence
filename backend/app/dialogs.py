@@ -92,15 +92,26 @@ async def load_history(
             )
         ).scalars().all()
 
-    history: list[dict[str, Any]] = []
-    for row in reversed(rows):
-        try:
-            content = json.loads(row.content)
-        except ValueError:
-            content = row.content
-        history.append({"role": row.role, "content": content})
-
+    history = [{"role": row.role, "content": content_of(row.content)} for row in reversed(rows)]
     return _openable(history)
+
+
+def content_of(raw: str) -> Any:
+    """Реплика из базы так, как её ждёт модель: строкой или списком блоков.
+
+    Текст гостя лежит как есть, а реплики с инструментами — JSON-списком, и
+    различать их приходится при чтении. json.loads здесь коварен: «6359909102»
+    (номер брони цифрами), «2» (сколько гостей), «true» — тоже JSON. 2026-10-05
+    номер брони Booking.com превратился в число, модель на такую историю
+    отвечала 400 «content: Input should be a valid list», и гость до конца
+    разговора получал только запасную фразу. Поэтому разобранное принимаем,
+    только если вышла строка или список.
+    """
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    return parsed if isinstance(parsed, (str, list)) else raw
 
 
 async def last_message_at(

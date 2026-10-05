@@ -4225,6 +4225,65 @@ async def qa_credits_alert() -> None:
     check("и только одна за час, а не на каждое сообщение", len(ушло) <= 1, str(len(ушло)))
 
 
+async def qa_numeric_history() -> None:
+    """Реплика из одних цифр не ломает историю разговора.
+
+    2026-10-05 гость прислал номер брони Booking.com «6359909102». В истории
+    он лежал строкой, а при чтении json.loads превратил его в число; модель
+    на такую историю отвечает 400, и гость до конца разговора получал только
+    «позвоните на стойку». Так же сломал бы разговор ответ «2» на вопрос о
+    числе гостей.
+    """
+    head("История: реплики из одних цифр")
+
+    import time as _t  # noqa: PLC0415
+
+    import app.concierge as _c  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.dialogs import content_of, load_history, save_turn  # noqa: PLC0415
+
+    чат = f"44{int(_t.time() * 1000) % 10_000_000_000:010d}@c.us"
+    await save_turn(SessionLocal, "whatsapp", чат, [
+        {"role": "user", "content": "6359909102"},
+        {"role": "assistant", "content": "Thank you."},
+        {"role": "user", "content": "2"},
+        {"role": "assistant", "content": "true"},
+        {"role": "user", "content": "null"},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ], 0)
+    история = await load_history(SessionLocal, "whatsapp", чат)
+    типы = [type(m["content"]).__name__ for m in история]
+    check("номер брони цифрами читается строкой", история and история[0]["content"] == "6359909102",
+          str(история[:1]))
+    check("«2», «true», «null» — тоже строками, список блоков — списком",
+          типы == ["str", "str", "str", "str", "str", "list"], str(типы))
+    check("строка JSON читается как строка", content_of('"привет"') == "привет")
+
+    # И страховка в самом консьерже: что бы ни пришло, в модель уходит строка.
+    запросы: list[dict] = []
+
+    async def _модель(payload, headers, **_kw):  # noqa: ANN001
+        запросы.append(payload)
+        return {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {}}
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {}, "policy": {}, "rooms": []}
+
+    settings = _gs()
+    было = (settings.anthropic_api_key, _c._call_model, _c.load_facts)
+    settings.anthropic_api_key, _c._call_model, _c.load_facts = "k", _модель, _факты
+    try:
+        await _c.answer(settings, message="It’s for today",
+                        history=[{"role": "user", "content": 6359909102},
+                                 {"role": "assistant", "content": "Thank you."}],
+                        today="2026-10-05", guest={"phone": "+447542253459"})
+    finally:
+        settings.anthropic_api_key, _c._call_model, _c.load_facts = было
+    содержимое = [type(m["content"]).__name__ for m in (запросы[-1]["messages"] if запросы else [])]
+    check("в модель не уходит число вместо текста",
+          bool(содержимое) and all(t in ("str", "list") for t in содержимое), str(содержимое))
+
+
 async def qa_guest_language_everywhere() -> None:
     """Язык гостя — во всех ответах, и в тех, что уходят без модели.
 
@@ -4965,6 +5024,7 @@ async def main() -> int:
     await qa_front_desk()
     await qa_daily_check()
     await qa_credits_alert()
+    await qa_numeric_history()
     await qa_guest_language_everywhere()
     await qa_followup_own()
     await qa_guest_messages_language()

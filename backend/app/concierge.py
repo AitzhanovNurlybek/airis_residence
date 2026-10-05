@@ -1610,6 +1610,23 @@ def _with_note(messages: list[dict[str, Any]], index: int, note: str) -> list[di
     return out
 
 
+def _годная(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """История, которую модель примет: содержимое каждой реплики — строка или список.
+
+    Число, true или словарь вместо текста модель отвергает целиком (400), и
+    гость получает запасную фразу на каждое следующее сообщение. Так было
+    2026-10-05 с номером брони цифрами — история читалась как число. Чтение
+    исправлено (dialogs.content_of), а здесь страховка для любого другого пути.
+    """
+    out = []
+    for реплика in history:
+        content = реплика.get("content")
+        if not isinstance(content, (str, list)):
+            реплика = {**реплика, "content": "" if content is None else str(content)}
+        out.append(реплика)
+    return out
+
+
 def _guest_texts(history: list[dict[str, Any]] | None) -> list[str]:
     """Реплики гостя текстом из истории, от свежих к старым — для его языка."""
     out: list[str] = []
@@ -1756,7 +1773,7 @@ async def answer(
 
     depth = max(0, settings.concierge_history_depth)
     messages: list[dict[str, Any]] = [
-        *_без_мышления((history or [])[-depth:]),
+        *_без_мышления(_годная((history or [])[-depth:])),
         {"role": "user", "content": message},
     ]
     # Где в списке новая реплика гостя. Пометка о паузе добавляется только в
