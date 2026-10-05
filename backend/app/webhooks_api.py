@@ -437,10 +437,10 @@ async def exely_webhook(
         # начнёт слать повторы.
         if number and any(w in kind.lower() for w in ("book", "reserv")):
             background.add_task(notify_hotel_booking, number, kind)
-            # И запоминаем саму бронь, чтобы её нашли по имени гостя.
-            # Через список это невозможно: Exely отдаёт там тысячу самых
-            # старых броней и ни одной свежей. Уведомление — единственный
-            # момент, когда мы вообще узнаём, что бронь появилась.
+            # И запоминаем саму бронь, чтобы её нашли по имени гостя сразу,
+            # а не после ежечасного переноса (sync-bookings). Основной путь —
+            # перенос: уведомления приходят пачкой раз в сутки и не обо всех
+            # бронях, а фоновая задача может оборваться вместе с функцией.
             background.add_task(_remember_booking, number)
 
     return {"ok": True, "saved": saved, "duplicates": duplicates, "events": len(events)}

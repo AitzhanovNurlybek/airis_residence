@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -551,6 +552,7 @@ FIRST_ACTION = """
 Не повторяй сказанное в этом разговоре. Цену раннего заезда, условия, телефон стойки, просьбу прислать номер брони называешь один раз; гость ответил «нет» или сказал, что сделает по-другому, — больше не предлагай и не напоминай. Если гость пишет два сообщения подряд, второе обычно уточняет первое — отвечай только на новое.
 Номер брони спрашивай, только если без него не выполнить то, о чём гость просит: найти, изменить или отменить бронь. Гостю, который просто сообщает время приезда, номер брони не нужен.
 Об услугах, которых нет в справке (например, хранение багажа), не говори «можно» и не обещай — гость поверит и придёт. Передай вопрос стойке через front_desk_request или скажи, что это уточнит стойка.
+Гость, бронировавший через Booking.com или другой сайт, называет номер так, как он назван там (Superior Double, Deluxe Room и т. п.): у сайтов свои названия. Не говори, что такого номера нет, и не поправляй гостя — найди бронь и назови номер по ней.
 """
 
 
@@ -1158,6 +1160,12 @@ async def _live_price(
     return offer.price_per_night
 
 
+#: Номер брони отеля в Exely: заезд, код объекта, порядковый номер —
+#: 20261005-509506-1265394803. Всё остальное — номера сайтов бронирования,
+#: по ним Exely отвечает 400.
+HOTEL_REF = re.compile(r"^\d{8}-\d{3,}-\d{5,}$")
+
+
 async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
     if not hasattr(booking, "find_bookings"):
         return "Эта система бронирования не умеет искать брони отсюда."
@@ -1184,6 +1192,15 @@ async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[s
         # короткие (L-0007): выдай там бронь по одному номеру — и любой
         # желающий переберёт чужие. Проверка это ловит.
         if not getattr(booking, "finds_by_phone", True) and hasattr(booking, "get_booking"):
+            if not HOTEL_REF.match(wanted):
+                return (
+                    f"«{wanted}» — не номер брони отеля: у отеля номера вида "
+                    "20261005-509506-1265394803. Такие номера дают сайты бронирования "
+                    "(у Booking.com — 10 цифр), система отеля по ним не ищет: бронь с сайта "
+                    "лежит у отеля под своим номером. Ищи по фамилии и дате заезда — "
+                    "find_booking с name и arrival; если гость их уже называл, ищи сразу, "
+                    "не переспрашивая. Номер у гостя больше не проси."
+                )
             try:
                 found = await booking.get_booking(wanted)
             except BookingSystemUnavailable as error:
@@ -1211,8 +1228,7 @@ async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[s
         from .db import SessionLocal
 
         async with SessionLocal() as session:
-            found = await find_by_name(session, who, limit=20)
-        same_day = [b for b in found if b.check_in == wanted_day]
+            same_day = await find_by_name(session, who, limit=10, arrival=wanted_day)
         if not same_day:
             return (
                 f"Брони на фамилию «{who}» с заездом {wanted_day} не нашлось. "

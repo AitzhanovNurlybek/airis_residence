@@ -3826,6 +3826,187 @@ async def qa_followup_own() -> None:
          settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone) = было
 
 
+async def qa_booking_sync() -> None:
+    """Перенос броней из Exely читает все страницы, ближайшие заезды — первыми.
+
+    2026-10-05 гость с бронью на сегодня (через Booking.com) по фамилии не
+    нашёлся: перенос читал одну страницу списка из семи, и свежих броней в
+    своей копии не было три дня. Номер Booking.com бот отправил в Exely,
+    получил 400 и сказал гостю, что «система не ответила».
+    """
+    head("Перенос броней из Exely и поиск по фамилии")
+
+    from datetime import date as _d
+
+    from sqlalchemy import delete as _del
+
+    import app.booking_sync as _bs
+    import app.booking_system.exely_api as _ea
+    from app.booking_system.base import BookingSystemUnavailable as _Unavail
+    from app.concierge import _tool_find
+    from app.db import ExelyBooking as _EB, SessionLocal as _S, init_db as _init
+
+    await _init()
+    QA = "-999999-"
+    сегодня = _d(2026, 10, 5)
+
+    def _сводка(номер: str, статус: str = "Active", правка: str = "2026-10-05T07:00:00Z",
+                создана: str = "2026-10-04T11:00:00Z") -> dict:
+        return {"number": номер, "status": статус, "modifiedDateTime": правка,
+                "createdDateTime": создана, "propertyId": "999999"}
+
+    def _деталь(сводка: dict, фамилия: str, заезд: str, выезд: str) -> dict:
+        return {"number": сводка["number"], "status": сводка["status"],
+                "customer": {"lastName": фамилия, "firstName": "James"},
+                "roomStays": [{"stayDates": {"arrivalDateTime": f"{заезд}T14:00",
+                                             "departureDateTime": f"{выезд}T12:00"},
+                               "roomType": {"name": "Comfort +"}}],
+                "total": {"priceAfterTax": 45000.0},
+                "modifiedDateTime": сводка["modifiedDateTime"]}
+
+    старая = _сводка(f"20250110{QA}0000000001", правка="2025-01-01T00:00:00Z",
+                     создана="2024-12-01T00:00:00Z")
+    через_месяц = _сводка(f"20261105{QA}0000000002", создана="2026-10-01T00:00:00Z")
+    сегодняшняя = _сводка(f"20261005{QA}0000000003")
+    отменённая = _сводка(f"20261010{QA}0000000004", статус="Cancelled",
+                         правка="2026-10-05T08:00:00Z")
+    страницы = {
+        "": {"bookingSummaries": [старая, через_месяц], "hasMoreData": True, "continueToken": "t1"},
+        "t1": {"bookingSummaries": [отменённая], "hasMoreData": True, "continueToken": "t2"},
+        "t2": {"bookingSummaries": [сегодняшняя], "hasMoreData": False, "continueToken": "t3"},
+    }
+    детали = {
+        старая["number"]: _деталь(старая, "Old", "2025-01-10", "2025-01-11"),
+        через_месяц["number"]: _деталь(через_месяц, "Later", "2026-11-05", "2026-11-07"),
+        сегодняшняя["number"]: _деталь(сегодняшняя, "Gibson", "2026-10-05", "2026-10-06"),
+        отменённая["number"]: _деталь(отменённая, "Cancelson", "2026-10-10", "2026-10-12"),
+    }
+
+    class _Api:
+        _rows = staticmethod(_ea.ExelyApi._rows)
+
+        def __init__(self) -> None:
+            self.токены: list[str] = []
+            self.детали: list[str] = []
+
+        async def _get(self, path: str, params=None, **_kw):  # noqa: ANN001
+            if path.endswith("/bookings"):
+                token = (params or {}).get("continueToken", "")
+                self.токены.append(token)
+                return страницы[token]
+            number = path.rsplit("/", 1)[-1]
+            self.детали.append(number)
+            return {"booking": детали[number]}
+
+    async with _S() as sess:
+        await sess.execute(_del(_EB).where(_EB.number.like(f"%{QA}%")))
+        # Отменённая уже лежит у нас «живой» — так было с бронями, отменёнными
+        # после переноса: статус не обновлялся до перечитывания.
+        sess.add(_EB(number=отменённая["number"], status="Active", guest_name="Cancelson James",
+                     guest_search="cancelson james", check_in=_d(2026, 10, 10),
+                     check_out=_d(2026, 10, 12), modified_at="2026-09-28T00:00:00Z"))
+        await sess.commit()
+
+    api = _Api()
+    async with _S() as sess:
+        r = await _bs.sync(sess, api, "999999", today=сегодня, budget=0)
+    check("читаются все страницы списка по continueToken", api.токены == ["", "t1", "t2"],
+          str(api.токены))
+    check("без времени на детали — ни одной детали", r["перенесено"] == 0 and not api.детали,
+          str(r))
+    check("отмена видна по сводке, без детального запроса", r["статус обновлён"] >= 1, str(r))
+    async with _S() as sess:
+        check("отменённая бронь у нас больше не «Active»",
+              (await sess.get(_EB, отменённая["number"])).status == "Cancelled")
+    check("старая история в очередь не попадает", r["осталось в очереди"] == 3, str(r))
+
+    api = _Api()
+    async with _S() as sess:
+        r = await _bs.sync(sess, api, "999999", limit=1, today=сегодня)
+    check("первой переносится бронь с заездом сегодня", api.детали == [сегодняшняя["number"]],
+          str(api.детали))
+
+    api = _Api()
+    async with _S() as sess:
+        r = await _bs.sync(sess, api, "999999", today=сегодня)
+    check("остальные нужные переносятся следующим запуском",
+          sorted(api.детали) == sorted([через_месяц["number"], отменённая["number"]]),
+          str(api.детали))
+    check("прошлогодняя бронь не запрашивается вовсе", старая["number"] not in api.детали)
+
+    api = _Api()
+    async with _S() as sess:
+        r = await _bs.sync(sess, api, "999999", today=сегодня)
+    check("повторный запуск ничего не перечитывает", r["перенесено"] == 0 and not api.детали,
+          str(r))
+
+    async with _S() as sess:
+        найдено = await _bs.find_by_name(sess, "James Gibson", arrival=сегодня)
+        check("«James Gibson» находит «Gibson James» с заездом сегодня",
+              [b.number for b in найдено] == [сегодняшняя["number"]], str([b.number for b in найдено]))
+        check("короткое «Mr» не мешает поиску",
+              len(await _bs.find_by_name(sess, "Mr Gibson", arrival=сегодня)) == 1)
+        check("с другой датой заезда не выдаётся",
+              not await _bs.find_by_name(sess, "Gibson", arrival=_d(2026, 10, 6)))
+    check("номер брони даёт дату заезда", _bs.arrival_of("20261005-509506-1265394803") == сегодня)
+    check("номер Booking.com датой не считается", _bs.arrival_of("6359909102") is None)
+
+    class _ExelyLike:
+        finds_by_phone = False
+
+        def __init__(self) -> None:
+            self.спрошено: list[str] = []
+
+        async def find_bookings(self, *, phone: str = "", name: str = ""):
+            return []
+
+        async def get_booking(self, ref: str):
+            self.спрошено.append(ref)
+            return None
+
+    гость = {"phone": "+447542253459"}
+    система = _ExelyLike()
+    ответ = await _tool_find(система, {"ref": "6359909102"}, гость)
+    check("номер Booking.com в Exely не отправляется", система.спрошено == [], str(система.спрошено))
+    check("и бот ищет по фамилии и дате, а не просит номер снова",
+          "не номер брони отеля" in ответ and "name и arrival" in ответ, ответ[:120])
+    ответ = await _tool_find(система, {"ref": "20261005-509506-1265394803"}, гость)
+    check("номер отеля ищется в Exely", система.спрошено == ["20261005-509506-1265394803"])
+    ответ = await _tool_find(система, {"name": "James Gibson", "arrival": "2026-10-05"}, гость)
+    check("по фамилии и дате заезда бронь находится", сегодняшняя["number"] in ответ, ответ[:120])
+
+    # Exely на чужой номер отвечает 400 — это «брони нет», а не сбой.
+    настоящий = _ea.httpx.AsyncClient
+    api400 = _ea.ExelyApi("id", "secret", "999999", auth_url="https://a/token",
+                          api_base="https://b")
+
+    async def _токен() -> str:
+        return "t"
+
+    api400.token = _токен
+    _ea.httpx.AsyncClient = lambda **kw: настоящий(
+        transport=httpx.MockTransport(lambda request: httpx.Response(400, text="bad number")),
+        **{k: v for k, v in kw.items() if k != "transport"})
+    try:
+        check("400 на номер брони — «такой брони нет»", await api400.get_booking("6359909102") is None)
+        try:
+            await api400._get("/v1/properties/999999/bookings")
+            маскировано = True
+        except _Unavail:
+            маскировано = False
+        check("400 на список по-прежнему ошибка, а не пустой отель", not маскировано)
+    finally:
+        _ea.httpx.AsyncClient = настоящий
+
+    async with _S() as sess:
+        await sess.execute(_del(_EB).where(_EB.number.like(f"%{QA}%")))
+        await sess.commit()
+
+    правила = build_system_prompt("", "2026-10-05", availability="exely")
+    check("названия номеров с Booking.com гостю не поправляют",
+          "Не говори, что такого номера нет" in правила)
+
+
 async def qa_daily_check() -> None:
     """Ежедневная проверка бота находит то, что ломалось молча.
 
@@ -3880,6 +4061,27 @@ async def qa_daily_check() -> None:
     async def _факты(_settings, force: bool = False):  # noqa: ANN001
         return {"rooms": [{"slug": "comfort"}]}
 
+    import app.db as _db  # noqa: PLC0415
+    from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+
+    свежесть = {"последняя": _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    class _Итог:
+        def scalar(self):  # noqa: ANN201
+            return свежесть["последняя"]
+
+    class _Сессия:
+        async def __aenter__(self):  # noqa: ANN204
+            return self
+
+        async def __aexit__(self, *_a) -> bool:
+            return False
+
+        async def execute(self, *_a, **_k) -> _Итог:
+            return _Итог()
+
+    было_сессии = _db.SessionLocal
+    _db.SessionLocal = lambda: _Сессия()
     настоящий_клиент = _dc.httpx.AsyncClient
     было_факты = _kn.load_facts
     settings = _gs()
@@ -3907,6 +4109,18 @@ async def qa_daily_check() -> None:
               str(r["problems"])[:160])
         баланс["пуст"] = False
 
+        # 2026-10-05: перенос броней стоял три дня, и гость с бронью на
+        # сегодня по фамилии не нашёлся. Проверка это теперь видит.
+        свежесть["последняя"] = (_dt.now(_tz.utc) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = await _dc.run(settings, booking=_Exely())
+        check("отставший перенос броней пойман", any("перенос броней" in p for p in r["problems"]),
+              str(r["problems"])[:160])
+        свежесть["последняя"] = None
+        r = await _dc.run(settings, booking=_Exely())
+        check("пустая копия броней поймана", any("копия броней пуста" in p for p in r["problems"]),
+              str(r["problems"])[:160])
+        свежесть["последняя"] = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         # Тариф кончился: тревога с 466 и после неё — ни одного сообщения наружу.
         тревога = {"chatId": "77003002526@c.us", "timestamp": сейчас - 600, "statusMessage": "sent",
                    "textMessage": "🔴 Гость написал, а ответ НЕ УШЁЛ ... HTTP 466: quota"}
@@ -3932,6 +4146,7 @@ async def qa_daily_check() -> None:
         check("сообщение разработчику перечисляет проблемы",
               "LEAD_NOTIFY_PHONE" in текст and "proverka_nomera.py" in текст)
     finally:
+        _db.SessionLocal = было_сессии
         _dc.httpx.AsyncClient = настоящий_клиент
         _kn.load_facts = было_факты
         (settings.green_api_id, settings.green_api_token, settings.lead_notify_phone,
@@ -4435,6 +4650,7 @@ async def main() -> int:
     qa_modes()
     await qa_tools()
     await qa_exely_api()
+    await qa_booking_sync()
     qa_webhooks()
     qa_freedompay()
     qa_payments()

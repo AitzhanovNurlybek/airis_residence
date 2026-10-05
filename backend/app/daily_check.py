@@ -11,6 +11,7 @@
 - за сутки не было упора в лимит тарифа и неушедших ответов гостям;
 - справка об отеле грузится с сайта;
 - Exely отдаёт наличие;
+- перенос броней из Exely не отстал (по нему бот ищет бронь по фамилии);
 - ключ модели принимается (подсчёт токенов — бесплатный запрос);
 - ключ распознавания голосовых принимается;
 - уведомления отелю настроены.
@@ -53,6 +54,7 @@ async def run(settings: Settings, *, booking: Any = None) -> dict[str, Any]:
 
     await _facts(settings, checks, плохо)
     await _exely(settings, booking, checks, плохо)
+    await _bookings_fresh(settings, checks, плохо)
 
     checks["lead_notify_configured"] = bool(settings.lead_notify_numbers)
     if not checks["lead_notify_configured"]:
@@ -217,6 +219,44 @@ async def _exely(settings: Settings, booking: Any, checks: dict[str, Any], пл�
     checks["exely_offers"] = len(result.offers)
     if not result.offers:
         плохо("Exely вернул пустое наличие — ни одной категории")
+
+
+async def _bookings_fresh(settings: Settings, checks: dict[str, Any], плохо) -> None:
+    """Свежая ли своя копия броней — по ней бот ищет бронь по фамилии.
+
+    2026-10-05 гость с бронью на сегодня по фамилии не нашёлся: перенос из
+    Exely читал одну страницу списка из семи, и свежих броней в копии не было
+    уже три дня. Брони в отеле меняются каждый день, поэтому самая свежая
+    правка старше двух суток значит, что перенос стоит.
+    """
+    if not settings.exely_api_ready:
+        return
+    from sqlalchemy import func, select  # noqa: PLC0415
+
+    from .db import ExelyBooking, SessionLocal  # noqa: PLC0415
+
+    try:
+        async with SessionLocal() as session:
+            последняя = (await session.execute(select(func.max(ExelyBooking.modified_at)))).scalar()
+    except Exception as error:  # noqa: BLE001
+        плохо(f"копия броней не читается из базы: {error}")
+        return
+    checks["bookings_last_modified"] = последняя or ""
+    if not последняя:
+        плохо("копия броней пуста — бот не найдёт бронь по фамилии (sync-bookings)")
+        return
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    try:
+        когда = datetime.fromisoformat(str(последняя).replace("Z", "+00:00"))
+    except ValueError:
+        return
+    if когда.tzinfo is None:
+        когда = когда.replace(tzinfo=timezone.utc)
+    отстала = datetime.now(timezone.utc) - когда
+    if отстала > timedelta(days=2):
+        плохо(f"перенос броней из Exely стоит {отстала.days} дн. — бот не найдёт свежую "
+              "бронь по фамилии; проверь sync-bookings в followup.yml")
 
 
 def describe(result: dict[str, Any]) -> str:

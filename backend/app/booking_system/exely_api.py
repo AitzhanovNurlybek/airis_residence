@@ -170,7 +170,8 @@ class ExelyApi:
         self._expires = time.monotonic() + lifetime
         return token
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def _get(self, path: str, params: dict[str, Any] | None = None, *,
+                   missing_on_400: bool = False) -> Any:
         url = f"{self._base}/{path.lstrip('/')}"
         headers = {
             "Authorization": f"Bearer {await self.token()}",
@@ -190,6 +191,12 @@ class ExelyApi:
                             "Для Read Reservation API это /api/read-reservation."
                         )
                     return None
+                if response.status_code == 400 and missing_on_400:
+                    # Номер не того вида: 2026-10-05 гость прислал номер
+                    # Booking.com (6359909102), Exely ответил 400, и бот
+                    # сказал «система не ответила». Это не сбой, брони с
+                    # таким номером в Exely просто нет.
+                    return None
                 response.raise_for_status()
                 return response.json()
         except BookingSystemUnavailable:
@@ -205,7 +212,8 @@ class ExelyApi:
         number = str(number or "").strip()
         if not number:
             return None
-        data = await self._get(f"/v1/properties/{self._property}/bookings/{number}")
+        data = await self._get(f"/v1/properties/{self._property}/bookings/{number}",
+                               missing_on_400=True)
         if not isinstance(data, dict):
             return None
         # Документация подтверждена: ответ обёрнут в {"booking": {...}},
