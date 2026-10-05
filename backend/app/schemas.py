@@ -435,3 +435,38 @@ class CorpBookingStatusIn(BaseModel):
     status: str = Field(pattern=r"^(new|confirmed|invoiced|paid|cancelled)$")
     invoiceNumber: str = Field(default="", max_length=60)
     reason: str = Field(default="", max_length=300)
+
+
+# ─────────────────────────── отзывы с сайта ───────────────────────────
+
+
+class ReviewIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    text: str = Field(min_length=10, max_length=1500)
+    stars: int = Field(ge=1, le=5)
+    stay: str | None = Field(default=None, max_length=60)
+    contact: str | None = Field(default=None, max_length=120)
+    # Поле-ловушка: люди его не видят, боты заполняют.
+    website: str | None = None
+
+
+class ReviewOut(BaseModel):
+    """То, что видит сайт: без контакта и адреса."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    text: str
+    stars: int
+    stay: str
+    created_at: datetime
+
+
+class ReviewAdminOut(ReviewOut):
+    contact: str
+    status: str
+
+
+class ReviewStatusIn(BaseModel):
+    status: Literal["pending", "published", "hidden"]

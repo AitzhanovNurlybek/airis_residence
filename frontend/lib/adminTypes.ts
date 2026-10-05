@@ -218,3 +218,15 @@ export const CORP_FLOW: Record<
     pill: "bg-white/5 text-muted border-white/15",
   },
 };
+
+/** Отзыв гостя с сайта — для проверки в админке. */
+export type AdminReview = {
+  id: number;
+  name: string;
+  text: string;
+  stars: number;
+  stay: string;
+  contact: string;
+  status: "pending" | "published" | "hidden";
+  created_at: string;
+};

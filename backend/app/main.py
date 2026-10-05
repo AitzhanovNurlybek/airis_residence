@@ -25,6 +25,7 @@ from .local_api import router as local_router
 from .funnel_api import router as funnel_router
 from .payment_callback import router as payment_callback_router
 from .webhooks_api import router as webhooks_router
+from .reviews_api import admin as reviews_admin_router, public as reviews_public_router
 from .rooms_api import admin as rooms_admin_router, public as rooms_public_router
 from .site_videos_api import (
     admin as site_videos_admin_router,
@@ -183,6 +184,8 @@ if not settings.s3_configured:
     app.mount("/media", StaticFiles(directory=str(settings.upload_path)), name="media")
 
 app.include_router(rooms_public_router)
+app.include_router(reviews_public_router)
+app.include_router(reviews_admin_router)
 app.include_router(rooms_admin_router)
 app.include_router(site_videos_public_router)
 app.include_router(site_videos_admin_router)

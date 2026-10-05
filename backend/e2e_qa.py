@@ -4878,6 +4878,78 @@ async def qa_price_sync() -> None:
           .read_text(encoding="utf-8"))
 
 
+async def qa_site_reviews() -> None:
+    """Отзывы с сайта: хранятся, выходят после проверки, спам не проходит."""
+    head("Отзывы с сайта")
+
+    import time as _t  # noqa: PLC0415
+
+    from httpx import ASGITransport  # noqa: PLC0415
+
+    import app.notify as _nt  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.main import app as _app  # noqa: PLC0415
+
+    settings = _gs()
+    отелю: list[str] = []
+
+    async def _отелю(text: str, что: str, *, corporate: bool = False) -> int:
+        отелю.append(text)
+        return 1
+
+    было = _nt._tell_hotel
+    _nt._tell_hotel = _отелю
+    ip = f"10.{int(_t.time()) % 250}.{int(_t.time() * 7) % 250}.1"
+    гость = {"X-Forwarded-For": ip}
+    метка = f"QA-отзыв-{int(_t.time())}"
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=_app), base_url="http://qa") as cl:
+            r = await cl.post("/api/reviews", headers=гость, json={
+                "name": "Пётр", "text": f"{метка}: чисто, тихо, отличный завтрак", "stars": 5,
+                "stay": "сентябрь 2026", "contact": "+77010000000"})
+            check("отзыв принимается", r.status_code == 201, r.text[:100])
+            check("отель узнаёт о новом отзыве", any(метка in t for t in отелю))
+            публичные = (await cl.get("/api/reviews")).json()
+            check("до проверки на сайте его нет", not any(метка in x["text"] for x in публичные))
+
+            r = await cl.post("/api/reviews", headers=гость, json={
+                "name": "Bot", "text": "buy cheap stuff here now", "stars": 5, "website": "http://spam"})
+            check("бот с заполненной ловушкой не сохраняется", r.status_code == 201 and "id" not in r.json())
+            r = await cl.post("/api/reviews", headers=гость, json={"name": "П", "text": "ok", "stars": 9})
+            check("пустой и кривой отзыв отклоняется", r.status_code == 422)
+
+            check("админка отзывов закрыта без входа", (await cl.get("/api/admin/reviews")).status_code in (401, 403))
+            вход = await cl.post("/api/auth/login", json={"username": settings.admin_username,
+                                                          "password": settings.admin_password})
+            токен = (вход.json() if вход.status_code == 200 else {}).get("token")
+            check("сотрудник входит в админку", bool(токен), f"HTTP {вход.status_code}")
+            if токен:
+                шапка = {"Authorization": f"Bearer {токен}"}
+                все = (await cl.get("/api/admin/reviews", headers=шапка)).json()
+                мой = next((x for x in все if метка in x["text"]), None)
+                check("в админке отзыв виден с контактом", мой is not None and мой["contact"] == "+77010000000")
+                if мой:
+                    await cl.patch(f"/api/admin/reviews/{мой['id']}", headers=шапка, json={"status": "published"})
+                    публичные = (await cl.get("/api/reviews")).json()
+                    на_сайте = next((x for x in публичные if метка in x["text"]), None)
+                    check("после публикации отзыв на сайте", на_сайте is not None)
+                    check("контакт гостя на сайт не попадает", на_сайте is not None and "contact" not in на_сайте)
+                    await cl.delete(f"/api/admin/reviews/{мой['id']}", headers=шапка)
+
+            коды = [(await cl.post("/api/reviews", headers=гость, json={
+                "name": "Пётр", "text": "ещё один отзыв подряд", "stars": 4})).status_code for _ in range(3)]
+            check("много отзывов с одного адреса — стоп", 429 in коды, str(коды))
+    finally:
+        _nt._tell_hotel = было
+        from sqlalchemy import delete as _del  # noqa: PLC0415
+
+        from app.db import SiteReview as _SR  # noqa: PLC0415
+
+        async with SessionLocal() as ses:
+            await ses.execute(_del(_SR).where(_SR.ip == ip))
+            await ses.commit()
+
+
 async def qa_front_desk() -> None:
     """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
 
@@ -5333,6 +5405,7 @@ async def main() -> int:
     await qa_guest_language_everywhere()
     await qa_staff_images_facts()
     await qa_price_sync()
+    await qa_site_reviews()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()

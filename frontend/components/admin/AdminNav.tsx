@@ -10,6 +10,7 @@ const links = [
   { href: "/admin", label: "Номера" },
   { href: "/admin/video", label: "Видео" },
   { href: "/admin/zayavki", label: "Заявки" },
+  { href: "/admin/otzyvy", label: "Отзывы" },
   { href: "/admin/kompanii", label: "Компании" },
   { href: "/admin/shahmatka", label: "Консьерж" },
   { href: "/admin/voronka", label: "Воронка" },

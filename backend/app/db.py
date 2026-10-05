@@ -706,6 +706,27 @@ class DialogFollowup(Base):
     )
 
 
+class SiteReview(Base):
+    """Отзыв гостя, оставленный на сайте. На сайте виден после проверки."""
+
+    __tablename__ = "site_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    text: Mapped[str] = mapped_column(Text)
+    stars: Mapped[int] = mapped_column(Integer, default=5)
+    #: Когда жил — со слов гостя («сентябрь 2026»). Необязательно.
+    stay: Mapped[str] = mapped_column(String(60), default="")
+    #: Телефон или почта для ответа. НЕ публикуется.
+    contact: Mapped[str] = mapped_column(String(120), default="")
+    #: pending — ждёт проверки, published — на сайте, hidden — скрыт.
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class StaffMessage(Base):
     """Сообщение, которое сотрудник отеля сам написал гостю — с телефона.
 
