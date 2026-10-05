@@ -38,11 +38,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .booking_system import get_booking_system
 from .channels import WhatsAppChannel, WhatsAppError
 from .channels.flow import CHANNEL as WA_CHANNEL, Reply, reply_for
-from .channels.whatsapp import _parse, for_whatsapp
+from .channels.whatsapp import _parse, for_whatsapp, parse_staff
 from .config import Settings, get_settings
 from .db import ExelyEvent, SessionLocal, get_session
 from .notify import notify_hotel_booking
-from .dialogs import answered_same_recently, chat_turn, guest_texts, save_turn, seen_before
+from .dialogs import (
+    answered_same_recently,
+    chat_turn,
+    guest_texts,
+    remember_guest,
+    remember_staff,
+    save_turn,
+    seen_before,
+    staff_active,
+)
 from .guest_messages import (
     CALL_NOT_ANSWERED,
     CANT_ANSWER,
@@ -495,6 +504,17 @@ async def whatsapp_webhook(
     if payload.get("typeWebhook") == "incomingCall":
         return await _звонок(settings, payload)
 
+    # Сотрудник написал гостю с телефона отеля — бот в этом чате молчит,
+    # пока человек ведёт разговор (staff_pause_minutes).
+    сотрудник = parse_staff(payload)
+    if сотрудник is not None:
+        if await seen_before(SessionLocal, "staff", сотрудник.message_id):
+            return {"ok": True, "duplicate": True}
+        await remember_staff(SessionLocal, WA_CHANNEL, сотрудник.chat_id, сотрудник.text)
+        logger.info("Вебхук WhatsApp: сотрудник ответил в %s — бот молчит %d мин",
+                    сотрудник.chat_id, settings.staff_pause_minutes)
+        return {"ok": True, "staff": True}
+
     # Green API присылает и исходящие, и статусы доставки, и события групп.
     # _parse отбирает только входящие сообщения от людей и возвращает None
     # для всего остального — на такое отвечаем 200, иначе начнутся повторы.
@@ -565,6 +585,16 @@ async def whatsapp_webhook(
     # отвечено и легло в историю (см. chat_turn). Иначе оба ответа
     # собираются параллельно и повторяют друг друга.
     async with chat_turn(SessionLocal, WA_CHANNEL, message.chat_id):
+        # Сотрудник ведёт этот разговор — второй голос не нужен. Реплику гостя
+        # запоминаем: когда бот вернётся, он должен знать, о чём речь.
+        if await staff_active(SessionLocal, WA_CHANNEL, message.chat_id,
+                              settings.staff_pause_minutes):
+            await remember_guest(
+                SessionLocal, WA_CHANNEL, message.chat_id,
+                message.text or ("[гость прислал голосовое]" if message.is_voice
+                                 else "[гость прислал файл]" if message.has_file else ""))
+            logger.info("Вебхук WhatsApp: %s — в чате сотрудник, бот молчит", message.phone)
+            return {"ok": True, "replied": False, "reason": "в чате сотрудник"}
         try:
             reply = await reply_for(settings, booking, channel, message)
         except Exception as error:  # noqa: BLE001 — один сбой не должен ронять приём

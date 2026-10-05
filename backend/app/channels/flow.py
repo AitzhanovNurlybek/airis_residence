@@ -98,8 +98,12 @@ async def _hand_to_front_desk(message: Incoming, what: str, *, once: bool = True
     return True
 
 
-async def handle_text(settings, booking, message: Incoming) -> Reply:
-    """Обычная реплика гостя."""
+async def handle_text(settings, booking, message: Incoming, *, language: str = "") -> Reply:
+    """Обычная реплика гостя.
+
+    `language` — язык гостя, если он уже понятен (снимок: реплика тогда
+    служебная, по-русски, и по ней язык не понять).
+    """
     depth = max(0, settings.concierge_history_depth)
     history = await load_history(SessionLocal, CHANNEL, message.chat_id, depth)
     # Сколько прошло с прошлой реплики. В самой истории дат нет, и после
@@ -132,7 +136,8 @@ async def handle_text(settings, booking, message: Incoming) -> Reply:
                # None у обычного гостя, и тогда всё как раньше.
                "corporate": корпоратив,
                # Часы с прошлой реплики. None — разговор первый.
-               "pause_hours": пауза},
+               "pause_hours": пауза,
+               "language": language},
     )
 
     photos = reply.get("photos") or [] if reply["ok"] else []
@@ -180,7 +185,17 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
         return await _передали("разобрать не получилось")
 
     if not doc.is_payment:
-        return await _передали("это не платёжный документ (возможно, снимок брони)")
+        if doc.summary:
+            # Снимок прочитан — дальше это обычная реплика: консьерж видит, что
+            # на нём, находит бронь, отвечает на языке гостя и помнит снимок в
+            # истории. Стойку не дёргаем: бот справляется сам.
+            что = "снимок" if (message.file_name or "").lower().endswith(
+                (".jpg", ".jpeg", ".png", ".webp")) else "файл"
+            пометка = f"[Гость прислал {что}. На нём: {doc.summary}]"
+            текст = f"{пометка}\n{message.text}" if message.text else пометка
+            return await handle_text(settings, booking, replace(message, text=текст),
+                                     language=язык)
+        return await _передали("это не платёжный документ")
 
     try:
         facts = await load_facts(settings)

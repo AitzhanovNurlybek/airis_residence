@@ -93,6 +93,10 @@ async def _whatsapp(client: httpx.AsyncClient, settings: Settings,
         плохо("в Green API выключен приём входящих (incomingWebhook)")
     if str(live.get("incomingCallWebhook")) != "yes":
         плохо("в Green API выключены уведомления о звонках (incomingCallWebhook)")
+    if str(live.get("outgoingMessageWebhook")) != "yes":
+        плохо("в Green API выключены уведомления об исходящих с телефона "
+              "(outgoingMessageWebhook) — бот не видит, что в чате отвечает сотрудник, "
+              "и перебивает его")
 
     свой = str(live.get("wid") or "")
     исходящие = [o for o in out if isinstance(o, dict)] if isinstance(out, list) else []

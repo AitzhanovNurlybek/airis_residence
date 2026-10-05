@@ -38,7 +38,9 @@ from .almaty import today as hotel_today
 #: Больше — почти наверняка не платёжка, а что-то присланное по ошибке.
 MAX_DOC_MB = 8
 
-EXTRACT_PROMPT = """Перед тобой платёжный документ: банковское поручение, чек, квитанция или скриншот перевода.
+EXTRACT_PROMPT = """Перед тобой файл, который гость прислал отелю в WhatsApp. Чаще всего это платёжный документ (банковское поручение, чек, квитанция, скриншот перевода) или подтверждение брони с сайта бронирования, иногда что-то другое.
+
+Если это платёжный документ — извлеки его поля, как описано ниже. Если нет — is_payment: false, а что на файле, коротко опиши в summary.
 
 Извлеки только то, что действительно написано в документе. Ничего не додумывай:
 поля, которых в бумаге нет, оставь пустыми. Лучше пусто, чем догадка — по этим
@@ -75,7 +77,9 @@ EXTRACT_PROMPT = """Перед тобой платёжный документ: �
   "doc_number": "",                // номер документа/квитанции
   "status_words": "",              // слова о статусе: «исполнено», «в обработке», «отклонено»
   "red_flags": [],                 // список подозрительных признаков, каждый одной строкой
-  "looks_edited": false            // есть ли следы правки изображения
+  "looks_edited": false,           // есть ли следы правки изображения
+  "kind": "",                      // payment | booking (подтверждение брони) | other
+  "summary": ""                    // по-русски, одна-две строки: что на файле. Для брони — сайт, имя гостя, отель, даты, название номера, сколько гостей, кровати, сумма и номер брони, если видны
 }"""
 
 
@@ -100,6 +104,12 @@ class PaymentDoc:
     status_words: str = ""
     red_flags: list[str] = field(default_factory=list)
     looks_edited: bool = False
+    #: payment | booking | other — что это за файл.
+    kind: str = ""
+    #: Что на файле, коротко по-русски. По нему консьерж отвечает гостю на
+    #: снимок брони: 2026-10-05 гость прислал скриншоты Booking.com, а бот
+    #: ответил «это не платёжный документ» — читать умел, а пересказать нет.
+    summary: str = ""
     #: SHA-256 присланного файла — по нему узнаём повторную пересылку.
     doc_hash: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -185,6 +195,8 @@ async def read_document(settings: Settings, data: bytes, filename: str) -> Payme
     return PaymentDoc(
         doc_hash=hashlib.sha256(data).hexdigest(),
         is_payment=bool(parsed.get("is_payment")),
+        kind=str(parsed.get("kind") or "").strip(),
+        summary=str(parsed.get("summary") or "").strip(),
         payer=str(parsed.get("payer") or "").strip(),
         payer_bin=str(parsed.get("payer_bin") or "").strip(),
         payee=str(parsed.get("payee") or "").strip(),
@@ -253,6 +265,13 @@ def check_recipient(doc: PaymentDoc, facts: dict[str, Any] | None) -> tuple[str,
     legal = ((facts or {}).get("hotel") or {}).get("legal") or {}
     our_bin = _digits(str(legal.get("bin") or ""))
     our_iik = str(legal.get("iik") or "").upper().replace(" ", "")
+    # Счета в долларах и евро — тоже наши (с 2026-10-05): перевод на них не
+    # «чужой счёт», а валютная оплата, которую проверит менеджер.
+    наши_счета = [our_iik] + [
+        str(счёт).upper().replace(" ", "")
+        for счёт in (legal.get("currencyAccounts") or {}).values() if счёт
+    ]
+    наши_счета = [счёт for счёт in наши_счета if счёт]
     our_name = str((facts or {}).get("hotel", {}).get("legalName") or "")
 
     doc_bin = _digits(doc.payee_bin)
@@ -263,10 +282,10 @@ def check_recipient(doc: PaymentDoc, facts: dict[str, Any] | None) -> tuple[str,
             return "ok", f"БИН получателя совпал с {our_name}"
         return "mismatch", f"Платёж в пользу БИН {doc.payee_bin}, а у отеля {legal.get('bin')}"
 
-    if our_iik and doc_acc and doc_acc.replace("*", "").isalnum():
+    if наши_счета and doc_acc and doc_acc.replace("*", "").isalnum():
         # Звёздочки в середине счёта — обычное дело: сравниваем хвост.
         tail = doc_acc.replace("*", "")[-6:]
-        if tail and tail in our_iik:
+        if tail and any(tail in счёт for счёт in наши_счета):
             return "ok", "Счёт получателя сходится с реквизитами отеля"
         if len(tail) >= 4:
             return "mismatch", f"Счёт получателя {doc.payee_account} не похож на счёт отеля"

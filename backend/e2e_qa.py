@@ -3793,7 +3793,11 @@ async def qa_followup_own() -> None:
 
     settings = _gs()
     было = (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
+            _fu._staff_spoke,
             settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone)
+
+    async def _без_сотрудника(_session, _chat, hours: int = 48):  # noqa: ANN001
+        return False
 
     async def _залежались(_session, *, stale_hours, since):  # noqa: ANN001
         return [("77775310009@c.us", 3), ("77087241460@c.us", 3), ("77010000001@c.us", 3)]
@@ -3812,6 +3816,7 @@ async def qa_followup_own() -> None:
 
     _fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts = (
         _залежались, _шаг, _история, _решение, _факты)
+    _fu._staff_spoke = _без_сотрудника
     settings.followup_since = "2026-10-05T12:00"
     settings.lead_notify_phone = "+7 777 531 00 09"
     settings.dev_alert_phone = "+77087241460"
@@ -3823,6 +3828,7 @@ async def qa_followup_own() -> None:
         check("а гостю пишет", "77010000001@c.us" in кому, str(кому))
     finally:
         (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
+         _fu._staff_spoke,
          settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone) = было
 
 
@@ -4045,6 +4051,7 @@ async def qa_daily_check() -> None:
             if "getSettings" in путь:
                 return httpx.Response(200, json={
                     "wid": "77003002526@c.us", "incomingWebhook": "yes", "incomingCallWebhook": "yes",
+                    "outgoingMessageWebhook": "yes",
                     "webhookUrl": "https://airisresidence.kz/api/backend/api/webhooks/whatsapp?key=x"})
             if "lastOutgoingMessages" in путь:
                 return httpx.Response(200, json=исходящие)
@@ -4442,7 +4449,7 @@ async def qa_guest_language_everywhere() -> None:
             return ["Do I have a booking for today then?"]
 
         async def _не_платёжка(_settings, _data, _name):  # noqa: ANN001
-            return _NS(is_payment=False)
+            return _NS(is_payment=False, summary="")
 
         _fl.seen_before, _fl.guest_texts, _fl.read_document = _seen, _истории, _не_платёжка
         снимок = _parse({"typeWebhook": "incomingMessageReceived", "idMessage": f"IMG-{_t.time()}",
@@ -4571,6 +4578,190 @@ async def qa_guest_language_everywhere() -> None:
     finally:
         _c.asyncio = было_asyncio
     check("всего пауз за ответ — не больше 25 секунд", сдались and sum(паузы) <= 25, str(паузы))
+
+
+async def qa_staff_images_facts() -> None:
+    """Сотрудник в чате, снимки брони и факты от отеля.
+
+    2026-10-05: ресепшн и бот отвечали гостю наперебой («Sorry, AI answering
+    faster than me»); на скриншоты Booking.com бот ответил «не платёжный
+    документ»; про диван-кровать, багаж и парковку справка молчала.
+    """
+    head("Сотрудник в чате, снимки брони, факты от отеля")
+
+    import time as _t  # noqa: PLC0415
+    from types import SimpleNamespace as _NS  # noqa: PLC0415
+
+    from httpx import ASGITransport  # noqa: PLC0415
+
+    import app.channels.flow as _fl  # noqa: PLC0415
+    import app.followup as _fu  # noqa: PLC0415
+    import app.webhooks_api as _wh  # noqa: PLC0415
+    from app.channels.whatsapp import parse_staff  # noqa: PLC0415
+    from app.concierge import FIRST_ACTION, _guest_texts  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.dialogs import guest_texts, load_history, remember_staff, staff_active  # noqa: PLC0415
+    from app.knowledge import render_brief  # noqa: PLC0415
+    from app.main import app as _app  # noqa: PLC0415
+    from app.payment_docs import PaymentDoc, check_recipient  # noqa: PLC0415
+
+    settings = _gs()
+    чат = f"44{int(_t.time() * 1000) % 10_000_000_000:010d}@c.us"
+
+    # 1. Сообщение с телефона отеля — сотрудник.
+    исходящее = {"typeWebhook": "outgoingMessageReceived", "idMessage": f"STAFF-{_t.time()}",
+                 "senderData": {"chatId": чат, "sender": "77003002526@c.us"},
+                 "messageData": {"typeMessage": "textMessage",
+                                 "textMessageData": {"textMessage": "Yes, your room has a sofa bed"}}}
+    разбор = parse_staff(исходящее)
+    check("сообщение с телефона отеля распознано как ответ сотрудника",
+          разбор is not None and разбор.chat_id == чат and "sofa bed" in разбор.text)
+    check("входящее от гостя сотрудником не считается",
+          parse_staff({**исходящее, "typeWebhook": "incomingMessageReceived"}) is None)
+    check("ответы бота через API сотрудником не считаются",
+          parse_staff({**исходящее, "typeWebhook": "outgoingAPIMessageReceived"}) is None)
+
+    отправлено: list[tuple[str, str]] = []
+    вызван_ответ: list[str] = []
+
+    class _Канал:
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        async def send(self, chat_id: str, text: str) -> str:
+            отправлено.append((chat_id, text))
+            return "ok"
+
+    async def _ответ(_settings, _booking, _channel, message):  # noqa: ANN001
+        вызван_ответ.append(message.text)
+        return _fl.Reply("Hello!")
+
+    было = (_wh.WhatsAppChannel, _wh.reply_for)
+    _wh.WhatsAppChannel, _wh.reply_for = _Канал, _ответ
+    ключ = {"X-Api-Key": settings.whatsapp_webhook_secret}
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=_app), base_url="http://qa") as cl:
+            r = await cl.post("/api/webhooks/whatsapp", headers=ключ, json=исходящее)
+            check("вебхук принимает ответ сотрудника", r.status_code == 200 and r.json().get("staff"),
+                  r.text[:100])
+            check("и бот знает, что в чате человек",
+                  await staff_active(SessionLocal, "whatsapp", чат, settings.staff_pause_minutes))
+            r = await cl.post("/api/webhooks/whatsapp", headers=ключ, json={
+                "typeWebhook": "incomingMessageReceived", "idMessage": f"G1-{_t.time()}",
+                "senderData": {"chatId": чат, "senderName": "James"},
+                "messageData": {"typeMessage": "textMessage",
+                                "textMessageData": {"textMessage": "Great, thank you!"}}})
+            check("пока сотрудник в чате, бот молчит",
+                  r.status_code == 200 and not отправлено and not вызван_ответ, r.text[:100])
+            from sqlalchemy import select as _select  # noqa: PLC0415
+
+            from app.db import DialogMessage as _DM  # noqa: PLC0415
+
+            async with SessionLocal() as ses:
+                история = [row.content for row in (await ses.execute(
+                    _select(_DM).where(_DM.chat_id == чат).order_by(_DM.id))).scalars().all()]
+            check("слова сотрудника и реплика гостя легли в историю",
+                  any("sofa bed" in str(c) for c in история)
+                  and any("Great, thank you" in str(c) for c in история), str(история)[:160])
+
+            было_пауза = settings.staff_pause_minutes
+            settings.staff_pause_minutes = 0
+            try:
+                r = await cl.post("/api/webhooks/whatsapp", headers=ключ, json={
+                    "typeWebhook": "incomingMessageReceived", "idMessage": f"G2-{_t.time()}",
+                    "senderData": {"chatId": чат, "senderName": "James"},
+                    "messageData": {"typeMessage": "textMessage",
+                                    "textMessageData": {"textMessage": "One more question"}}})
+            finally:
+                settings.staff_pause_minutes = было_пауза
+            check("сотрудник замолчал — бот снова отвечает", bool(вызван_ответ) and bool(отправлено),
+                  r.text[:100])
+    finally:
+        _wh.WhatsAppChannel, _wh.reply_for = было
+
+    async with SessionLocal() as ses:
+        check("дожим не пишет туда, где разговор вёл сотрудник", await _fu._staff_spoke(ses, чат))
+    check("в истории для модели сказанное сотрудником помечено",
+          any(str(c).startswith("[Ответил сотрудник отеля]") for c in история))
+
+    # 2. Снимок брони — в разговор, на языке гостя.
+    переданное: list[tuple[str, str]] = []
+
+    async def _прочитан(_settings, _data, _name):  # noqa: ANN001
+        return _NS(is_payment=False, summary="Подтверждение брони Booking.com: James Gibson, "
+                   "AIRIS Residence, 5–6 октября 2026, Superior Double Room, 3 взрослых")
+
+    async def _текст(_settings, _booking, message, *, language: str = ""):  # noqa: ANN001
+        переданное.append((message.text, language))
+        return _fl.Reply("I can see your booking.")
+
+    async def _истории(_sessions, _channel, _chat, limit: int = 6):  # noqa: ANN001
+        return ["Do I have a booking for today then?"]
+
+    class _Скачать:
+        async def download(self, url: str) -> bytes:
+            return b"image"
+
+    было = (_fl.read_document, _fl.handle_text, _fl.guest_texts)
+    _fl.read_document, _fl.handle_text, _fl.guest_texts = _прочитан, _текст, _истории
+    try:
+        снимок = _parse({"typeWebhook": "incomingMessageReceived", "idMessage": f"IMG-{_t.time()}",
+                         "senderData": {"chatId": "447542253459@c.us", "senderName": "James"},
+                         "messageData": {"typeMessage": "imageMessage", "fileMessageData": {
+                             "downloadUrl": "https://example/b.jpg", "fileName": "b.jpg"}}})
+        ответ = await _fl.handle_file(settings, None, _Скачать(), снимок)
+    finally:
+        _fl.read_document, _fl.handle_text, _fl.guest_texts = было
+    check("снимок брони уходит в разговор с тем, что на нём",
+          bool(переданное) and переданное[0][0].startswith("[Гость прислал снимок. На нём:")
+          and "Superior Double Room" in переданное[0][0], str(переданное)[:160])
+    check("и язык гостя передаётся вместе с ним — английский",
+          bool(переданное) and переданное[0][1] == "en", str(переданное)[:80])
+    check("гость получает ответ консьержа, а не «не платёжный документ»",
+          ответ.text == "I can see your booking.")
+    check("в правилах — что делать со снимком брони", "[Гость прислал снимок" in FIRST_ACTION)
+    check("и что делать, когда сказали «оплатили»", "оплатили переводом" in FIRST_ACTION)
+
+    # Служебные пометки по-русски не сбивают язык гостя.
+    чат2 = f"44{int(_t.time() * 1000 + 7) % 10_000_000_000:010d}@c.us"
+    await save_turn_qa(чат2, [{"role": "user", "content": "Do I have a booking?"},
+                              {"role": "assistant", "content": "Yes."},
+                              {"role": "user", "content": "[Гость прислал снимок. На нём: бронь]"},
+                              {"role": "assistant", "content": "Thanks."}])
+    check("служебная пометка не считается репликой гостя (база)",
+          await guest_texts(SessionLocal, "whatsapp", чат2) == ["Do I have a booking?"])
+    check("и в истории разговора тоже",
+          _guest_texts([{"role": "user", "content": "Hi there"},
+                        {"role": "user", "content": "[Гость прислал снимок. На нём: бронь]"}])
+          == ["Hi there"])
+
+    # 3. Факты от отеля в справке консьержа.
+    факты = {
+        "hotel": {"name": "Airis", "legal": {"iik": "KZ11722S000048166255", "currencyAccounts": {
+            "USD": "KZ73551E129373278USD", "EUR": "KZ78551E129377576EUR"}}},
+        "policy": {"luggage": "да, храним багаж гостей на стойке — до заезда и после выезда"},
+        "conciergeNotes": ["Comfort Plus на Booking.com называется «Superior Double Room»."],
+        "faq": [{"q": "Есть ли парковка?", "a": "Да, у отеля круглосуточная парковка под видеонаблюдением."}],
+    }
+    бриф = render_brief(факты)
+    check("справка знает, что багаж храним", "Хранение багажа: да, храним" in бриф)
+    check("справка знает название номера на Booking.com", "Superior Double Room" in бриф)
+    check("валютные счета — в справке", "USD — KZ73551E129373278USD" in бриф
+          and "EUR — KZ78551E129377576EUR" in бриф)
+    check("и правило: после «оплатили» — менеджеру", "front_desk_request" in бриф.split("ВАЛЮТНЫЕ")[-1])
+
+    # Перевод на валютный счёт — не «чужой счёт».
+    чек = PaymentDoc(is_payment=True, payee_account="KZ73551E129373278USD")
+    вердикт, _ = check_recipient(чек, факты)
+    check("перевод на долларовый счёт отеля признаётся своим", вердикт == "ok", вердикт)
+    чужой, _ = check_recipient(PaymentDoc(is_payment=True, payee_account="KZ00999X000000123456"), факты)
+    check("а чужой счёт — по-прежнему чужой", чужой == "mismatch", чужой)
+
+
+async def save_turn_qa(chat_id: str, messages: list[dict]) -> None:
+    from app.dialogs import save_turn  # noqa: PLC0415
+
+    await save_turn(SessionLocal, "whatsapp", chat_id, messages, 0)
 
 
 async def qa_front_desk() -> None:
@@ -5026,6 +5217,7 @@ async def main() -> int:
     await qa_credits_alert()
     await qa_numeric_history()
     await qa_guest_language_everywhere()
+    await qa_staff_images_facts()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()

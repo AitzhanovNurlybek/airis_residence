@@ -706,6 +706,27 @@ class DialogFollowup(Base):
     )
 
 
+class StaffMessage(Base):
+    """Сообщение, которое сотрудник отеля сам написал гостю — с телефона.
+
+    Пока сотрудник ведёт разговор, бот молчит. 2026-10-05 ресепшн и бот
+    отвечали гостю одновременно, и сотруднице пришлось извиняться: «Sorry, AI
+    answering faster than me». По этим отметкам бот видит, что в чате человек.
+    Само сказанное ложится ещё и в историю разговора, чтобы бот, вернувшись,
+    знал, о чём уже договорились.
+    """
+
+    __tablename__ = "staff_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), index=True)
+    chat_id: Mapped[str] = mapped_column(String(80), index=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class SeenPayment(Base):
     """Платёж, о котором банк сообщил уведомлением.
 

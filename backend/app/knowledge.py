@@ -232,6 +232,25 @@ def render_brief(facts: dict[str, Any]) -> str:
         for item in faq:
             add(f"- {item.get('q')} — {item.get('a')}")
 
+    notes = facts.get("conciergeNotes") or []
+    if notes:
+        add("")
+        add("ЕЩЁ ОТ ОТЕЛЯ:")
+        for note in notes:
+            add(f"- {note}")
+
+    # Валютные счета. Отель просил: давать гостям и компаниям, а после
+    # «оплатили» — передавать менеджеру. Банк и SWIFT отель пока не прислал.
+    счета = (hotel.get("legal") or {}).get("currencyAccounts") or {}
+    if счета:
+        add("")
+        add("ВАЛЮТНЫЕ СЧЕТА ОТЕЛЯ (перевод в долларах и евро): "
+            + "; ".join(f"{валюта} — {счёт}" for валюта, счёт in счета.items()) + ".")
+        add("Называй их, только когда гость или компания спрашивает, как оплатить переводом "
+            "в валюте. Банк и SWIFT в справке не указаны — их пришлёт менеджер. Данные карты "
+            "у гостя никогда не спрашивай. Сказали «оплатили» — передай менеджеру "
+            "(front_desk_request) и попроси квитанцию.")
+
     corp = (facts.get("escalation") or {}).get("corporate")
     if corp:
         add("")

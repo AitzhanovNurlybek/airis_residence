@@ -38,7 +38,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .almaty import now as hotel_now
-from .db import ChannelReceipt, DialogMessage, utcnow
+from .db import ChannelReceipt, DialogMessage, StaffMessage, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,53 @@ async def save_turn(
         await session.commit()
 
 
+#: Чем помечено в истории сказанное сотрудником: модель должна понимать, что
+#: это ответил человек, а не она сама.
+STAFF_MARK = "[Ответил сотрудник отеля] "
+
+
+async def remember_staff(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, text: str
+) -> None:
+    """Сотрудник написал гостю сам: отметить, что в чате человек, и запомнить сказанное."""
+    async with sessions() as session:
+        session.add(StaffMessage(channel=channel, chat_id=chat_id, text=text))
+        session.add(DialogMessage(channel=channel, chat_id=chat_id, role="assistant",
+                                  content=STAFF_MARK + text))
+        await session.commit()
+
+
+async def staff_active(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, minutes: int
+) -> bool:
+    """Писал ли сотрудник в этот чат за последние `minutes` минут."""
+    if minutes <= 0 or not chat_id:
+        return False
+    since = utcnow() - timedelta(minutes=minutes)
+    async with sessions() as session:
+        found = (
+            await session.execute(
+                select(StaffMessage.id)
+                .where(StaffMessage.channel == channel)
+                .where(StaffMessage.chat_id == chat_id)
+                .where(StaffMessage.created_at >= since)
+                .limit(1)
+            )
+        ).scalar()
+    return found is not None
+
+
+async def remember_guest(
+    sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, text: str
+) -> None:
+    """Реплика гостя, на которую бот не отвечал (в чате был сотрудник), — в историю."""
+    if not text:
+        return
+    async with sessions() as session:
+        session.add(DialogMessage(channel=channel, chat_id=chat_id, role="user", content=text))
+        await session.commit()
+
+
 async def guest_texts(
     sessions: async_sessionmaker[AsyncSession], channel: str, chat_id: str, limit: int = 6
 ) -> list[str]:
@@ -257,7 +304,9 @@ async def guest_texts(
             )
         else:
             text = str(content or "")
-        if text.strip():
+        # Служебные пометки («[Гость прислал снимок…]») пишутся по-русски и
+        # язык гостя не показывают.
+        if text.strip() and not text.lstrip().startswith("["):
             out.append(text)
         if len(out) >= limit:
             break

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { faqItems } from "@/lib/faq";
 import { getRoomsWithSource } from "@/lib/rooms";
-import { airport, amenities, eventVenues, nearby, reviews, site } from "@/lib/site";
+import { airport, amenities, conciergeNotes, eventVenues, nearby, reviews, site } from "@/lib/site";
 
 /**
  * Машиночитаемая выжимка всего, что отель рассказывает о себе.
@@ -56,6 +56,9 @@ export async function GET() {
     },
 
     policy: site.policy,
+
+    // Только для консьержа: на страницах сайта этого нет.
+    conciergeNotes,
 
     rooms: rooms.map((room) => ({
       slug: room.slug,

@@ -39,6 +39,11 @@ BASE_URL = "https://api.green-api.com/waInstance{id}/{method}/{token}"
 #: доставки, изменения в группах — пропускаем.
 INCOMING = {"incomingMessageReceived"}
 
+#: Сообщение, отправленное с телефона отеля, — его написал сотрудник. Свои
+#: ответы бот шлёт через API, и такие приходят другим типом
+#: (outgoingAPIMessageReceived), их уведомления в Green API выключены.
+STAFF_OUTGOING = {"outgoingMessageReceived"}
+
 #: Типы, на которые молчим сознательно: это не обращения к отелю.
 IGNORED_KINDS = {
     "reactionMessage",       # «палец вверх» на нашу реплику
@@ -237,6 +242,41 @@ class WhatsAppChannel:
 
 
 # ─────────────────────────────── разбор ───────────────────────────────
+
+
+@dataclass(frozen=True)
+class StaffReply:
+    """Сообщение сотрудника гостю, отправленное с телефона отеля."""
+
+    message_id: str
+    chat_id: str
+    text: str
+
+
+def parse_staff(body: dict[str, Any]) -> StaffReply | None:
+    """Сообщение сотрудника с телефона — или None, если это что-то другое."""
+    if str(body.get("typeWebhook")) not in STAFF_OUTGOING:
+        return None
+    sender = body.get("senderData") or {}
+    chat_id = str(sender.get("chatId") or "")
+    if not chat_id or chat_id.endswith("@g.us"):
+        return None
+    data = body.get("messageData") or {}
+    text = ""
+    for holder, field in (
+        ("textMessageData", "textMessage"),
+        ("extendedTextMessageData", "text"),
+        ("fileMessageData", "caption"),
+    ):
+        found = (data.get(holder) or {}).get(field)
+        if found:
+            text = str(found)
+            break
+    if not text:
+        # Снимок, файл, голосовое без подписи — сотрудник всё равно в чате.
+        text = f"[{data.get('typeMessage') or 'сообщение'}]"
+    return StaffReply(message_id=str(body.get("idMessage") or ""), chat_id=chat_id,
+                      text=text.strip())
 
 
 def _parse(body: dict[str, Any]) -> Incoming | None:

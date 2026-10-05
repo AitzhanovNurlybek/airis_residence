@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .almaty import now as hotel_now
 from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
 from .concierge import ANTHROPIC_URL, ANTHROPIC_VERSION, model_request
-from .db import DialogFollowup, DialogMessage, utcnow
+from .db import DialogFollowup, DialogMessage, StaffMessage, utcnow
 from .guest_messages import guest_language
 from .knowledge import KnowledgeUnavailable, load_facts, render_brief
 from .lifecycle import quiet_hours
@@ -344,6 +344,19 @@ async def _decide(settings: Any, talk: list[dict[str, str]], hours: int,
     return write, why, text
 
 
+async def _staff_spoke(session: AsyncSession, chat_id: str, hours: int = 48) -> bool:
+    """Писал ли в этот чат сотрудник отеля за последние двое суток."""
+    found = (
+        await session.execute(
+            select(StaffMessage.id)
+            .where(StaffMessage.chat_id == chat_id)
+            .where(StaffMessage.created_at >= utcnow() - timedelta(hours=hours))
+            .limit(1)
+        )
+    ).scalar()
+    return found is not None
+
+
 async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
     """Собрать сообщения вдогонку по оборванным разговорам."""
     since = settings.followup_from
@@ -371,6 +384,10 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
     out: list[Nudge] = []
     for chat_id, hours in await _stale_chats(session, stale_hours=stale_hours, since=since):
         if chat_id.split("@")[0] in свои:
+            continue
+        # Разговор вёл сотрудник: последнее слово его, а не бота, и дожим
+        # поверх живого общения выглядел бы как спам.
+        if await _staff_spoke(session, chat_id):
             continue
         step = await _step_for(session, chat_id, final_hours=final_hours)
         if step is None:
