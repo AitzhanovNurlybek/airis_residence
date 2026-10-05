@@ -3862,7 +3862,9 @@ async def qa_booking_sync() -> None:
                                              "departureDateTime": f"{выезд}T12:00"},
                                "roomType": {"name": "Comfort +"}}],
                 "total": {"priceAfterTax": 45000.0},
-                "modifiedDateTime": сводка["modifiedDateTime"]}
+                # Exely округляет время в детали иначе, чем в сводке: на
+                # живых бронях разница в секунду.
+                "modifiedDateTime": сводка["modifiedDateTime"].replace(":00Z", ":59Z")}
 
     старая = _сводка(f"20250110{QA}0000000001", правка="2025-01-01T00:00:00Z",
                      создана="2024-12-01T00:00:00Z")
@@ -3878,7 +3880,7 @@ async def qa_booking_sync() -> None:
     детали = {
         старая["number"]: _деталь(старая, "Old", "2025-01-10", "2025-01-11"),
         через_месяц["number"]: _деталь(через_месяц, "Later", "2026-11-05", "2026-11-07"),
-        сегодняшняя["number"]: _деталь(сегодняшняя, "Gibson", "2026-10-05", "2026-10-06"),
+        сегодняшняя["number"]: _деталь(сегодняшняя, "Qagibson", "2026-10-05", "2026-10-06"),
         отменённая["number"]: _деталь(отменённая, "Cancelson", "2026-10-10", "2026-10-12"),
     }
 
@@ -3937,17 +3939,18 @@ async def qa_booking_sync() -> None:
     api = _Api()
     async with _S() as sess:
         r = await _bs.sync(sess, api, "999999", today=сегодня)
-    check("повторный запуск ничего не перечитывает", r["перенесено"] == 0 and not api.детали,
-          str(r))
+    check("повторный запуск ничего не перечитывает, хотя время в детали другое",
+          r["перенесено"] == 0 and not api.детали, str(r))
 
     async with _S() as sess:
-        найдено = await _bs.find_by_name(sess, "James Gibson", arrival=сегодня)
-        check("«James Gibson» находит «Gibson James» с заездом сегодня",
+        # Фамилия выдуманная: в локальной базе могут лежать настоящие брони.
+        найдено = await _bs.find_by_name(sess, "James Qagibson", arrival=сегодня)
+        check("«James Qagibson» находит «Qagibson James» с заездом сегодня",
               [b.number for b in найдено] == [сегодняшняя["number"]], str([b.number for b in найдено]))
         check("короткое «Mr» не мешает поиску",
-              len(await _bs.find_by_name(sess, "Mr Gibson", arrival=сегодня)) == 1)
+              len(await _bs.find_by_name(sess, "Mr Qagibson", arrival=сегодня)) == 1)
         check("с другой датой заезда не выдаётся",
-              not await _bs.find_by_name(sess, "Gibson", arrival=_d(2026, 10, 6)))
+              not await _bs.find_by_name(sess, "Qagibson", arrival=_d(2026, 10, 6)))
     check("номер брони даёт дату заезда", _bs.arrival_of("20261005-509506-1265394803") == сегодня)
     check("номер Booking.com датой не считается", _bs.arrival_of("6359909102") is None)
 
@@ -3972,7 +3975,7 @@ async def qa_booking_sync() -> None:
           "не номер брони отеля" in ответ and "name и arrival" in ответ, ответ[:120])
     ответ = await _tool_find(система, {"ref": "20261005-509506-1265394803"}, гость)
     check("номер отеля ищется в Exely", система.спрошено == ["20261005-509506-1265394803"])
-    ответ = await _tool_find(система, {"name": "James Gibson", "arrival": "2026-10-05"}, гость)
+    ответ = await _tool_find(система, {"name": "James Qagibson", "arrival": "2026-10-05"}, гость)
     check("по фамилии и дате заезда бронь находится", сегодняшняя["number"] in ответ, ответ[:120])
 
     # Exely на чужой номер отвечает 400 — это «брони нет», а не сбой.

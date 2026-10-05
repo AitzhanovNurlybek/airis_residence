@@ -248,6 +248,11 @@ async def sync(session: AsyncSession, api: ExelyApi, property_id: str,
                 session.add(record)
                 known[number] = record
             _apply(record, booking)
+            # Сравниваем потом со сводкой — значит и храним время из сводки.
+            # Exely округляет его в сводке и в детали по-разному (замер
+            # 2026-10-05: у трёх броней из шести разница в секунду), и с
+            # временем из детали такие брони перечитывались каждый запуск.
+            record.modified_at = str(row.get("modifiedDateTime") or record.modified_at)
             fetched += 1
         # После каждой пачки: оборвись функция — сделанное не пропадёт.
         await session.commit()
