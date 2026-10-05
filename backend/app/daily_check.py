@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 GREEN = "https://api.green-api.com/waInstance{id}/{method}/{token}"
 ANTHROPIC_COUNT = "https://api.anthropic.com/v1/messages/count_tokens"
+ANTHROPIC_MESSAGES = "https://api.anthropic.com/v1/messages"
 
 
 async def run(settings: Settings, *, booking: Any = None) -> dict[str, Any]:
@@ -112,6 +113,10 @@ async def _whatsapp(client: httpx.AsyncClient, settings: Settings,
         плохо(f"за сутки {len(тревоги)} ответов гостям не ушли — подробности в тревогах на ресепшне")
 
 
+НЕТ_ДЕНЕГ = ("кончились деньги на ключе Anthropic — бот отвечает гостям запасной фразой. "
+             "Пополните: console.anthropic.com → Plans & Billing")
+
+
 async def _model(client: httpx.AsyncClient, settings: Settings,
                  checks: dict[str, Any], плохо) -> None:
     if not settings.anthropic_api_key:
@@ -131,9 +136,33 @@ async def _model(client: httpx.AsyncClient, settings: Settings,
         return
     checks["model"] = settings.concierge_model
     checks["model_ok"] = response.status_code == 200
+    if "credit balance" in response.text.lower():
+        плохо(НЕТ_ДЕНЕГ)
+        return
     if response.status_code != 200:
         плохо(f"модель {settings.concierge_model} не принимает запрос: "
               f"HTTP {response.status_code} {response.text[:120]}")
+        return
+    # Подсчёт токенов бесплатный, и не факт, что он всегда смотрит на баланс.
+    # 2026-10-05 деньги на ключе кончились, и бот весь день отвечал гостям
+    # запасной фразой, — поэтому ещё настоящий запрос на один токен самой
+    # дешёвой моделью (баланс общий на организацию): тысячные доли цента.
+    try:
+        ответ = await client.post(
+            ANTHROPIC_MESSAGES,
+            headers={"x-api-key": settings.anthropic_api_key,
+                     "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5", "max_tokens": 1,
+                  "messages": [{"role": "user", "content": "ok"}]},
+        )
+    except Exception as error:  # noqa: BLE001
+        плохо(f"модель недоступна: {error}")
+        return
+    checks["credits_ok"] = ответ.status_code == 200
+    if "credit balance" in ответ.text.lower():
+        плохо(НЕТ_ДЕНЕГ)
+    elif ответ.status_code != 200:
+        плохо(f"модель не отвечает: HTTP {ответ.status_code} {ответ.text[:120]}")
 
 
 async def _speech(client: httpx.AsyncClient, settings: Settings,

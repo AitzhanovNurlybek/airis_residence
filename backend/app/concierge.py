@@ -1442,6 +1442,30 @@ def _без_мышления(history: list[dict[str, Any]]) -> list[dict[str, An
 ПАУЗЫ_ПОВТОРА: tuple[float, ...] = (1.0, 2.5)
 
 
+async def _сказать_что_кончились_кредиты(error: str) -> None:
+    """Кончились деньги на ключе Anthropic — разработчику, раз в час.
+
+    2026-10-05 баланс опустел, и бот всем отвечал запасной фразой «позвоните
+    на стойку», а узнали об этом не от бота. Пишем разработчику (WhatsApp и
+    Telegram), но не на каждое сообщение гостя: одна тревога в час.
+    """
+    from .almaty import now as hotel_now  # noqa: PLC0415
+    from .db import SessionLocal  # noqa: PLC0415
+    from .dialogs import seen_before  # noqa: PLC0415
+    from .notify import tell_developer  # noqa: PLC0415
+
+    try:
+        if await seen_before(SessionLocal, "alert", f"credits:{hotel_now():%Y%m%d%H}"):
+            return
+        await tell_developer(
+            "🔴 Бот Airis: кончились деньги на ключе Anthropic. Гости получают запасной "
+            "ответ «позвоните на стойку». Пополните баланс: console.anthropic.com → "
+            "Plans & Billing (лучше включить автопополнение).\n\n" + error[:200],
+            "кончились кредиты Anthropic")
+    except Exception as alert_error:  # noqa: BLE001
+        logger.error("Не удалось сообщить о кончившихся кредитах: %s", alert_error)
+
+
 async def _call_model(payload: dict[str, Any], headers: dict[str, str], *,
                       transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
     """Запрос к модели с двумя повторами на кратковременных сбоях.
@@ -1467,7 +1491,10 @@ async def _call_model(payload: dict[str, Any], headers: dict[str, str], *,
             последняя = RuntimeError(f"HTTP {response.status_code}: {response.text[:120]}")
             logger.warning("Модель ответила %s — пробую ещё раз", response.status_code)
             continue
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # С текстом ответа: по нему видно, что именно не так, — например,
+            # «credit balance is too low» (кончились деньги на ключе).
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
         return response.json()
     raise последняя or RuntimeError("модель не ответила")
 
@@ -1693,6 +1720,8 @@ async def answer(
             data = await _call_model(payload, headers)
         except Exception as error:  # noqa: BLE001
             logger.warning("Модель недоступна, гостю уходит запасной ответ: %s", error)
+            if "credit balance" in str(error).lower():
+                await _сказать_что_кончились_кредиты(str(error))
             return {"text": FALLBACK, "ok": False, "reason": f"модель недоступна: {error}"}
 
         usage = data.get("usage", {})

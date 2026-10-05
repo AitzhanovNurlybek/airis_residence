@@ -3843,9 +3843,19 @@ async def qa_daily_check() -> None:
 
     сейчас = int(_t.time())
 
+    баланс = {"пуст": False, "запросов": 0}
+    НЕТ_БАЛАНСА = httpx.Response(400, json={"type": "error", "error": {
+        "type": "invalid_request_error",
+        "message": "Your credit balance is too low to access the Anthropic API."}})
+
     def _зелёный(исходящие: list[dict]) -> httpx.MockTransport:
         def _ответ(request: httpx.Request) -> httpx.Response:
             путь = request.url.path
+            if путь.endswith("/v1/messages"):
+                баланс["запросов"] += 1
+                if баланс["пуст"]:
+                    return НЕТ_БАЛАНСА
+                return httpx.Response(200, json={"content": [{"type": "text", "text": "o"}]})
             if "getStateInstance" in путь:
                 return httpx.Response(200, json={"stateInstance": "authorized"})
             if "getSettings" in путь:
@@ -3887,6 +3897,15 @@ async def qa_daily_check() -> None:
         _dc.httpx.AsyncClient = _клиент([])
         r = await _dc.run(settings, booking=_Exely())
         check("здоровый бот — без замечаний", r["ok"] and not r["problems"], str(r["problems"])[:160])
+        check("баланс проверяется настоящим запросом на один токен", баланс["запросов"] == 1)
+
+        # 2026-10-05: деньги на ключе кончились — подсчёт токенов мог пройти,
+        # а гости весь день получали запасную фразу.
+        баланс["пуст"] = True
+        r = await _dc.run(settings, booking=_Exely())
+        check("пустой баланс Anthropic пойман", any("кончились деньги" in p for p in r["problems"]),
+              str(r["problems"])[:160])
+        баланс["пуст"] = False
 
         # Тариф кончился: тревога с 466 и после неё — ни одного сообщения наружу.
         тревога = {"chatId": "77003002526@c.us", "timestamp": сейчас - 600, "statusMessage": "sent",
@@ -3927,6 +3946,65 @@ async def qa_daily_check() -> None:
     check("и пишет разработчику при проблемах", "tell_developer(" in исходник)
     check("тревога о неушедшем ответе идёт и разработчику",
           "tell_developer(" in _insp.getsource(_wh._сказать_отелю_что_ответ_не_ушёл))
+
+
+async def qa_credits_alert() -> None:
+    """Кончились деньги на ключе — разработчик узнаёт сразу, но не на каждое сообщение.
+
+    2026-10-05 баланс Anthropic опустел, бот отвечал гостям запасной фразой,
+    и узнали об этом не от бота.
+    """
+    head("Тревога: кончились кредиты Anthropic")
+
+    import app.concierge as _c  # noqa: PLC0415
+    import app.notify as _nt  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+
+    ушло: list[str] = []
+
+    async def _разработчику(text: str, что: str) -> int:
+        ушло.append(text)
+        return 1
+
+    def _нет_денег(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"type": "error", "error": {
+            "type": "invalid_request_error",
+            "message": "Your credit balance is too low to access the Anthropic API."}})
+
+    import app.dialogs as _dl  # noqa: PLC0415
+
+    # Ключ «уже говорили в этот час» — в памяти, чтобы повторный прогон QA
+    # не упирался в запись из прошлого прогона.
+    виденные: set[str] = set()
+
+    async def _seen(_sessions, channel: str, message_id: str) -> bool:
+        ключ = f"{channel}:{message_id}"
+        if ключ in виденные:
+            return True
+        виденные.add(ключ)
+        return False
+
+    settings = _gs()
+    было = (settings.anthropic_api_key, _nt.tell_developer, _c.httpx.AsyncClient)
+    было_seen = _dl.seen_before
+    _dl.seen_before = _seen
+    настоящий_клиент = _c.httpx.AsyncClient
+    settings.anthropic_api_key = "k"
+    _nt.tell_developer = _разработчику
+    _c.httpx.AsyncClient = lambda **kw: настоящий_клиент(
+        transport=httpx.MockTransport(_нет_денег), **{k: v for k, v in kw.items() if k != "transport"})
+    try:
+        гость = {"name": "QA", "phone": "+77010000000", "chat_id": "77010000000@c.us"}
+        первый = await _c.answer(settings, message="Здравствуйте", history=[], today="2026-10-05",
+                                 guest=гость)
+        await _c.answer(settings, message="Есть номер?", history=[], today="2026-10-05", guest=гость)
+    finally:
+        settings.anthropic_api_key, _nt.tell_developer, _c.httpx.AsyncClient = было
+        _dl.seen_before = было_seen
+    check("гость получает запасной ответ", bool(первый.get("text")))
+    check("разработчику ушла тревога о кончившихся деньгах",
+          any("кончились деньги" in t for t in ушло), str(ушло)[:160])
+    check("и только одна за час, а не на каждое сообщение", len(ушло) <= 1, str(len(ушло)))
 
 
 async def qa_front_desk() -> None:
@@ -4378,6 +4456,7 @@ async def main() -> int:
     await qa_model_retry()
     await qa_front_desk()
     await qa_daily_check()
+    await qa_credits_alert()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()
