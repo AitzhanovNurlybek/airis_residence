@@ -4950,6 +4950,168 @@ async def qa_site_reviews() -> None:
             await ses.commit()
 
 
+async def qa_nearest_and_style() -> None:
+    """Нет мест на даты гостя — бот сам находит ближайшие; ответы короткие.
+
+    2026-10-07 гость писал по-казахски про 14–17 октября. Бот сказал правду
+    (все три ночи подряд ни в одной категории не свободны), но трижды
+    переспросил гостя вместо того, чтобы предложить 17–20 — оно было
+    свободно в трёх категориях. Гость написал «позвоню» и ушёл. И ответы
+    были длиннее вопросов: на два слова — два предложения с извинением.
+    """
+    head("Ближайшие даты и короткий стиль")
+
+    import asyncio as _aio  # noqa: PLC0415
+    from datetime import date as _d, timedelta as _td  # noqa: PLC0415
+
+    import app.almaty as _al  # noqa: PLC0415
+    import app.concierge as _c  # noqa: PLC0415
+    import app.nearest as _nr  # noqa: PLC0415
+    from app.booking_system.base import Availability as _Av, RatePlan as _Rate, RoomOffer as _Offer  # noqa: PLC0415
+
+    сегодня = _d(2026, 10, 7)
+    # Свободно по ночам: ночь → {категория: (сколько, цена)}. 14 и 15-го — по
+    # одному номеру в разных категориях, 16-го всё занято, с 17-го свободно.
+    таблица = {
+        _d(2026, 10, 14): {"comfort": (1, 42000)},
+        _d(2026, 10, 15): {"standart": (1, 35000)},
+        _d(2026, 10, 17): {"comfort-plus": (1, 47250), "apart": (1, 45000)},
+        _d(2026, 10, 18): {"comfort-plus": (1, 47250), "apart": (1, 45000)},
+        _d(2026, 10, 19): {"comfort-plus": (2, 47250), "apart": (1, 45000)},
+        _d(2026, 10, 20): {"comfort-plus": (2, 47250)},
+        _d(2026, 10, 21): {"comfort-plus": (2, 47250)},
+    }
+    вызовов = {"n": 0}
+    имена = {"comfort": "Comfort", "standart": "Standart", "comfort-plus": "Comfort Plus", "apart": "Apart"}
+
+    class _Система:
+        async def availability(self, check_in, check_out, *, guests=2):  # noqa: ANN001
+            вызовов["n"] += 1
+            ночи = [check_in + _td(days=n) for n in range((check_out - check_in).days)]
+            общие = None
+            for ночь in ночи:
+                cats = set(таблица.get(ночь, {}))
+                общие = cats if общие is None else общие & cats
+            offers = []
+            for slug, name in имена.items():
+                if общие and slug in общие:
+                    price = min(таблица[н][slug][1] for н in ночи)
+                    offers.append(_Offer(room_slug=slug, room_name=name, rooms_left=1,
+                                         price_per_night=price, source="exely",
+                                         rates=(_Rate(code="r", name="Тариф", price=price),)))
+                else:
+                    offers.append(_Offer(room_slug=slug, room_name=name, rooms_left=0,
+                                         price_per_night=None, source="exely"))
+            return _Av(check_in, check_out, len(ночи), offers, "exely")
+
+    система = _Система()
+    варианты = await _nr.nearest_options(система, _d(2026, 10, 14), _d(2026, 10, 17), 2, сегодня)
+    check("ближайшее окно — 17–20 октября, три ночи",
+          bool(варианты) and варианты[0].check_in == _d(2026, 10, 17) and варианты[0].nights == 3,
+          str([(o.check_in, o.nights) for o in варианты]))
+    check("в нём свободны именно те категории, что есть",
+          bool(варианты) and set(варианты[0].rooms) == {"comfort-plus", "apart"}, str(варианты[:1]))
+    check("цена — самая низкая из тарифов",
+          bool(варианты) and варианты[0].rooms["apart"][1] == 45000)
+    check("не больше двух вариантов, и не копии соседних дней",
+          len(варианты) <= 2 and all(abs((a.check_in - b.check_in).days) >= 2
+                                      for a in варианты for b in варианты if a is not b),
+          str([(o.check_in, o.nights) for o in варианты]))
+    check("прошедшие даты не предлагаются",
+          all(o.check_in >= сегодня for o in await _nr.nearest_options(
+              система, _d(2026, 10, 8), _d(2026, 10, 10), 2, сегодня)))
+
+    # На ночь-две короче, если такого же периода нет.
+    таблица_было = dict(таблица)
+    таблица.clear()
+    таблица.update({_d(2026, 10, 14): {"comfort": (1, 42000)}, _d(2026, 10, 15): {"comfort": (1, 42000)}})
+    короче = await _nr.nearest_options(система, _d(2026, 10, 14), _d(2026, 10, 17), 2, сегодня)
+    check("нет окна той же длины — предлагается короче (2 ночи из 3)",
+          bool(короче) and короче[0].nights == 2 and короче[0].check_in == _d(2026, 10, 14),
+          str([(o.check_in, o.nights) for o in короче]))
+    таблица.clear()
+    пусто = await _nr.nearest_options(система, _d(2026, 10, 14), _d(2026, 10, 17), 2, сегодня)
+    check("рядом ничего нет — пустой список, а не выдумка", пусто == [])
+    таблица.update(таблица_было)
+
+    class _Тормоз:
+        async def availability(self, *_a, **_k):  # noqa: ANN002, ANN003
+            await _aio.sleep(60)
+
+    было_предел = _nr.TIME_LIMIT
+    _nr.TIME_LIMIT = 0.2
+    try:
+        медленно = await _nr.nearest_options(_Тормоз(), _d(2026, 10, 14), _d(2026, 10, 17), 2, сегодня)
+    finally:
+        _nr.TIME_LIMIT = было_предел
+    check("медленная система — поиск сдаётся, гость не ждёт", медленно == [])
+
+    # В самом инструменте.
+    было_today = _al.today
+    _al.today = lambda: сегодня
+    try:
+        вызовов["n"] = 0
+        текст = await _c._tool_availability(
+            система, {"check_in": "2026-10-14", "check_out": "2026-10-17", "guests": 2}, None)
+        check("в ответе инструмента — ближайшее свободное",
+              "2026-10-17 — 2026-10-20" in текст and "Apart" in текст, текст[-400:])
+        check("и просьба предложить его одной короткой фразой",
+              "ОДНОЙ короткой фразой" in текст and "Не проси гостя самому искать даты" in текст)
+        check("в подсказке нет русских слов-образцов, которые модель копирует",
+              "подойдёт" not in текст.lower() and "на языке гостя" in текст)
+        check("к результату инструмента для казаха — напоминание о языке",
+              "по-казахски, не по-русски" in _c._с_языком(текст, "kk")
+              and "по-английски" in _c._с_языком(текст, "en"))
+        check("русскому гостю результат инструмента не меняется", _c._с_языком(текст, "ru") == текст)
+        check("история, начатая с ответа инструмента, открывается",
+              _c._открывается([{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x",
+                                                            "content": "ок"}]},
+                               {"role": "user", "content": "Привет"}])[0]["content"] == "Привет")
+        вызовов["n"] = 0
+        свободно = await _c._tool_availability(
+            система, {"check_in": "2026-10-17", "check_out": "2026-10-20", "guests": 2}, None)
+        check("когда места есть, лишних запросов не делается",
+              вызовов["n"] == 1 and "ближайш" not in свободно.lower())
+        корп = await _c._tool_availability(
+            система, {"check_in": "2026-10-14", "check_out": "2026-10-17", "guests": 2}, None,
+            corporate={"company": "ТОО", "rates": {}, "discount_percent": 0})
+        check("корпоративному гостю прайсовые цены вариантов не называются",
+              "тенге за ночь" not in корп.split("проверено тем же запросом")[-1], корп[-300:])
+        таблица.clear()
+        нет = await _c._tool_availability(
+            система, {"check_in": "2026-10-14", "check_out": "2026-10-17", "guests": 2}, None)
+        check("рядом пусто — подсказка про стойку остаётся",
+              "стойк" in нет.lower() and "ничего не нашёл" in нет)
+        таблица.update(таблица_было)
+    finally:
+        _al.today = было_today
+
+    # Стиль: длина ответа по длине сообщения.
+    check("два слова — одна короткая фраза", "ОДНОЙ короткой фразой" in _c._style_note("Барма нөмір"))
+    check("пять-двенадцать слов — одно-два предложения",
+          "одним-двумя короткими" in _c._style_note("Нам нужен номер на двоих с четырнадцатого"))
+    check("длинное сообщение — без пометки",
+          _c._style_note("Здравствуйте, хотели бы забронировать номер на три ночи с двадцатого, "
+                         "нас двое взрослых") == "")
+    check("служебная реплика про снимок по длине не судится",
+          _c._style_note("[Гость прислал снимок. На нём: бронь]") == "")
+    правила = _c.build_system_prompt("", "2026-10-07", availability="exely")
+    check("в правилах: длина ответа — по длине сообщения гостя", "по длине сообщения гостя" in правила)
+    check("в правилах: месяц по числам не переспрашивать", "месяц не спрашивай" in правила)
+    check("в правилах: «да» на «А или Б» — первый вариант", "это первый вариант" in правила)
+    check("в правилах: опечатки гостя не копировать", "Не копируй опечатки" in правила)
+    check("в правилах: не просить гостя искать другие даты", "не проси его назвать другие даты" in правила)
+    check("в правилах: цены с пробелом и знаком тенге", "«36 000 ₸»" in правила)
+    казахская = _c._language_note("Саламатсызба с14 по17", first=True, language="kk")
+    check("казахская пометка: разговорный язык, «Сіз», точное приветствие",
+          "на «Сіз»" in казахская and "«Сәлеметсіз бе!»" in казахская, казахская[:200])
+    check("английская пометка: естественно, как администратор",
+          "как живой администратор" in _c._language_note("Do you have a room?", first=True, language="en"))
+    import app.followup as _fu  # noqa: PLC0415
+
+    check("дожим — одно предложение", "до 20 слов" in _fu.DECIDE_PROMPT)
+
+
 async def qa_front_desk() -> None:
     """Просьба живущего гостя — на стойку, а не в пустое «стойка подтвердит».
 
@@ -5406,6 +5568,7 @@ async def main() -> int:
     await qa_staff_images_facts()
     await qa_price_sync()
     await qa_site_reviews()
+    await qa_nearest_and_style()
     await qa_followup_own()
     await qa_guest_messages_language()
     await qa_chat_turn()
