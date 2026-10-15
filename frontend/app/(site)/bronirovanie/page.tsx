@@ -110,6 +110,7 @@ export default async function BookingPage(props: PageProps<"/bronirovanie">) {
                 <div>
                   <dt className="text-cream">Оплата</dt>
                   <dd className="mt-1 text-muted">{site.policy.payment.join(", ")}</dd>
+                  <dd className="mt-1 text-muted">{site.policy.onlinePayment}</dd>
                 </div>
                 <div className="hairline" />
                 <div>

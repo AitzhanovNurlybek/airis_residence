@@ -126,6 +126,8 @@ def render_brief(facts: dict[str, Any]) -> str:
         add(f"- {policy['refund']}.")
     payment = policy.get("payment") or []
     add(f"- Оплата: {', '.join(payment)}.")
+    if policy.get("onlinePayment"):
+        add(f"- Онлайн-оплата: {policy['onlinePayment']}.")
     # Хранение багажа. Пока отель не подтвердил, модель обещала его сама:
     # «оставьте вещи на стойке» — и в следующем сообщении поправлялась
     # «на самом деле не уверен» (живой диалог 2026-10-05). Общее правило «не

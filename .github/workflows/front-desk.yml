@@ -1,0 +1,28 @@
+name: Стойке — приезды на сегодня
+
+# Утром в день приезда стойке приходит список: кто сегодня приезжает и что
+# писал боту заранее («приедем к 10, сумки оставим»). Второй запуск — запас
+# на случай, если первый не дошёл: уже отправленное повторно не уходит.
+
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 07:30 по Алматы
+    - cron: "0 6 * * *"    # 11:00 — повтор, если утром не ушло
+  workflow_dispatch:
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отправить список стойке
+        run: |
+          code=$(curl -s -o response.json -w "%{http_code}" --max-time 120 \
+            -X POST "https://airisresidence.kz/api/backend/api/webhooks/front-desk-digest" \
+            -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "HTTP $code"
+          cat response.json
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Список для стойки не отправился, код $code"
+            exit 1
+          fi

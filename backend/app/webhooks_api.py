@@ -809,6 +809,34 @@ async def corp_pending_tick(
     return {"ok": True, **result}
 
 
+@router.post("/front-desk-digest")
+async def front_desk_digest(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Утром — стойке: кто сегодня приезжает и что писал боту заранее.
+
+    Гость за три дня пишет «приедем к 10, сумки оставим». Уведомление тогда
+    же ушло, но в день приезда его никто не найдёт. Повторный запуск в тот
+    же день ничего не шлёт. `?dry_run=1` показывает текст, ничего не отправляя.
+    """
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+
+    from .front_desk import morning_digest
+
+    dry = request.query_params.get("dry_run") in ("1", "true", "yes")
+    result = await morning_digest(session, dry_run=dry)
+    return {"ok": True, **result}
+
+
 @router.post("/sync-prices")
 async def sync_prices_endpoint(
     request: Request,

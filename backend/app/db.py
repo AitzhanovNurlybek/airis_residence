@@ -834,6 +834,41 @@ class GuestName(Base):
     )
 
 
+class FrontDeskNote(Base):
+    """То, что гость сообщил боту, а знать и сделать должна стойка.
+
+    2026-10-15 отель пожаловался: гость пишет боту «приедем пораньше, сумки
+    оставим», бот отвечает, а ресепшен об этом не знает — гость приезжает, а
+    там «хлопают глазами, кто писал». Уведомление в моменте уходит сразу, но
+    в день приезда смена уже другая, и сообщение недельной давности никто не
+    найдёт. Поэтому пометка хранится и утром в день приезда приходит стойке
+    ещё раз, списком.
+    """
+
+    __tablename__ = "front_desk_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), default="whatsapp")
+    chat_id: Mapped[str] = mapped_column(String(80), index=True, default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    guest_name: Mapped[str] = mapped_column(String(120), default="")
+    booking_ref: Mapped[str] = mapped_column(String(60), default="")
+    room: Mapped[str] = mapped_column(String(20), default="")
+    #: День приезда, если гость его назвал. По нему — утреннее напоминание.
+    arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    #: Время словами, как сказал гость: «около 10», «ночью, рейс в 3:40».
+    arrival_time: Mapped[str] = mapped_column(String(60), default="")
+    request: Mapped[str] = mapped_column(Text, default="")
+    #: Последние реплики гостя — чтобы стойка видела историю, а не пересказ.
+    said: Mapped[str] = mapped_column(Text, default="")
+    #: Напомнили ли утром в день приезда. Пометке на сегодня ставится сразу:
+    #: уведомление в моменте и есть напоминание.
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "staff_messages": {

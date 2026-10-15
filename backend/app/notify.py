@@ -221,26 +221,63 @@ async def notify_hotel_booking(number: str, kind: str) -> None:
     await _tell_hotel("\n".join(lines), f"бронь {number}")
 
 
+def wa_link(phone: str) -> str:
+    """Ссылка «написать в WhatsApp» по номеру гостя: нажал — и чат открыт."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return f"https://wa.me/{digits}" if len(digits) >= 10 else ""
+
+
+def front_desk_lines(*, request: str, room: str = "", guest: str = "", phone: str = "",
+                     urgent: bool = False, booking_ref: str = "", arrival: str = "",
+                     said: list[str] | None = None) -> list[str]:
+    """Сообщение стойке одним списком строк — его же повторяет утренняя сводка."""
+    lines = (["🛎 Стойке: гость сообщил о приезде", ""] if arrival
+             else ["🛎 Просьба гостя — нужен сотрудник", ""])
+    кто = ", ".join(x for x in (guest, phone) if x)
+    if кто:
+        lines.append(f"Гость: {кто}")
+    if booking_ref:
+        lines.append(f"Бронь: {booking_ref}")
+    if room:
+        lines.append(f"Живёт в номере: {room}")
+    if arrival:
+        lines.append(f"Приезд: {arrival}")
+    lines.append(f"{'Что передать' if arrival else 'Просьба'}: {request}")
+    if urgent:
+        lines.append("Срочно: нужно сегодня")
+    реплики = [" ".join(str(x).split())[:200] for x in (said or []) if str(x).strip()]
+    if реплики:
+        # Своими словами гостя, а не пересказом бота: «приедем к 10, сумки
+        # оставим» стойка должна прочитать так, как обещали гостю.
+        lines += ["", "Гость писал:"] + [f"«{x}»" for x in реплики[-4:]]
+    ссылка = wa_link(phone)
+    lines += ["", "Вся переписка — в WhatsApp отеля, в чате с этим гостем."]
+    if ссылка:
+        lines.append(f"Написать гостю: {ссылка}")
+    if not arrival:
+        lines.append("Свяжитесь с гостем или подойдите в номер — бот этого сделать не может.")
+    return lines
+
+
 async def notify_front_desk(*, request: str, room: str = "", guest: str = "",
-                            phone: str = "", urgent: bool = False) -> int:
-    """Просьба живущего гостя, которую выполнить может только сотрудник.
+                            phone: str = "", urgent: bool = False, booking_ref: str = "",
+                            arrival: str = "", said: list[str] | None = None) -> int:
+    """Просьба гостя или его приезд — стойке, сразу.
 
     2026-10-04 гость из номера 105 попросил утром переехать в другой номер.
     Бот ответил вежливо и пообещал, что «стойка всё подтвердит», — а стойка
     ничего не узнала: передать просьбу, кроме отмены брони, было нечем.
     Обещание, которое никто не выполнит, хуже честного «позвоните».
+
+    2026-10-15 отель добавил: «приедем пораньше, сумки оставим», время
+    приезда — тоже стойке, иначе гость приезжает, а там никто не в курсе.
+    Уходит и ресепшену (`corporate=True` добавляет его номер): заселяет он.
     """
-    lines = ["🛎 Просьба гостя — нужен сотрудник", ""]
-    кто = ", ".join(x for x in (guest, phone) if x)
-    if кто:
-        lines.append(f"Гость: {кто}")
-    if room:
-        lines.append(f"Живёт в номере: {room}")
-    lines.append(f"Просьба: {request}")
-    if urgent:
-        lines.append("Срочно: нужно сегодня")
-    lines += ["", "Свяжитесь с гостем или подойдите в номер — бот этого сделать не может."]
-    return await _tell_hotel("\n".join(lines), "просьба гостя")
+    lines = front_desk_lines(request=request, room=room, guest=guest, phone=phone,
+                             urgent=urgent, booking_ref=booking_ref, arrival=arrival,
+                             said=said)
+    return await _tell_hotel("\n".join(lines), "приезд гостя" if arrival else "просьба гостя",
+                             corporate=True)
 
 
 async def notify_cancel_request(*, ref: str = "", guest: str = "", phone: str = "",
