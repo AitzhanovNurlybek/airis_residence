@@ -30,7 +30,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -374,7 +374,6 @@ async def _звонок(settings: Settings, payload: dict[str, Any]) -> dict[str
 async def exely_webhook(
     request: Request,
     response: Response,
-    background: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -435,19 +434,80 @@ async def exely_webhook(
         saved.append(event.id)
         logger.info("Вебхук Exely: %s по брони %s", kind, number or "без номера")
 
-        # Отель узнаёт о брони отсюда, и только отсюда: платёж проходит между
-        # Exely и банком, мимо нас. Отправляем в фоне — уведомление не должно
-        # задерживать ответ Exely, иначе он посчитает доставку неудачной и
-        # начнёт слать повторы.
-        if number and any(w in kind.lower() for w in ("book", "reserv")):
-            background.add_task(notify_hotel_booking, number, kind)
-            # И запоминаем саму бронь, чтобы её нашли по имени гостя сразу,
-            # а не после ежечасного переноса (sync-bookings). Основной путь —
-            # перенос: уведомления приходят пачкой раз в сутки и не обо всех
-            # бронях, а фоновая задача может оборваться вместе с функцией.
-            background.add_task(_remember_booking, number)
-
+    # Здесь только приём: сохранили — ответили. Разбор (расчёт возврата,
+    # запись брони) делает process_exely_events по расписанию.
+    #
+    # Раньше разбор шёл фоновой задачей, но на Vercel ответ уходит
+    # отправителю только после неё: Exely ждал запросов к Exely, банку и
+    # WhatsApp, обрывал по таймауту в 100 секунд и повторял с растущим
+    # интервалом до суток (ответ разработчиков Exely, 2026-10-28). Отсюда и
+    # «уведомления приходят пачкой раз в сутки».
     return {"ok": True, "saved": saved, "duplicates": duplicates, "events": len(events)}
+
+
+#: Сколько секунд обработчик событий Exely тратит за один запуск. Остальное
+#: разберёт следующий: функция на Vercel не живёт бесконечно.
+PROCESS_BUDGET = 60.0
+
+
+async def process_exely_events(*, limit: int = 30, budget: float = PROCESS_BUDGET) -> dict[str, Any]:
+    """Разобрать принятые события Exely: возврат при отмене, бронь — в поиск.
+
+    Пометка `processed` ставится ДО работы, как и `handled` в рассылке:
+    оборвись функция посреди — событие не разберётся второй раз. Потерять
+    одно уведомление неприятно, а повторить возврат денег — недопустимо.
+    """
+    import time  # noqa: PLC0415
+
+    начало = time.monotonic()
+    async with SessionLocal() as session:
+        ожидают = [
+            (e.id, e.kind, e.booking_number)
+            for e in (await session.execute(
+                select(ExelyEvent).where(ExelyEvent.processed.is_(False))
+                .order_by(ExelyEvent.id).limit(limit))).scalars().all()
+        ]
+    разобрано = 0
+    for event_id, kind, number in ожидают:
+        if time.monotonic() - начало > budget:
+            break
+        async with SessionLocal() as session:
+            event = await session.get(ExelyEvent, event_id)
+            if event is None or event.processed:
+                continue  # параллельный запуск успел раньше
+            event.processed = True
+            await session.commit()
+        разобрано += 1
+        # Отель узнаёт о брони отсюда: платёж проходит между Exely и банком,
+        # мимо нас. Каждая часть — со своим пределом времени, чтобы одна
+        # зависшая не съела весь запуск.
+        if number and any(w in kind.lower() for w in ("book", "reserv")):
+            try:
+                await asyncio.wait_for(notify_hotel_booking(number, kind), 40)
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Событие %s (%s): уведомление отелю не ушло: %s", number, kind, error)
+            try:
+                await asyncio.wait_for(_remember_booking(number), 20)
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Событие %s: бронь не запомнилась: %s", number, error)
+    return {"pending": len(ожидают), "processed": разобрано}
+
+
+@router.post("/exely-process")
+async def exely_process(
+    request: Request,
+    response: Response,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Разобрать события Exely, принятые вебхуком. Дёргается по расписанию."""
+    secret = (settings.whatsapp_webhook_secret or "").strip()
+    if not secret:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "error": "webhook secret is not configured"}
+    if _presented(request) != secret:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"ok": False, "error": "bad key"}
+    return {"ok": True, **await process_exely_events()}
 
 
 async def _remember_booking(number: str) -> None:

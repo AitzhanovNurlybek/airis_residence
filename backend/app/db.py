@@ -584,6 +584,13 @@ class ExelyEvent(Base):
     #: Отработал ли по нему бот (написал гостю, обновил разговор).
     handled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
+    #: Разобрано ли для отеля: расчёт возврата при отмене, запись брони для
+    #: поиска по имени. Раньше это делалось при приёме, и Exely ждал ответа,
+    #: пока шли запросы к Exely, банку и WhatsApp, — до таймаута в 100 секунд
+    #: и повторов с интервалом до суток (ответ поддержки Exely, 2026-10-28).
+    #: Теперь приём только сохраняет, а разбирает обработчик по расписанию.
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -893,6 +900,12 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
         # Ложь по умолчанию намеренна: существующие компании не должны
         # начать подтверждать заявки сами от того, что мы выкатили версию.
         "auto_confirm": "BOOLEAN NOT NULL DEFAULT FALSE",
+    },
+    "exely_events": {
+        # TRUE для уже лежащих событий: их отработали при приёме, и разобрать
+        # их второй раз — значит повторить уведомления и, хуже, возвраты.
+        # Новые строки пишутся с явным False из модели.
+        "processed": "BOOLEAN NOT NULL DEFAULT TRUE",
     },
     "corp_bookings": {
         "meal_plan": "VARCHAR(20) DEFAULT 'breakfast'",

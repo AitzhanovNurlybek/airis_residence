@@ -35,3 +35,15 @@ jobs:
           # Падать не надо: единичный сбой прогрева не повод красить репозиторий
           # в красное. Но в логе видно, если бэкенд лежит.
           [ "$code" = "200" ] || echo "::warning::бэкенд ответил $code"
+
+      # Заодно — разобрать уведомления Exely. Приём (/webhooks/exely) только
+      # сохраняет и сразу отвечает: дольше 100 секунд Exely не ждёт и шлёт
+      # повторы с интервалом до суток. Разбор — здесь, раз в пять минут.
+      - name: Разобрать уведомления Exely
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o exely.json -w "%{http_code}" --max-time 120 \
+            -X POST "https://airisresidence.kz/api/backend/api/webhooks/exely-process" \
+            -H "X-Api-Key: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}")
+          echo "exely-process → $code"; cat exely.json; echo
+          [ "$code" = "200" ] || echo "::warning::разбор уведомлений Exely вернул $code"

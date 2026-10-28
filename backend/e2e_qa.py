@@ -1116,7 +1116,9 @@ def qa_webhooks() -> None:
 
     KEY = "qa-secret-abc"
     was = _os.environ.get("EXELY_WEBHOOK_SECRET")
+    was_wa = _os.environ.get("WHATSAPP_WEBHOOK_SECRET")
     _os.environ["EXELY_WEBHOOK_SECRET"] = KEY
+    _os.environ["WHATSAPP_WEBHOOK_SECRET"] = "qa-process-key"
     _gs.cache_clear()
     try:
         import app.main as _main
@@ -1130,8 +1132,15 @@ def qa_webhooks() -> None:
         async def _не_шлём(number: str, kind: str) -> None:
             отправлено_отелю.append((number, kind))
 
+        запомнено: list[str] = []
+
+        async def _не_запоминаем(number: str) -> None:
+            запомнено.append(number)
+
         настоящий = _wh.notify_hotel_booking
+        настоящее_запоминание = _wh._remember_booking
         _wh.notify_hotel_booking = _не_шлём
+        _wh._remember_booking = _не_запоминаем
 
         client = TestClient(_main.app)
         # Номер свой на каждый прогон. События копятся в базе, и с постоянным
@@ -1210,6 +1219,24 @@ def qa_webhooks() -> None:
         check("отмена той же брони — отдельное событие",
               cancel.status_code == 200 and not cancel.json().get("duplicate"))
 
+        # Приём только сохраняет и сразу отвечает. Раньше разбор шёл тут же
+        # фоновой задачей, и на Vercel Exely ждал его до таймаута в 100 секунд
+        # (ответ разработчиков Exely, 2026-10-28) — и слал повторы до суток.
+        check("приём сам ничего не разбирает — только сохраняет",
+              not отправлено_отелю and not запомнено, str(отправлено_отелю)[:120])
+        check("разбор без ключа не запускается",
+              client.post("/api/webhooks/exely-process").status_code == 401)
+        разбор = client.post("/api/webhooks/exely-process",
+                             headers={"X-Api-Key": "qa-process-key"})
+        check("обработчик разобрал принятое",
+              разбор.status_code == 200 and разбор.json().get("processed", 0) >= 3, разбор.text[:120])
+        check("и запомнил брони для поиска", any(n.startswith(ref) for n in запомнено))
+        уже = len(отправлено_отелю)
+        второй = client.post("/api/webhooks/exely-process",
+                             headers={"X-Api-Key": "qa-process-key"})
+        check("второй запуск ничего не разбирает повторно",
+              второй.json().get("processed") == 0 and len(отправлено_отелю) == уже, второй.text[:120])
+
         _os.environ["EXELY_WEBHOOK_SECRET"] = ""
         _gs.cache_clear()
         check("без настроенного секрета точка выключена",
@@ -1228,8 +1255,13 @@ def qa_webhooks() -> None:
     finally:
         try:
             _wh.notify_hotel_booking = настоящий
+            _wh._remember_booking = настоящее_запоминание
         except NameError:
             pass
+        if was_wa is None:
+            _os.environ.pop("WHATSAPP_WEBHOOK_SECRET", None)
+        else:
+            _os.environ["WHATSAPP_WEBHOOK_SECRET"] = was_wa
         if was is None:
             _os.environ.pop("EXELY_WEBHOOK_SECRET", None)
         else:
