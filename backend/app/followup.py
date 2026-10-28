@@ -357,6 +357,22 @@ async def _staff_spoke(session: AsyncSession, chat_id: str, hours: int = 48) -> 
     return found is not None
 
 
+async def _hotel_note_last(session: AsyncSession, chat_id: str) -> bool:
+    """Последнее в чате — сообщение, которое отель отправил сам."""
+    from .dialogs import HOTEL_NOTE_MARK  # noqa: PLC0415
+
+    последнее = (
+        await session.execute(
+            select(DialogMessage.content)
+            .where(DialogMessage.channel == CHANNEL)
+            .where(DialogMessage.chat_id == chat_id)
+            .order_by(DialogMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return str(последнее or "").startswith(HOTEL_NOTE_MARK)
+
+
 async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
     """Собрать сообщения вдогонку по оборванным разговорам."""
     since = settings.followup_from
@@ -388,6 +404,10 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
         # Разговор вёл сотрудник: последнее слово его, а не бота, и дожим
         # поверх живого общения выглядел бы как спам.
         if await _staff_spoke(session, chat_id):
+            continue
+        # Последнее слово — сообщение отеля («завтра ждём, во сколько
+        # приедете?»), а не ответ бота на вопрос гостя. Не ответил — его дело.
+        if await _hotel_note_last(session, chat_id):
             continue
         step = await _step_for(session, chat_id, final_hours=final_hours)
         if step is None:

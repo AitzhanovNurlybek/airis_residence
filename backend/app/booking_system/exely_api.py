@@ -84,6 +84,16 @@ def _money(value: Any) -> int:
         return 0
 
 
+def normalize_phone(raw: Any) -> str:
+    """Телефон цифрами с кодом страны: «8 701 …» и «701 …» → 7701…; мусор → ""."""
+    цифры = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if len(цифры) == 11 and цифры.startswith("8"):
+        цифры = "7" + цифры[1:]
+    elif len(цифры) == 10 and цифры.startswith("7"):
+        цифры = "7" + цифры
+    return цифры if 11 <= len(цифры) <= 15 else ""
+
+
 def _first(source: dict[str, Any], *names: str) -> Any:
     """Первое непустое поле из перечисленных.
 
@@ -170,9 +180,43 @@ class ExelyApi:
         self._expires = time.monotonic() + lifetime
         return token
 
+    @property
+    def pms_base(self) -> str:
+        """Адрес PMS Universal API: тот же шлюз, другой раздел."""
+        корень = self._base.split("/api/")[0] if "/api/" in self._base else self._base
+        return f"{корень}/api/pms/v2"
+
+    async def guest_contacts(self, number: str) -> dict[str, str] | None:
+        """Телефон и имя гостя из PMS API. None — брони нет.
+
+        Read Reservation API контактов не отдаёт по задумке (ответ поддержки
+        Exely, 2026-10-28). PMS Universal API отдаёт: поддержка включила его
+        в настройках WebPMS, проверено нашим ключом в тот же день. У броней с
+        Booking.com телефона нет (площадка не передаёт), почта там —
+        пересылочный адрес Booking, поэтому её не берём вовсе.
+        """
+        data = await self._get(f"/properties/{self._property}/reservations/{number}",
+                               {"languageCode": "en"}, base=self.pms_base,
+                               missing_on_400=True)
+        бронь = (data or {}).get("reservation") if isinstance(data, dict) else None
+        if not isinstance(бронь, dict):
+            return None
+        гость = бронь.get("customer") if isinstance(бронь.get("customer"), dict) else {}
+        телефон = ""
+        for item in гость.get("phones") or []:
+            сырой = item if isinstance(item, str) else (
+                _first(item, "phone", "number", "phoneNumber", "value") if isinstance(item, dict) else "")
+            телефон = normalize_phone(сырой)
+            if телефон:
+                break
+        имя = гость.get("personName") if isinstance(гость.get("personName"), dict) else {}
+        канал = бронь.get("channelInformation") if isinstance(бронь.get("channelInformation"), dict) else {}
+        return {"phone": телефон, "first_name": str(имя.get("firstName") or "").strip(),
+                "channel": str(канал.get("channelName") or "")}
+
     async def _get(self, path: str, params: dict[str, Any] | None = None, *,
-                   missing_on_400: bool = False) -> Any:
-        url = f"{self._base}/{path.lstrip('/')}"
+                   missing_on_400: bool = False, base: str | None = None) -> Any:
+        url = f"{base or self._base}/{path.lstrip('/')}"
         headers = {
             "Authorization": f"Bearer {await self.token()}",
             "Accept": "application/json",

@@ -62,9 +62,9 @@ BOOKING_CREATED = (
 #: организует сам, и спросить о нём заранее полезно обоим.
 BEFORE_ARRIVAL = (
     "{name}, завтра ждём вас в Airis Residence.\n\n"
-    "Бронь {number}, заезд с {check_in_time}, стойка работает круглосуточно — "
-    "приезжайте в удобное время.\n\n"
-    "Нужен трансфер из аэропорта или помощь с парковкой? Напишите, организуем."
+    "Бронь {number}, заезд с {check_in_time}, стойка работает круглосуточно.\n\n"
+    "Подскажите, во сколько примерно приедете? Предупредим стойку. "
+    "Нужен трансфер из аэропорта — тоже напишите, организуем."
 )
 
 #: После выезда — уходит на следующий день.
@@ -102,9 +102,9 @@ BOOKING_CREATED_EN = (
 
 BEFORE_ARRIVAL_EN = (
     "{name}, we look forward to seeing you at Airis Residence tomorrow.\n\n"
-    "Booking {number}, check-in from {check_in_time}. The front desk is open "
-    "24/7 — arrive whenever suits you.\n\n"
-    "Need an airport transfer or help with parking? Write here and we'll arrange it."
+    "Booking {number}, check-in from {check_in_time}. The front desk is open 24/7.\n\n"
+    "What time do you expect to arrive? We'll let the front desk know. "
+    "Need an airport transfer? Write here and we'll arrange it."
 )
 
 AFTER_DEPARTURE_EN = (

@@ -51,7 +51,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .almaty import now as hotel_now, today as hotel_today
 from .booking_system.exely_api import _as_date, _first
 from .channels.whatsapp import WhatsAppChannel, WhatsAppError, for_whatsapp
-from .db import ExelyEvent
+from .channels.flow import CHANNEL as WA_CHANNEL
+from .db import DialogMessage, ExelyEvent
+from .dialogs import HOTEL_NOTE_MARK
 from .guest_messages import (
     AFTER_DEPARTURE,
     BEFORE_ARRIVAL,
@@ -280,6 +282,52 @@ async def plan_from_calendar(session: AsyncSession, settings: Any) -> list[Plann
     return planned
 
 
+#: Статусы брони, по которым гостю писать нельзя.
+CANCELLED = {"cancelled", "canceled", "declined", "rejected", "noshow", "no_show"}
+
+
+async def plan_from_bookings(session: AsyncSession, settings: Any) -> list[Planned]:
+    """«Завтра ждём» — по перенесённым броням, у которых есть телефон гостя.
+
+    До 2026-10-28 писать было некому: уведомления Exely телефона не несут, а
+    Read Reservation API его не отдаёт. Телефон теперь берётся из PMS API
+    (booking_sync.fill_contacts). У броней с Booking.com его нет — им не пишем.
+    """
+    from .db import ExelyBooking  # noqa: PLC0415
+
+    завтра = hotel_today() + timedelta(days=1)
+    rows = list((
+        await session.execute(
+            select(ExelyBooking)
+            .where(ExelyBooking.check_in == завтра)
+            .where(ExelyBooking.guest_phone != "")
+        )
+    ).scalars().all())
+    if not rows:
+        return []
+    ключи = {f"напоминание:{r.number}" for r in rows}
+    уже = set((await session.execute(
+        select(ExelyEvent.event_key).where(ExelyEvent.event_key.in_(ключи)))).scalars().all())
+    # Свои номера — не гости: тестовые брони отеля на телефон ресепшена.
+    свои = {*getattr(settings, "lead_notify_numbers", []), *getattr(settings, "corp_notify_numbers", [])}
+
+    planned: list[Planned] = []
+    for r in rows:
+        статус = str(r.status or "").strip().casefold().replace(" ", "").replace("-", "_")
+        if статус in CANCELLED or f"напоминание:{r.number}" in уже or r.guest_phone in свои:
+            continue
+        values = {
+            "name": r.first_name or r.guest_name or "Здравствуйте",
+            "number": r.number,
+            "check_in_time": "14:00",
+            "phone": getattr(settings, "hotel_phone", "") or "+7 (777) 531-00-09",
+        }
+        planned.append(Planned(r.guest_phone,
+                               render(for_guest(BEFORE_ARRIVAL, r.guest_phone), **values),
+                               f"завтра заезд по броне {r.number}"))
+    return planned
+
+
 async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) -> dict[str, Any]:
     """Разобрать поводы и отправить сообщения."""
     planned = await plan_from_events(session, settings)
@@ -291,7 +339,11 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
     just_confirmed = {p.reason.split()[-1] for p in planned}
     night = quiet_hours()
     postponed = 0
-    for item in await plan_from_calendar(session, settings):
+    календарь = await plan_from_calendar(session, settings)
+    по_календарю = {p.reason for p in календарь}
+    календарь += [p for p in await plan_from_bookings(session, settings)
+                  if p.reason not in по_календарю]
+    for item in календарь:
         if item.reason.split()[-1] in just_confirmed:
             logger.info("Пропускаю «%s»: подтверждение брони уже уходит", item.reason)
             continue
@@ -347,11 +399,16 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
             ))
         await session.commit()
 
+        чат = f"{''.join(c for c in item.phone if c.isdigit())}@c.us"
         try:
-            await channel.send(f"{''.join(c for c in item.phone if c.isdigit())}@c.us",
-                               for_whatsapp(item.text))
+            await channel.send(чат, for_whatsapp(item.text))
             sent += 1
             logger.info("Отправлено: %s", item.reason)
+            # В историю разговора — чтобы бот понял ответ гостя «будем к 10»
+            # и передал его стойке, а не переспрашивал, о чём речь.
+            session.add(DialogMessage(channel=WA_CHANNEL, chat_id=чат, role="assistant",
+                                      content=HOTEL_NOTE_MARK + item.text))
+            await session.commit()
         except WhatsAppError as error:
             logger.warning("Не отправилось (%s): %s", item.reason, error)
 

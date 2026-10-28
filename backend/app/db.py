@@ -628,6 +628,16 @@ class ExelyBooking(Base):
     total_amount: Mapped[int] = mapped_column(Integer, default=0)
     room_name: Mapped[str] = mapped_column(String(120), default="")
 
+    #: Имя гостя отдельно — для обращения: «Джеймс, завтра ждём вас».
+    first_name: Mapped[str] = mapped_column(String(80), default="")
+    #: Телефон гостя цифрами, из PMS API Exely (с 2026-10-28). По нему бот
+    #: находит бронь того, кто пишет в WhatsApp, и пишет гостю накануне
+    #: заезда. У броней с Booking.com пусто: площадка телефон не передаёт.
+    guest_phone: Mapped[str] = mapped_column(String(20), default="", index=True)
+    #: Спрашивали ли PMS API о контактах после последнего изменения брони.
+    #: Без пометки брони без телефона перечитывались бы каждый запуск.
+    contacts_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+
     #: Когда бронь последний раз менялась в Exely. По нему решаем, надо ли
     #: перечитывать деталь: неизменившиеся не трогаем.
     modified_at: Mapped[str] = mapped_column(String(40), default="")
@@ -900,6 +910,13 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
         # Ложь по умолчанию намеренна: существующие компании не должны
         # начать подтверждать заявки сами от того, что мы выкатили версию.
         "auto_confirm": "BOOLEAN NOT NULL DEFAULT FALSE",
+    },
+    "exely_bookings": {
+        "first_name": "VARCHAR(80) DEFAULT ''",
+        "guest_phone": "VARCHAR(20) DEFAULT ''",
+        # FALSE: уже перенесённые брони тоже надо дочитать — так заполнятся
+        # телефоны ближайших заездов.
+        "contacts_checked": "BOOLEAN NOT NULL DEFAULT FALSE",
     },
     "exely_events": {
         # TRUE для уже лежащих событий: их отработали при приёме, и разобрать

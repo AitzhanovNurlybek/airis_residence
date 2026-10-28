@@ -37,7 +37,7 @@ import time
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .booking_system.base import BookingSystemUnavailable
@@ -154,6 +154,10 @@ def _apply(record: ExelyBooking, booking: dict[str, Any]) -> None:
     имя = _name(booking)
     заезд, выезд = _dates(booking)
     record.status = str(booking.get("status") or "")
+    who = booking.get("customer") if isinstance(booking.get("customer"), dict) else {}
+    record.first_name = str(who.get("firstName") or "").strip()[:80]
+    # Бронь изменилась — контакты перечитать: гость мог исправить телефон.
+    record.contacts_checked = False
     record.guest_name = имя
     record.guest_search = имя.casefold()
     record.check_in = заезд
@@ -258,8 +262,10 @@ async def sync(session: AsyncSession, api: ExelyApi, property_id: str,
         await session.commit()
 
     await session.commit()
+    контакты = await fill_contacts(session, api, today, deadline=started + budget)
     return {
         "ok": True,
+        "телефоны": контакты,
         "перенесено": fetched,
         "статус обновлён": статусов,
         "не прочиталось": failed,
@@ -268,6 +274,87 @@ async def sync(session: AsyncSession, api: ExelyApi, property_id: str,
         "уже у нас": len(known),
         "секунд": round(time.monotonic() - started, 1),
     }
+
+
+#: Сколько броней за запуск спрашивать о контактах.
+CONTACTS_CHUNK = 60
+
+
+async def fill_contacts(session: AsyncSession, api: Any, today: date, *,
+                        limit: int = CONTACTS_CHUNK, deadline: float | None = None) -> dict[str, int]:
+    """Дочитать телефоны гостей из PMS API — для текущих и будущих заездов.
+
+    Прошлые брони не трогаем: писать им незачем, а запрос на каждую стоит
+    времени. Не ответил API — пометку не ставим, спросим в следующий раз.
+    Контакты — дополнение к переносу: их сбой перенос не останавливает.
+    """
+    if not hasattr(api, "guest_contacts"):
+        return {}
+    rows = list((
+        await session.execute(
+            select(ExelyBooking)
+            .where(ExelyBooking.contacts_checked.is_(False))
+            .where(or_(ExelyBooking.check_out.is_(None),
+                       ExelyBooking.check_out >= today - timedelta(days=1)))
+            .order_by(ExelyBooking.check_in)
+            .limit(limit)
+        )
+    ).scalars().all())
+    gate = asyncio.Semaphore(PARALLEL)
+
+    async def одна(record: ExelyBooking) -> tuple[ExelyBooking, dict[str, str] | None, bool]:
+        async with gate:
+            try:
+                return record, await api.guest_contacts(record.number), True
+            except Exception as error:  # noqa: BLE001 — сбой контактов не роняет перенос
+                logger.warning("Контакты брони %s не прочитались: %s", record.number, error)
+                return record, None, False
+            finally:
+                await asyncio.sleep(PAUSE)
+
+    с_телефоном = прочитано = сбой = 0
+    пачка = PARALLEL * 2
+    for begin in range(0, len(rows), пачка):
+        if deadline is not None and time.monotonic() > deadline:
+            break
+        for record, got, ok in await asyncio.gather(*(одна(r) for r in rows[begin:begin + пачка])):
+            if not ok:
+                сбой += 1
+                continue
+            прочитано += 1
+            record.contacts_checked = True
+            record.guest_phone = (got or {}).get("phone", "")
+            if (got or {}).get("first_name") and not record.first_name:
+                record.first_name = got["first_name"][:80]
+            if record.guest_phone:
+                с_телефоном += 1
+        await session.commit()
+    return {"прочитано": прочитано, "с телефоном": с_телефоном, "сбой": сбой,
+            "в очереди": len(rows)}
+
+
+async def find_by_phone(session: AsyncSession, phone: str, today: date,
+                        limit: int = 5) -> list[ExelyBooking]:
+    """Текущие и будущие брони, оформленные на этот телефон.
+
+    Телефон берётся из канала (кто пишет в WhatsApp), а не из слов гостя,
+    поэтому найденное — его бронь, и показать её можно.
+    """
+    from .booking_system.exely_api import normalize_phone  # noqa: PLC0415
+
+    цифры = normalize_phone(phone)
+    if not цифры:
+        return []
+    return list((
+        await session.execute(
+            select(ExelyBooking)
+            .where(ExelyBooking.guest_phone == цифры)
+            .where(or_(ExelyBooking.check_out.is_(None),
+                       ExelyBooking.check_out >= today - timedelta(days=1)))
+            .order_by(ExelyBooking.check_in)
+            .limit(limit)
+        )
+    ).scalars().all())
 
 
 async def remember(session: AsyncSession, api: ExelyApi, property_id: str,

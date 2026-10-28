@@ -3825,7 +3825,7 @@ async def qa_followup_own() -> None:
 
     settings = _gs()
     было = (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
-            _fu._staff_spoke,
+            _fu._staff_spoke, _fu._hotel_note_last,
             settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone)
 
     async def _без_сотрудника(_session, _chat, hours: int = 48):  # noqa: ANN001
@@ -3849,6 +3849,7 @@ async def qa_followup_own() -> None:
     _fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts = (
         _залежались, _шаг, _история, _решение, _факты)
     _fu._staff_spoke = _без_сотрудника
+    _fu._hotel_note_last = _без_сотрудника
     settings.followup_since = "2026-10-05T12:00"
     settings.lead_notify_phone = "+7 777 531 00 09"
     settings.dev_alert_phone = "+77087241460"
@@ -3860,7 +3861,7 @@ async def qa_followup_own() -> None:
         check("а гостю пишет", "77010000001@c.us" in кому, str(кому))
     finally:
         (_fu._stale_chats, _fu._step_for, _fu._history, _fu._decide, _fu.load_facts,
-         _fu._staff_spoke,
+         _fu._staff_spoke, _fu._hotel_note_last,
          settings.followup_since, settings.lead_notify_phone, settings.dev_alert_phone) = было
 
 
@@ -5343,6 +5344,178 @@ async def qa_reception_arrival() -> None:
           "Онлайн-оплата: Принимаются карты иностранных банков" in бриф)
 
 
+async def qa_guest_phones() -> None:
+    """Телефоны гостей из PMS API: поиск брони по WhatsApp и «завтра ждём».
+
+    2026-10-28 поддержка Exely включила PMS Universal API — в нём есть
+    телефон гостя. До этого бот искал бронь только по номеру, а написать
+    гостю накануне заезда было некуда.
+    """
+    head("Телефоны гостей: поиск брони и напоминание накануне")
+
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    import app.db as _db  # noqa: PLC0415
+    from sqlalchemy import delete as _delete  # noqa: PLC0415
+
+    from app.almaty import today as _today  # noqa: PLC0415
+    from app.booking_sync import fill_contacts  # noqa: PLC0415
+    from app.booking_system.base import BookingSystemUnavailable as _Down  # noqa: PLC0415
+    from app.booking_system.exely_api import ExelyApi, normalize_phone  # noqa: PLC0415
+    from app.concierge import FIND_TOOL, LOOKUP_RULES, _tool_find  # noqa: PLC0415
+    from app.dialogs import HOTEL_NOTE_MARK  # noqa: PLC0415
+    from app.followup import _hotel_note_last  # noqa: PLC0415
+    from app.lifecycle import plan_from_bookings  # noqa: PLC0415
+
+    check("телефон: 8 → 7", normalize_phone("8 701 123 45 67") == "77011234567")
+    check("телефон: без кода страны", normalize_phone("701 123 45 67") == "77011234567")
+    check("телефон: иностранный как есть", normalize_phone("+44 7542 253459") == "447542253459")
+    check("телефон: мусор отбрасывается", normalize_phone("12-34") == "")
+
+    api = ExelyApi("id", "secret", "509506", auth_url="https://a/token",
+                   api_base="https://connect.hopenapi.com/api/read-reservation")
+    check("адрес PMS API выводится из адреса брони",
+          api.pms_base == "https://connect.hopenapi.com/api/pms/v2", api.pms_base)
+    запросы: list[tuple[str, str]] = []
+    ответы = {
+        "S": {"reservation": {"customer": {"personName": {"firstName": "Aigerim", "lastName": "K"},
+                                           "phones": [{"phone": "8 (701) 999-00-11"}],
+                                           "emails": [{"address": "a@b.kz"}]},
+                              "channelInformation": {"channelName": "website"}}},
+        "B": {"reservation": {"customer": {"personName": {"firstName": "James"}, "phones": [],
+                                           "emails": [{"address": "x@guest.booking.com"}]},
+                              "channelInformation": {"channelName": "booking.com"}}},
+    }
+
+    async def _get(path, params=None, *, missing_on_400=False, base=None):  # noqa: ANN001
+        запросы.append((base or "", path))
+        return ответы.get(path.rsplit("/", 1)[-1])
+
+    api._get = _get
+    сайт = await api.guest_contacts("S")
+    check("PMS: телефон с сайта взят и приведён", (сайт or {}).get("phone") == "77019990011", str(сайт))
+    check("PMS: имя и канал", (сайт or {}).get("first_name") == "Aigerim" and сайт.get("channel") == "website")
+    check("PMS: запрос ушёл в раздел PMS",
+          запросы and запросы[0][0].endswith("/api/pms/v2") and "/reservations/S" in запросы[0][1], str(запросы[:1]))
+    букинг = await api.guest_contacts("B")
+    check("Booking.com: телефона нет — пусто, почту-прокси не берём",
+          букинг == {"phone": "", "first_name": "James", "channel": "booking.com"}, str(букинг))
+    check("нет брони — None", await api.guest_contacts("нет") is None)
+
+    await _db.init_db()
+    S = _db.SessionLocal
+    B = _db.ExelyBooking
+    сегодня = _today()
+    завтра = сегодня + _td(days=1)
+    номера = ["QA-PH-1", "QA-PH-2", "QA-PH-3", "QA-PH-4", "QA-PH-5"]
+
+    async def _убрать() -> None:
+        async with S() as ses:
+            await ses.execute(_delete(B).where(B.number.in_(номера)))
+            await ses.execute(_delete(_db.ExelyEvent).where(_db.ExelyEvent.event_key.like("напоминание:QA-PH-%")))
+            await ses.execute(_delete(_db.DialogMessage).where(_db.DialogMessage.chat_id.like("7701999001%")))
+            await ses.commit()
+
+    await _убрать()
+    try:
+        async with S() as ses:
+            ses.add_all([
+                B(number="QA-PH-1", status="Active", guest_name="Qaphone Aigerim", first_name="Aigerim",
+                  guest_search="qaphone aigerim", check_in=завтра, check_out=завтра + _td(days=2)),
+                B(number="QA-PH-2", status="Active", guest_name="Qaphone James", first_name="James",
+                  guest_search="qaphone james", check_in=завтра, check_out=завтра + _td(days=1)),
+                B(number="QA-PH-3", status="Active", guest_name="Qaphone Old", check_in=сегодня - _td(days=20),
+                  check_out=сегодня - _td(days=18)),
+                B(number="QA-PH-4", status="Cancelled", guest_name="Qaphone Cancel", first_name="Cancel",
+                  check_in=завтра, check_out=завтра + _td(days=1)),
+                B(number="QA-PH-5", status="Active", guest_name="Qaphone Down",
+                  check_in=завтра, check_out=завтра + _td(days=1)),
+            ])
+            await ses.commit()
+
+        спрошено: list[str] = []
+
+        class _Pms:
+            async def guest_contacts(self, number):  # noqa: ANN001, ANN201
+                спрошено.append(number)
+                if number == "QA-PH-5":
+                    raise _Down("PMS не ответил")
+                return {"QA-PH-1": {"phone": "77019990011", "first_name": "Aigerim", "channel": "website"},
+                        "QA-PH-4": {"phone": "77019990014", "first_name": "", "channel": "website"},
+                        }.get(number, {"phone": "", "first_name": "", "channel": "booking.com"})
+
+        async with S() as ses:
+            итог = await fill_contacts(ses, _Pms(), сегодня, limit=500)
+        async with S() as ses:
+            записи = {b.number: b for b in (await ses.execute(
+                _select_phones(B, номера))).scalars().all()}
+        check("телефон гостя сохранён", записи["QA-PH-1"].guest_phone == "77019990011", str(итог))
+        check("бронь без телефона помечена прочитанной",
+              записи["QA-PH-2"].contacts_checked and записи["QA-PH-2"].guest_phone == "")
+        check("прошлые брони не спрашиваем", "QA-PH-3" not in спрошено)
+        check("PMS не ответил — спросим в следующий раз", not записи["QA-PH-5"].contacts_checked)
+
+        class _Exely:
+            async def find_bookings(self, *, phone="", name=""):  # noqa: ANN001, ANN201
+                return []
+
+        моя = await _tool_find(_Exely(), {}, {"phone": "+7 701 999 00 11"})
+        check("бот находит бронь по номеру WhatsApp", "QA-PH-1" in моя and "это его бронь" in моя, моя[:160])
+        чужая = await _tool_find(_Exely(), {}, {"phone": "+7 705 000 00 00"})
+        check("по чужому телефону — ничего, и без «броней нет»",
+              "QA-PH-1" not in чужая and "НЕ значит, что броней нет" in чужая, чужая[:160])
+        check("в правилах: искать сначала без номера", "Сначала — без номера" in LOOKUP_RULES)
+        check("старого «искать можно только по номеру» нет",
+              "Искать можно только по номеру брони" not in LOOKUP_RULES)
+        check("инструмент: без параметров — по WhatsApp", "Без параметров" in FIND_TOOL["description"])
+
+        class _Settings:
+            lead_notify_numbers = ["77019990014"]
+            corp_notify_numbers: list = []
+            hotel_phone = ""
+
+        async with S() as ses:
+            план = [p for p in await plan_from_bookings(ses, _Settings()) if "QA-PH" in p.reason]
+        причины = " ".join(p.reason for p in план)
+        check("накануне — гостю с телефоном", "QA-PH-1" in причины, причины)
+        check("без телефона, отменённым и своим номерам — нет",
+              not any(n in причины for n in ("QA-PH-2", "QA-PH-4", "QA-PH-5")), причины)
+        текст = план[0].text if план else ""
+        check("в напоминании — имя и вопрос о времени приезда",
+              текст.startswith("Aigerim, завтра ждём") and "во сколько" in текст, текст[:160])
+
+        async with S() as ses:
+            ses.add(_db.ExelyEvent(event_key="напоминание:QA-PH-1", kind="lifecycle",
+                                   booking_number="QA-PH-1", guest_phone="77019990011", payload="",
+                                   handled=True))
+            await ses.commit()
+        async with S() as ses:
+            второй = [p for p in await plan_from_bookings(ses, _Settings()) if "QA-PH" in p.reason]
+        check("второй раз то же напоминание не уходит", not второй, str([p.reason for p in второй]))
+
+        async with S() as ses:
+            ses.add(_db.DialogMessage(channel="whatsapp", chat_id="77019990011@c.us", role="user",
+                                      content="здравствуйте"))
+            ses.add(_db.DialogMessage(channel="whatsapp", chat_id="77019990011@c.us", role="assistant",
+                                      content=HOTEL_NOTE_MARK + текст))
+            ses.add(_db.DialogMessage(channel="whatsapp", chat_id="77019990012@c.us", role="assistant",
+                                      content="Бронируем?"))
+            await ses.commit()
+        async with S() as ses:
+            check("дожим не пишет поверх сообщения отеля",
+                  await _hotel_note_last(ses, "77019990011@c.us"))
+            check("а обычный разговор дожиму доступен",
+                  not await _hotel_note_last(ses, "77019990012@c.us"))
+    finally:
+        await _убрать()
+
+
+def _select_phones(model, numbers):  # noqa: ANN001, ANN202
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    return _select(model).where(model.number.in_(numbers))
+
+
 async def qa_empty_answer() -> None:
     """Модель промолчала после инструмента — гость не получает «позвоните».
 
@@ -5740,6 +5913,7 @@ async def main() -> int:
     await qa_model_retry()
     await qa_front_desk()
     await qa_reception_arrival()
+    await qa_guest_phones()
     await qa_daily_check()
     await qa_credits_alert()
     await qa_numeric_history()
