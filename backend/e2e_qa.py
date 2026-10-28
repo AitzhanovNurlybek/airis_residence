@@ -5459,9 +5459,16 @@ async def qa_guest_phones() -> None:
             async def find_bookings(self, *, phone="", name=""):  # noqa: ANN001, ANN201
                 return []
 
+        import app.concierge as _cc  # noqa: PLC0415
+
+        async def _без_exely() -> bool:  # промах не должен ходить в настоящий Exely
+            return False
+
+        настоящий_рефреш, _cc._refresh_bookings = _cc._refresh_bookings, _без_exely
         моя = await _tool_find(_Exely(), {}, {"phone": "+7 701 999 00 11"})
         check("бот находит бронь по номеру WhatsApp", "QA-PH-1" in моя and "это его бронь" in моя, моя[:160])
         чужая = await _tool_find(_Exely(), {}, {"phone": "+7 705 000 00 00"})
+        _cc._refresh_bookings = настоящий_рефреш
         check("по чужому телефону — ничего, и без «броней нет»",
               "QA-PH-1" not in чужая and "НЕ значит, что броней нет" in чужая, чужая[:160])
         check("в правилах: искать сначала без номера", "Сначала — без номера" in LOOKUP_RULES)
@@ -5514,6 +5521,133 @@ def _select_phones(model, numbers):  # noqa: ANN001, ANN202
     from sqlalchemy import select as _select  # noqa: PLC0415
 
     return _select(model).where(model.number.in_(numbers))
+
+
+async def qa_fresh_booking() -> None:
+    """Бронь, оформленная минуту назад, находится; имя — один раз.
+
+    2026-10-28 гость оформил бронь и через минуту спросил «подтверждена?» —
+    бот не нашёл её (своя копия обновляется раз в час) и отправил звонить на
+    стойку. И имя бот спросил шесть раз, гость писал его дважды.
+    """
+    head("Свежая бронь и имя один раз")
+
+    import app.db as _db  # noqa: PLC0415
+    import app.concierge as _c  # noqa: PLC0415
+    from sqlalchemy import delete as _delete  # noqa: PLC0415
+
+    from app.booking_sync import TAIL_KEY, refresh_recent, summaries  # noqa: PLC0415
+    from app.booking_system.exely_api import ExelyApi  # noqa: PLC0415
+
+    class _Api:
+        _rows = staticmethod(ExelyApi._rows)
+
+        def __init__(self) -> None:
+            self.токены: list[str] = []
+
+        async def _get(self, path, params=None, *, missing_on_400=False, base=None):  # noqa: ANN001, ANN202
+            if path.endswith("/bookings"):
+                self.токены.append((params or {}).get("continueToken", ""))
+                return {"bookingSummaries": [{"number": "QA-FR-1", "status": "Active",
+                                              "modifiedDateTime": "2026-10-28T22:25:00Z"}],
+                        "continueToken": "T2", "hasMoreData": False}
+            if path.endswith("/QA-FR-1"):
+                return {"booking": {"customer": {"firstName": "Rony", "lastName": "James"},
+                                    "status": "Active", "total": {"priceAfterTax": 31500},
+                                    "roomStays": [{"stayDates": {"arrivalDateTime": "2026-11-20T14:00",
+                                                                 "departureDateTime": "2026-11-21T12:00"}}]}}
+            return None
+
+        async def guest_contacts(self, number):  # noqa: ANN001, ANN202
+            return {"phone": "77019990077", "first_name": "Rony", "channel": "website"}
+
+    api = _Api()
+    хвост: dict = {}
+    await summaries(api, "1", tail=хвост)
+    check("токен последней страницы запоминается", хвост.get("token") == "T2", str(хвост))
+
+    await _db.init_db()
+    S = _db.SessionLocal
+
+    async def _убрать() -> None:
+        async with S() as ses:
+            await ses.execute(_delete(_db.ExelyBooking).where(_db.ExelyBooking.number == "QA-FR-1"))
+            await ses.execute(_delete(_db.GuestName).where(_db.GuestName.chat_id == "77019990077@c.us"))
+            await ses.commit()
+
+    async with S() as ses:
+        было = await ses.get(_db.SyncState, TAIL_KEY)
+        было_значение = было.value if было else None
+    await _убрать()
+    try:
+        async with S() as ses:
+            без_токена = await refresh_recent(ses, api, "1")
+        check("без токена свежие не читаем — ничего не ломается", без_токена == 0)
+        async with S() as ses:
+            состояние = await ses.get(_db.SyncState, TAIL_KEY)
+            if состояние is None:
+                ses.add(_db.SyncState(key=TAIL_KEY, value="T1"))
+            else:
+                состояние.value = "T1"
+            await ses.commit()
+        api.токены.clear()
+        async with S() as ses:
+            новых = await refresh_recent(ses, api, "1")
+        check("по токену читается только новое", api.токены == ["T1"], str(api.токены))
+        async with S() as ses:
+            бронь = await ses.get(_db.ExelyBooking, "QA-FR-1")
+            токен = (await ses.get(_db.SyncState, TAIL_KEY)).value
+        check("свежая бронь попала в копию сразу, с телефоном",
+              новых == 1 and бронь is not None and бронь.guest_phone == "77019990077", str(новых))
+        check("и токен сдвинулся", токен == "T2", токен)
+
+        гость = {"phone": "+77019990077", "chat_id": "77019990077@c.us"}
+        # Наружу из QA не ходим: промах подтягивал бы настоящий Exely.
+        настоящий_рефреш = _c._refresh_bookings
+
+        async def _без_exely() -> bool:
+            return False
+
+        _c._refresh_bookings = _без_exely
+
+        class _Exely:
+            async def find_bookings(self, *, phone="", name=""):  # noqa: ANN001, ANN202
+                return []
+
+        по_имени = await _c._tool_find(_Exely(), {"name": "Rony James", "arrival": "2026-11-20"}, гость)
+        check("по имени и дате свежая бронь находится", "QA-FR-1" in по_имени, по_имени[:120])
+        check("названное для поиска имя запомнено", await _c._name_known(гость) == "rony james")
+        ссылка = _c._tool_link(type("S", (), {"site_url": ""})(),
+                               {"hotel": {"url": "https://airisresidence.kz"},
+                                "rooms": [{"slug": "standart", "name": "Standart"}]},
+                               {"room": "standart", "check_in": "2026-11-20", "check_out": "2026-11-21"},
+                               known_name="rony james")
+        check("ссылка: имя известно — не спрашивать", "НЕ спрашивай его снова" in ссылка, ссылка[-120:])
+        без_имени = _c._tool_link(type("S", (), {"site_url": ""})(),
+                                  {"hotel": {"url": "https://airisresidence.kz"},
+                                   "rooms": [{"slug": "standart", "name": "Standart"}]},
+                                  {"room": "standart", "check_in": "2026-11-20", "check_out": "2026-11-21"})
+        check("ссылка: имя спросить один раз", "один раз за разговор" in без_имени)
+        промах = await _c._tool_find(_Exely(), {"name": "Nobody", "arrival": "2026-11-20"}, гость)
+        check("не нашлось — подсказка про только что оформленную бронь",
+              "появляется в системе в течение нескольких минут" in промах, промах[-160:])
+    finally:
+        try:
+            _c._refresh_bookings = настоящий_рефреш
+        except NameError:
+            pass
+        await _убрать()
+        async with S() as ses:
+            состояние = await ses.get(_db.SyncState, TAIL_KEY)
+            if было_значение is None and состояние is not None:
+                await ses.delete(состояние)
+            elif состояние is not None:
+                состояние.value = было_значение
+            await ses.commit()
+
+    правила = _c.FIRST_ACTION
+    check("в правилах: имя не больше одного раза", "НЕ БОЛЬШЕ ОДНОГО РАЗА" in правила)
+    check("в правилах: цена в форме бывает ниже", "в форме бывает скидка" in правила)
 
 
 async def qa_empty_answer() -> None:
@@ -5914,6 +6048,7 @@ async def main() -> int:
     await qa_front_desk()
     await qa_reception_arrival()
     await qa_guest_phones()
+    await qa_fresh_booking()
     await qa_daily_check()
     await qa_credits_alert()
     await qa_numeric_history()

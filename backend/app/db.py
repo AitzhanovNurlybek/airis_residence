@@ -886,6 +886,23 @@ class FrontDeskNote(Base):
     )
 
 
+class SyncState(Base):
+    """Маленькое хранилище «где остановились» для переносов из Exely.
+
+    `bookings_tail` — continueToken последней страницы списка броней. По нему
+    Exely отдаёт только то, что изменилось после, — за полсекунды, а не за 12
+    секунд всего списка. Так бот находит бронь, оформленную минуту назад.
+    """
+
+    __tablename__ = "sync_state"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 # Колонки, добавленные после первого запуска. Ключ — таблица.
 _LATE_COLUMNS: dict[str, dict[str, str]] = {
     "staff_messages": {

@@ -125,7 +125,8 @@ def arrival_of(number: str) -> date | None:
         return None
 
 
-async def summaries(api: ExelyApi, property_id: str) -> list[dict[str, Any]]:
+async def summaries(api: ExelyApi, property_id: str, *, start: str = "",
+                    tail: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Сводки всех броней — страница за страницей, по continueToken.
 
     2026-09-01 читали только первую страницу и решили, что Exely отдаёт одну
@@ -137,16 +138,78 @@ async def summaries(api: ExelyApi, property_id: str) -> list[dict[str, Any]]:
     """
     path = f"/v1/properties/{property_id}/bookings"
     rows: list[dict[str, Any]] = []
-    token = ""
+    token = start
     for _ in range(MAX_PAGES):
         data = await api._get(path, {"continueToken": token} if token else None)
         rows.extend(r for r in api._rows(data) if isinstance(r, dict) and r.get("number"))
         if not isinstance(data, dict):
             break
-        token = str(data.get("continueToken") or "")
-        if not token or not data.get("hasMoreData"):
+        token = str(data.get("continueToken") or token)
+        if tail is not None and token:
+            # Токен последней страницы: с него Exely отдаст только новое.
+            tail["token"] = token
+        if not data.get("hasMoreData"):
             break
     return rows
+
+
+TAIL_KEY = "bookings_tail"
+
+
+async def _save_tail(session: AsyncSession, token: str) -> None:
+    from .db import SyncState  # noqa: PLC0415
+
+    if not token:
+        return
+    state = await session.get(SyncState, TAIL_KEY)
+    if state is None:
+        session.add(SyncState(key=TAIL_KEY, value=token))
+    else:
+        state.value = token
+    await session.commit()
+
+
+async def refresh_recent(session: AsyncSession, api: Any, property_id: str, *,
+                         limit: int = 12) -> int:
+    """Подтянуть брони, изменившиеся после прошлого чтения списка, — сейчас.
+
+    2026-10-28 гость оформил бронь в форме и через минуту спросил бота
+    «бронь подтверждена?». Своя копия обновляется раз в час, бот брони не
+    нашёл и отправил гостя звонить на стойку. Exely по токену последней
+    страницы отдаёт только изменения — полсекунды, — и свежая бронь
+    находится сразу. Нет токена или Exely не ответил — 0, как раньше.
+    """
+    from .db import SyncState  # noqa: PLC0415
+
+    state = await session.get(SyncState, TAIL_KEY)
+    if state is None or not state.value:
+        return 0
+    tail: dict[str, str] = {}
+    try:
+        rows = await summaries(api, property_id, start=state.value, tail=tail)
+    except BookingSystemUnavailable as error:
+        logger.warning("Свежие брони не прочитались: %s", error)
+        return 0
+    готово = 0
+    for row in rows[-limit:]:
+        number = str(row.get("number") or "")
+        record = await session.get(ExelyBooking, number)
+        if record is not None and record.modified_at == str(row.get("modifiedDateTime") or ""):
+            continue
+        if await remember(session, api, property_id, number):
+            готово += 1
+            record = await session.get(ExelyBooking, number)
+            if record is not None and hasattr(api, "guest_contacts"):
+                try:
+                    got = await api.guest_contacts(number) or {}
+                    record.guest_phone = got.get("phone", "")
+                    record.contacts_checked = True
+                    record.modified_at = str(row.get("modifiedDateTime") or record.modified_at)
+                    await session.commit()
+                except Exception as error:  # noqa: BLE001
+                    logger.warning("Контакты свежей брони %s не прочитались: %s", number, error)
+    await _save_tail(session, tail.get("token", ""))
+    return готово
 
 
 def _apply(record: ExelyBooking, booking: dict[str, Any]) -> None:
@@ -176,10 +239,15 @@ async def sync(session: AsyncSession, api: ExelyApi, property_id: str,
                budget: float = BUDGET) -> dict[str, Any]:
     """Перенести очередную порцию броней: сначала ближайшие заезды."""
     started = time.monotonic()
+    tail: dict[str, str] = {}
     try:
-        rows = await summaries(api, property_id)
+        rows = await summaries(api, property_id, tail=tail)
     except BookingSystemUnavailable as error:
         return {"ok": False, "error": str(error)}
+    try:
+        await _save_tail(session, tail.get("token", ""))
+    except Exception as error:  # noqa: BLE001 — без токена просто не будет быстрого пути
+        logger.warning("Токен списка броней не сохранился: %s", error)
 
     if today is None:
         from .almaty import today as hotel_today  # noqa: PLC0415

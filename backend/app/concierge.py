@@ -574,7 +574,8 @@ FIRST_ACTION = """
 Гость спросил про свободные номера или про цену на даты — ПЕРВЫМ ДЕЙСТВИЕМ вызови check_availability. Даты выведи сам: «завтра» — завтра плюс ночь, одна названная дата — она плюс ночь, «на выходных» — ближайшие суббота и воскресенье. Потом скажи, какие даты взял.
 Ни числа гостей, ни даты выезда, ни категории до этого не спрашивай: гость задал вопрос и ждёт ответа, а не анкеты.
 Пишет отель, а не приятель. Как бы ни писал гость — со смайликами, сленгом, «хаха» — ты отвечаешь ровно и по делу. Не смеёшься в ответ, не подхватываешь «кайф», «круто», «класс», «огонь», не ставишь несколько восклицательных знаков подряд. Тёплым быть можно, фамильярным нельзя.
-Гость определился — ссылку на бронирование давай сразу, без вопросов перед ней. В том же сообщении, последней строкой, спроси, на чьё имя будет бронь; когда гость назовёт имя — вызови remember_name. Если имя гость уже называл раньше в разговоре — вызови remember_name сразу и не переспрашивай. Имя нужно, чтобы потом напомнить гостю о его же броне, если оплата не придёт; про запоминание гостю говорить не надо.
+Гость определился — ссылку на бронирование давай сразу, без вопросов перед ней. В том же сообщении, последней строкой, спроси, на чьё имя будет бронь; когда гость назовёт имя — вызови remember_name. Если имя гость уже называл раньше в разговоре — в любом месте, в том числе для поиска брони, — вызови remember_name сразу и не переспрашивай. Спрашивай имя НЕ БОЛЬШЕ ОДНОГО РАЗА за разговор: не ответил — больше не спрашивай и не напоминай, имя гость всё равно впишет в форму. Живой случай: гость писал своё имя дважды, а бот спрашивал его шесть раз.
+Гость говорит, что в форме на сайте цена ниже, чем назвал ты, — так и есть: в форме бывает скидка, которой не видно в проверке наличия. Подтверди коротко и предложи бронировать по цене формы. Причину скидки не придумывай. Имя нужно, чтобы потом напомнить гостю о его же броне, если оплата не придёт; про запоминание гостю говорить не надо.
 Гость о чём-то просит, а сделать это может только сотрудник (сменить номер, поздний выезд, что-то сломалось, полотенца, трансфер) — СНАЧАЛА вызови front_desk_request, потом отвечай. Особенно если гость уже живёт в отеле: назвал номер комнаты, пишет «я заселился», «I checked in», «my room». На любом языке «передам», «передал», «I'll pass your request», «the front desk will help» без вызова front_desk_request — ложь: стойка ничего не узнает.
 Гость сказал, что хочет отменить бронь, — ПЕРВЫМ ДЕЙСТВИЕМ вызови cancel_request, не дожидаясь номера брони. Номер уточнишь потом, а отель должен узнать сразу: без этого просьба остаётся в переписке, и о пустом номере узнают в день заезда.
 Спросили про возврат денег — назови срок сразу, до всяких уточнений: возврат оформляется в день отмены, на карту приходит за 1–7 рабочих дней, зависит от банка гостя. Это и есть ответ на «когда». Номер брони спрашивай потом и только если он для чего-то нужен.
@@ -854,7 +855,7 @@ async def _tool_front_desk(guest: dict[str, Any] | None, args: dict[str, Any],
 
 
 def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any],
-               *, corporate: dict[str, Any] | None = None) -> str:
+               *, corporate: dict[str, Any] | None = None, known_name: str = "") -> str:
     """Собрать ссылку на форму брони.
 
     Адрес берём из справки (`hotel.url`), а не из настроек: settings.site_url
@@ -946,8 +947,10 @@ def _tool_link(settings: Any, facts: dict[str, Any], args: dict[str, Any],
         f"выезд {выезд:%d.%m.%Y} (ночей: {ночей}), {кто}. Гостю остаётся "
         "выбрать тариф и ввести свои данные. Назови ему даты и категорию "
         "словами, чтобы он сверил с формой, и пришли ссылку как есть. "
-        "Последней строкой — на языке гостя — спроси, на чьё имя будет бронь, "
-        "если имя ещё не называли."
+        + (f"Имя гостя уже известно ({known_name.title()}) — НЕ спрашивай его снова."
+           if known_name else
+           "Последней строкой — на языке гостя — спроси, на чьё имя будет бронь, "
+           "если имя ещё не называли. Спросить можно один раз за разговор.")
     )
 
 
@@ -1380,12 +1383,18 @@ async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[s
         from .booking_sync import find_by_name
         from .db import SessionLocal
 
+        # Названное для поиска имя — имя гостя: запоминаем, чтобы потом не
+        # спрашивать его второй раз (2026-10-28 гость написал имя дважды).
+        await _tool_remember_name(guest, {"name": who})
         async with SessionLocal() as session:
             same_day = await find_by_name(session, who, limit=10, arrival=wanted_day)
+        if not same_day and await _refresh_bookings():
+            async with SessionLocal() as session:
+                same_day = await find_by_name(session, who, limit=10, arrival=wanted_day)
         if not same_day:
             return (
                 f"Брони на фамилию «{who}» с заездом {wanted_day} не нашлось. "
-                "Уточни у гостя написание фамилии и дату либо предложи стойку."
+                "Уточни у гостя написание фамилии и дату либо предложи стойку. " + _JUST_BOOKED
             )
         return "\n".join(
             f"{b.number}: {b.check_in} — {b.check_out}, {b.room_name or 'номер'}, "
@@ -1410,6 +1419,9 @@ async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[s
         try:
             async with SessionLocal() as session:
                 по_телефону = await find_by_phone(session, phone, hotel_today())
+            if not по_телефону and await _refresh_bookings():
+                async with SessionLocal() as session:
+                    по_телефону = await find_by_phone(session, phone, hotel_today())
         except Exception as error:  # noqa: BLE001
             logger.warning("Поиск брони по телефону не удался: %s", error)
             по_телефону = []
@@ -1424,12 +1436,62 @@ async def _tool_find(booking: BookingSystem, args: dict[str, Any], guest: dict[s
         # живой бронью нельзя отвечать «у вас броней нет».
         return (
             "По номеру WhatsApp, с которого пишет гость, текущих броней не нашлось. "
+            + _JUST_BOOKED +
             "Это НЕ значит, что броней нет: бронь могли оформить на другой телефон, "
             "а Booking.com телефон гостя не передаёт. Попроси номер брони — он в "
             "подтверждении (20260902-509506-1262476932). Если номер не сохранился, "
             "спроси фамилию и дату заезда."
         )
     return "\n".join(_describe(b) for b in mine)
+
+
+#: Гость только что заполнил форму и спрашивает, подтверждена ли бронь, а
+#: она ещё не видна. Отправить его звонить на стойку — испугать человека,
+#: который всё сделал правильно (2026-10-28).
+_JUST_BOOKED = (
+    "Если гость в этом разговоре только что оформил бронь в форме — не пугай его и "
+    "не отправляй на стойку: скажи, что бронь появляется в системе в течение "
+    "нескольких минут, а подтверждение приходит на почту, указанную в форме. "
+)
+
+
+async def _refresh_bookings() -> bool:
+    """Подтянуть из Exely брони, изменившиеся за последние минуты. True — что-то новое."""
+    from .booking_sync import refresh_recent  # noqa: PLC0415
+    from .booking_system.exely_api import ExelyApi  # noqa: PLC0415
+    from .config import get_settings  # noqa: PLC0415
+    from .db import SessionLocal  # noqa: PLC0415
+
+    settings = get_settings()
+    try:
+        api = ExelyApi(settings.exely_client_id, settings.exely_client_secret,
+                       settings.exely_property_id, auth_url=settings.exely_auth_url,
+                       api_base=settings.exely_api_base, timeout=8.0)
+        async with SessionLocal() as session:
+            return await asyncio.wait_for(
+                refresh_recent(session, api, settings.exely_property_id), 15) > 0
+    except Exception as error:  # noqa: BLE001 — ответ гостю важнее
+        logger.warning("Свежие брони не подтянулись: %s", error)
+        return False
+
+
+async def _name_known(guest: dict[str, Any] | None) -> str:
+    """Имя, которое гость уже называл в этом чате, — или пусто."""
+    chat = str((guest or {}).get("chat_id") or "")
+    if not chat:
+        return ""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from .db import GuestName, SessionLocal  # noqa: PLC0415
+
+    try:
+        async with SessionLocal() as session:
+            имя = (await session.execute(
+                select(GuestName.name).where(GuestName.chat_id == chat)
+                .order_by(GuestName.id.desc()).limit(1))).scalar_one_or_none()
+    except Exception:  # noqa: BLE001
+        return ""
+    return str(имя or "")
 
 
 async def _tool_change(booking: BookingSystem, args: dict[str, Any], guest: dict[str, str]) -> str:
@@ -2126,7 +2188,8 @@ async def answer(
                     output = _tool_room_page(facts, args, photos)
                 elif name == "booking_link":
                     output = _tool_link(
-                        settings, facts, args, corporate=корпоратив)
+                        settings, facts, args, corporate=корпоратив,
+                        known_name=await _name_known(guest))
                 elif name == "check_availability":
                     output = await _tool_availability(
                         booking, args, facts, corporate=корпоратив, lang=язык)
