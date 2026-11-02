@@ -5766,6 +5766,10 @@ async def qa_chat_lessons() -> None:
           "не переспрашивай число" in FIRST_ACTION)
     check("правило: форма не принимает — сразу стойке", "Стойка оформит бронь сама" in FIRST_ACTION)
     check("правило: трансфер — не «встретят»", "Не пиши «встретят»" in FIRST_ACTION)
+    check("правило: трансфер сам не предлагать", "Трансфер сам не предлагай" in FIRST_ACTION)
+    from app.guest_messages import BEFORE_ARRIVAL as _BA, BEFORE_ARRIVAL_EN as _BAE  # noqa: PLC0415
+    check("в «завтра ждём» трансфер не предлагается",
+          "трансфер" not in _BA.lower() and "transfer" not in _BAE.lower())
     check("правило: «передала» и «я мог» названы", "«передала»" in RULES and "«я мог»" in RULES)
     check("примеры из живых переписок", "КАК ЭТО ЗВУЧИТ В ЖИВЫХ ПЕРЕПИСКАХ" in RULES)
 
