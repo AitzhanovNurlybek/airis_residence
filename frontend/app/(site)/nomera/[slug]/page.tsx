@@ -13,6 +13,7 @@ import { BookingBar } from "@/components/ui/BookingBar";
 import { buttonClass } from "@/components/ui/Button";
 import { IconArrow, IconPhone, IconWhatsApp } from "@/components/ui/Icons";
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
+import { RoomName, RoomTitle } from "@/components/ui/RoomName";
 
 export async function generateStaticParams() {
   const rooms = await getRooms();
@@ -74,7 +75,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
               </Link>
             </li>
             <li aria-hidden>/</li>
-            <li className="text-cream/80">{room.shortName}</li>
+            <li className="text-cream/80"><RoomName name={room.shortName} /></li>
           </ol>
         </nav>
 
@@ -94,7 +95,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
           <div>
             <p className="eyebrow">{room.area} · до {room.capacity} гостей</p>
             <h1 className="mt-4 font-display text-[clamp(2.1rem,4.5vw,3.2rem)] leading-[1.06] font-semibold text-cream">
-              {room.name}
+              <RoomTitle name={room.name} shortName={room.shortName} />
             </h1>
             <p className="mt-5 text-[1.02rem] leading-relaxed text-muted">{room.description}</p>
 
@@ -172,7 +173,7 @@ export default async function RoomPage(props: PageProps<"/nomera/[slug]">) {
                 className="group flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-ink-900 p-6 transition-colors hover:border-sand-400/40"
               >
                 <span>
-                  <span className="block font-display text-xl text-cream">{other.shortName}</span>
+                  <span className="block font-display text-xl text-cream"><RoomName name={other.shortName} /></span>
                   <span className="mt-1.5 block text-sm text-muted">
                     {other.area} · {formatPrice(other.price)}
                   </span>

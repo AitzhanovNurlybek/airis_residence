@@ -5,6 +5,7 @@ import { rooms as fallbackRooms } from "@/lib/site";
 import { Logo } from "@/components/ui/Logo";
 import { IconClock, IconMail, IconPhone, IconPin, IconTelegram, IconWhatsApp } from "@/components/ui/Icons";
 import { rooms as roomsWord } from "@/lib/plural";
+import { RoomName } from "@/components/ui/RoomName";
 
 const legalLinks = [
   { href: "/o-kompanii", label: "О компании" },
@@ -59,7 +60,7 @@ export function Footer({ rooms = fallbackRooms }: { rooms?: Room[] }) {
                     href={`/nomera/${room.slug}`}
                     className="text-cream/75 transition-colors hover:text-sand-300"
                   >
-                    {room.shortName}
+                    <RoomName name={room.shortName} />
                   </Link>
                 </li>
               ))}

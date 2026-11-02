@@ -10,6 +10,7 @@ import { Reveal } from "@/components/ui/Reveal";
 import { TiltCard } from "@/components/ui/TiltCard";
 import { IconArrow } from "@/components/ui/Icons";
 import { types as typesWord } from "@/lib/plural";
+import { RoomName } from "@/components/ui/RoomName";
 
 function RoomCard({ room, index }: { room: Room; index: number }) {
   // Первый номер — крупной карточкой: 5 карточек ложатся в сетку 3+3 без дыр.
@@ -42,7 +43,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
           </div>
 
           <div className="flex flex-1 flex-col p-5 md:p-7">
-            <h3 className="font-display text-xl text-cream md:text-[1.7rem]">{room.shortName}</h3>
+            <h3 className="font-display text-xl text-cream md:text-[1.7rem]"><RoomName name={room.shortName} /></h3>
             <p className="mt-2.5 flex-1 text-sm leading-relaxed text-muted md:mt-3">
               {room.summary}
             </p>

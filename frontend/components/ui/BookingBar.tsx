@@ -109,7 +109,7 @@ export function BookingBar({ roomSlug, compact = false }: { roomSlug?: string; c
             >
               <option value="">Любой</option>
               {rooms.map((r) => (
-                <option key={r.slug} value={r.slug}>
+                <option key={r.slug} value={r.slug} className="notranslate" translate="no">
                   {r.shortName}
                 </option>
               ))}

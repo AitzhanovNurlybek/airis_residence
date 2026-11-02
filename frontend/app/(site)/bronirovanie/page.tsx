@@ -8,6 +8,7 @@ import { bookingConfig } from "@/lib/booking";
 import { site, formatPrice } from "@/lib/site";
 import { getRooms } from "@/lib/rooms";
 import { IconClock, IconPhone, IconWhatsApp } from "@/components/ui/Icons";
+import { RoomName } from "@/components/ui/RoomName";
 
 export const metadata: Metadata = pageMetadata({
   title: "Бронирование номера в отеле Airis Residence, Алматы",
@@ -39,7 +40,7 @@ export default async function BookingPage(props: PageProps<"/bronirovanie">) {
           <div>
             <p className="eyebrow">Бронирование</p>
             <h1 className="mt-4 font-display text-[clamp(2.1rem,4.6vw,3.4rem)] leading-[1.05] font-semibold text-cream">
-              {room ? `Бронирование: ${room.shortName}` : "Забронировать номер"}
+              {room ? <>Бронирование: <RoomName name={room.shortName} /></> : "Забронировать номер"}
             </h1>
             <p className="mt-5 max-w-xl text-[1.02rem] leading-relaxed text-muted">
               {room

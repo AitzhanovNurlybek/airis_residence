@@ -454,7 +454,62 @@ async def remember(session: AsyncSession, api: ExelyApi, property_id: str,
     return True
 
 
+_ЛАТИНИЦА = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o",
+    "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu",
+    "я": "ya", "ә": "a", "ғ": "g", "қ": "k", "ң": "n", "ө": "o", "ұ": "u", "ү": "u",
+    "һ": "h", "і": "i",
+}
+
+
+def name_variants(name: str) -> list[str]:
+    """Имя как написал гость и латиницей — так его заносят площадки.
+
+    2026-10-29 гостья написала «Кузьменко», а бронь с площадки лежит в Exely
+    латиницей — по-русски её было не найти. «х» пишут и kh, и h.
+    """
+    исходное = " ".join((name or "").split()).casefold()
+    варианты = [исходное]
+    if any(ch in _ЛАТИНИЦА for ch in исходное):
+        kh = "".join(_ЛАТИНИЦА.get(ch, ch) for ch in исходное)
+        for v in (kh, kh.replace("kh", "h")):
+            if v not in варианты:
+                варианты.append(v)
+        # Имя латиницей пишут по-разному (Юлия — Yuliya, Juliya), а фамилия
+        # стабильнее: напоследок — каждое слово латиницей отдельно. Дата
+        # заезда рядом с ним по-прежнему обязательна (см. _tool_find).
+        слова = kh.split()
+        if len(слова) > 1:
+            варианты += [w for w in слова if len(w) >= 4 and w not in варианты]
+    return варианты
+
+
 async def find_by_name(
+    session: AsyncSession, name: str, limit: int = 5, *, arrival: date | None = None
+) -> list[ExelyBooking]:
+    """Брони по имени гостя — с латиницей и, если в дату не нашлось, ±1 день.
+
+    2026-11-01 гость написал «бронировал с 3 по 7», а заезд по брони — 4-го:
+    гости путают день заезда на один. Соседний день вместе с фамилией чужую
+    бронь не откроет.
+    """
+    for вариант in name_variants(name):
+        найдено = await _find_by_name_exact(session, вариант, limit, arrival=arrival)
+        if найдено:
+            return найдено
+    if arrival is not None:
+        for сдвиг in (-1, 1):
+            for вариант in name_variants(name):
+                найдено = await _find_by_name_exact(
+                    session, вариант, limit, arrival=arrival + timedelta(days=сдвиг))
+                if найдено:
+                    return найдено
+    return []
+
+
+async def _find_by_name_exact(
     session: AsyncSession, name: str, limit: int = 5, *, arrival: date | None = None
 ) -> list[ExelyBooking]:
     """Брони по имени гостя.

@@ -82,6 +82,11 @@ class Planned:
     text: str
     reason: str
     event_id: int | None = None
+    #: Все брони, о которых сообщение (у гостя их бывает две на один день).
+    numbers: tuple[str, ...] = ()
+    #: Что дописать в историю разговора перед текстом: дата заезда словами
+    #: из «завтра» — иначе бот переспрашивал «на какое число?».
+    history_note: str = ""
 
 
 def quiet_hours(hour: int | None = None) -> bool:
@@ -311,20 +316,29 @@ async def plan_from_bookings(session: AsyncSession, settings: Any) -> list[Plann
     # Свои номера — не гости: тестовые брони отеля на телефон ресепшена.
     свои = {*getattr(settings, "lead_notify_numbers", []), *getattr(settings, "corp_notify_numbers", [])}
 
-    planned: list[Planned] = []
+    # Две брони на один телефон — одно сообщение: 2026-10-30 гостья получила
+    # два одинаковых «завтра ждём» подряд, по брони на каждый номер.
+    по_телефону: dict[str, list[Any]] = {}
     for r in rows:
         статус = str(r.status or "").strip().casefold().replace(" ", "").replace("-", "_")
         if статус in CANCELLED or f"напоминание:{r.number}" in уже or r.guest_phone in свои:
             continue
+        по_телефону.setdefault(r.guest_phone, []).append(r)
+
+    planned: list[Planned] = []
+    for телефон, брони in по_телефону.items():
+        первая = брони[0]
+        номера = tuple(b.number for b in брони)
         values = {
-            "name": r.first_name or r.guest_name or "Здравствуйте",
-            "number": r.number,
+            "name": первая.first_name or первая.guest_name or "Здравствуйте",
+            "number": ", ".join(номера),
             "check_in_time": "14:00",
             "phone": getattr(settings, "hotel_phone", "") or "+7 (777) 531-00-09",
         }
-        planned.append(Planned(r.guest_phone,
-                               render(for_guest(BEFORE_ARRIVAL, r.guest_phone), **values),
-                               f"завтра заезд по броне {r.number}"))
+        planned.append(Planned(
+            телефон, render(for_guest(BEFORE_ARRIVAL, телефон), **values),
+            f"завтра заезд по броне {номера[-1]}", numbers=номера,
+            history_note=f"(заезд {завтра:%d.%m.%Y}, бронь {', '.join(номера)}) "))
     return planned
 
 
@@ -388,15 +402,15 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
             if event:
                 event.handled = True
         else:
-            session.add(ExelyEvent(
-                event_key=("напоминание:" if "заезд" in item.reason else "отзыв:")
-                          + item.reason.split()[-1],
-                kind="lifecycle",
-                booking_number=item.reason.split()[-1],
-                guest_phone=item.phone,
-                payload="",
-                handled=True,
-            ))
+            for номер in item.numbers or (item.reason.split()[-1],):
+                session.add(ExelyEvent(
+                    event_key=("напоминание:" if "заезд" in item.reason else "отзыв:") + номер,
+                    kind="lifecycle",
+                    booking_number=номер,
+                    guest_phone=item.phone,
+                    payload="",
+                    handled=True,
+                ))
         await session.commit()
 
         чат = f"{''.join(c for c in item.phone if c.isdigit())}@c.us"
@@ -407,7 +421,7 @@ async def run(session: AsyncSession, settings: Any, *, dry_run: bool = False) ->
             # В историю разговора — чтобы бот понял ответ гостя «будем к 10»
             # и передал его стойке, а не переспрашивал, о чём речь.
             session.add(DialogMessage(channel=WA_CHANNEL, chat_id=чат, role="assistant",
-                                      content=HOTEL_NOTE_MARK + item.text))
+                                      content=HOTEL_NOTE_MARK + item.history_note + item.text))
             await session.commit()
         except WhatsAppError as error:
             logger.warning("Не отправилось (%s): %s", item.reason, error)

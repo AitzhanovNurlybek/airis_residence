@@ -9,6 +9,7 @@ import { getRooms } from "@/lib/rooms";
 import { buttonClass } from "@/components/ui/Button";
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 import { rooms as roomsWord } from "@/lib/plural";
+import { RoomName } from "@/components/ui/RoomName";
 
 export const metadata: Metadata = pageMetadata({
   title: "О компании — ТОО INCOME HOUSE, отель Airis Residence",
@@ -60,7 +61,7 @@ export default async function AboutCompanyPage() {
           <ul>
             {rooms.map((room) => (
               <li key={room.slug}>
-                <Link href={`/nomera/${room.slug}`}>{room.shortName}</Link> — {room.area}, до{" "}
+                <Link href={`/nomera/${room.slug}`}><RoomName name={room.shortName} /></Link> — {room.area}, до{" "}
                 {room.capacity} гостей, от {formatPrice(room.price)} за ночь.
               </li>
             ))}

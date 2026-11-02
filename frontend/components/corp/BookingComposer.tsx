@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { buttonClass } from "@/components/ui/Button";
 import { formatMoney, formatNights, type Dictionary, type Locale } from "@/lib/corp/dictionary";
 import type { CorpRoom } from "@/lib/corp/types";
+import { RoomName } from "@/components/ui/RoomName";
 
 /**
  * Подбор номеров и оформление заявки.
@@ -318,7 +319,7 @@ export function BookingComposer({
                     </div>
                   )}
                   <div className="p-5">
-                    <h3 className="font-display text-lg">{room.shortName}</h3>
+                    <h3 className="font-display text-lg"><RoomName name={room.shortName} /></h3>
                     <p className="mt-1 text-xs text-ink-700/60">
                       {room.area} · {room.capacity} · {room.beds}
                     </p>
@@ -420,7 +421,7 @@ export function BookingComposer({
             {lines.map((line) => (
               <li key={line.room.slug} className="flex justify-between gap-3">
                 <span className="text-ink-700/80">
-                  {line.room.shortName} × {line.count}
+                  <RoomName name={line.room.shortName} /> × {line.count}
                 </span>
                 <span className="whitespace-nowrap tabular-nums">
                   {nights > 0

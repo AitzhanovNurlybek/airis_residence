@@ -3988,8 +3988,10 @@ async def qa_booking_sync() -> None:
               [b.number for b in найдено] == [сегодняшняя["number"]], str([b.number for b in найдено]))
         check("короткое «Mr» не мешает поиску",
               len(await _bs.find_by_name(sess, "Mr Qagibson", arrival=сегодня)) == 1)
-        check("с другой датой заезда не выдаётся",
-              not await _bs.find_by_name(sess, "Qagibson", arrival=_d(2026, 10, 6)))
+        check("гость ошибся на день — бронь всё равно находится",
+              len(await _bs.find_by_name(sess, "Qagibson", arrival=_d(2026, 10, 6))) == 1)
+        check("с другой датой заезда (через три дня) не выдаётся",
+              not await _bs.find_by_name(sess, "Qagibson", arrival=_d(2026, 10, 8)))
     check("номер брони даёт дату заезда", _bs.arrival_of("20261005-509506-1265394803") == сегодня)
     check("номер Booking.com датой не считается", _bs.arrival_of("6359909102") is None)
 
@@ -5650,6 +5652,124 @@ async def qa_fresh_booking() -> None:
     check("в правилах: цена в форме бывает ниже", "в форме бывает скидка" in правила)
 
 
+async def qa_chat_lessons() -> None:
+    """Уроки живых переписок 28.10–02.11.
+
+    Бронь «Кузьменко» лежала латиницей; «с 3 по 7» — а заезд 4-го; гостья с
+    двумя бронями получила два одинаковых «завтра ждём»; после «завтра ждём»
+    бот переспрашивал «на какое число?»; форма требовала оплату — бот
+    расспрашивал про ошибку вместо передачи стойке.
+    """
+    head("Уроки живых переписок")
+
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    import app.db as _db  # noqa: PLC0415
+    import app.lifecycle as _lc  # noqa: PLC0415
+    from sqlalchemy import delete as _delete, select as _select  # noqa: PLC0415
+
+    from app.almaty import today as _today  # noqa: PLC0415
+    from app.booking_sync import find_by_name, name_variants  # noqa: PLC0415
+    from app.concierge import FIRST_ACTION, RULES  # noqa: PLC0415
+    from app.dialogs import HOTEL_NOTE_MARK  # noqa: PLC0415
+
+    check("фамилия кириллицей ищется и латиницей", "kuzmenko" in name_variants("Кузьменко"))
+    check("«х» — и kh, и h", {"khasanov", "hasanov"} <= set(name_variants("Хасанов")))
+    check("имя латиницей — как есть", name_variants("James") == ["james"])
+
+    await _db.init_db()
+    S = _db.SessionLocal
+    B = _db.ExelyBooking
+    сегодня = _today()
+    завтра = сегодня + _td(days=1)
+    номера = ["QA-LS-1", "QA-LS-2", "QA-LS-3"]
+
+    async def _убрать() -> None:
+        async with S() as ses:
+            await ses.execute(_delete(B).where(B.number.in_(номера)))
+            await ses.execute(_delete(_db.ExelyEvent).where(_db.ExelyEvent.event_key.like("напоминание:QA-LS-%")))
+            await ses.execute(_delete(_db.DialogMessage).where(_db.DialogMessage.chat_id == "77019990055@c.us"))
+            await ses.commit()
+
+    await _убрать()
+    было = (_lc.WhatsAppChannel, _lc.quiet_hours)
+    try:
+        async with S() as ses:
+            ses.add_all([
+                B(number="QA-LS-1", status="Active", guest_name="Kuzmenko Irina", first_name="Irina",
+                  guest_search="kuzmenko irina", check_in=сегодня + _td(days=20),
+                  check_out=сегодня + _td(days=24)),
+                B(number="QA-LS-2", status="Active", guest_name="Qalesson Aliya", first_name="Aliya",
+                  guest_search="qalesson aliya", guest_phone="77019990055", contacts_checked=True,
+                  check_in=завтра, check_out=завтра + _td(days=1)),
+                B(number="QA-LS-3", status="Active", guest_name="Qalesson Aliya", first_name="Aliya",
+                  guest_search="qalesson aliya", guest_phone="77019990055", contacts_checked=True,
+                  check_in=завтра, check_out=завтра + _td(days=2)),
+            ])
+            await ses.commit()
+        async with S() as ses:
+            кириллицей = await find_by_name(ses, "Кузьменко Ирина", arrival=сегодня + _td(days=20))
+            на_день_раньше = await find_by_name(ses, "Kuzmenko", arrival=сегодня + _td(days=19))
+            через_два = await find_by_name(ses, "Kuzmenko", arrival=сегодня + _td(days=22))
+        check("кириллицей находится бронь латиницей", [b.number for b in кириллицей] == ["QA-LS-1"])
+        check("гость ошибся на день — бронь находится", [b.number for b in на_день_раньше] == ["QA-LS-1"])
+        check("но не за два дня", not через_два)
+
+        class _Settings:
+            lead_notify_numbers: list = []
+            corp_notify_numbers: list = []
+            hotel_phone = ""
+            green_api_id = "1"
+            green_api_token = "t"
+
+        async with S() as ses:
+            план = [p for p in await _lc.plan_from_bookings(ses, _Settings()) if "QA-LS" in p.reason]
+        check("две брони на один телефон — одно сообщение", len(план) == 1, str([p.reason for p in план]))
+        check("в нём обе брони", план and set(план[0].numbers) == {"QA-LS-2", "QA-LS-3"}
+              and "QA-LS-2" in план[0].text and "QA-LS-3" in план[0].text)
+        check("в историю — дата заезда словами",
+              план and f"(заезд {завтра:%d.%m.%Y}" in план[0].history_note, план[0].history_note if план else "")
+
+        ушло: list[tuple[str, str]] = []
+
+        class _Канал:
+            def __init__(self, *_a) -> None:
+                pass
+
+            async def send(self, chat: str, text: str) -> None:
+                ушло.append((chat, text))
+
+        _lc.WhatsAppChannel = _Канал
+        _lc.quiet_hours = lambda *_a: False
+        async with S() as ses:
+            await _lc.run(ses, _Settings())
+        гостье = [t for c, t in ушло if c == "77019990055@c.us"]
+        check("гостье ушло ровно одно сообщение", len(гостье) == 1, str(len(гостье)))
+        async with S() as ses:
+            ключи = set((await ses.execute(_select(_db.ExelyEvent.event_key).where(
+                _db.ExelyEvent.event_key.like("напоминание:QA-LS-%")))).scalars().all())
+            история = (await ses.execute(_select(_db.DialogMessage.content).where(
+                _db.DialogMessage.chat_id == "77019990055@c.us"))).scalars().all()
+        check("помечены обе брони — повторно не уйдёт",
+              ключи == {"напоминание:QA-LS-2", "напоминание:QA-LS-3"}, str(ключи))
+        check("в истории — пометка отеля с датой",
+              история and история[0].startswith(HOTEL_NOTE_MARK + f"(заезд {завтра:%d.%m.%Y}"), str(история)[:120])
+        ушло.clear()
+        async with S() as ses:
+            await _lc.run(ses, _Settings())
+        check("второй запуск гостье не пишет", not [t for c, t in ушло if c == "77019990055@c.us"])
+    finally:
+        _lc.WhatsAppChannel, _lc.quiet_hours = было
+        await _убрать()
+
+    check("правило: после сообщения отеля дату не переспрашивать",
+          "не переспрашивай число" in FIRST_ACTION)
+    check("правило: форма не принимает — сразу стойке", "Стойка оформит бронь сама" in FIRST_ACTION)
+    check("правило: трансфер — не «встретят»", "Не пиши «встретят»" in FIRST_ACTION)
+    check("правило: «передала» и «я мог» названы", "«передала»" in RULES and "«я мог»" in RULES)
+    check("примеры из живых переписок", "КАК ЭТО ЗВУЧИТ В ЖИВЫХ ПЕРЕПИСКАХ" in RULES)
+
+
 async def qa_empty_answer() -> None:
     """Модель промолчала после инструмента — гость не получает «позвоните».
 
@@ -6049,6 +6169,7 @@ async def main() -> int:
     await qa_reception_arrival()
     await qa_guest_phones()
     await qa_fresh_booking()
+    await qa_chat_lessons()
     await qa_daily_check()
     await qa_credits_alert()
     await qa_numeric_history()
