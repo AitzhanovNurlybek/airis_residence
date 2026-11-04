@@ -3,6 +3,7 @@ import { Footer } from "@/components/layout/Footer";
 import { SmoothScroll } from "@/components/layout/SmoothScroll";
 import { FloatingActions } from "@/components/layout/FloatingActions";
 import { JsonLd } from "@/components/JsonLd";
+import { Analytics } from "@/components/analytics/Analytics";
 import { hotelJsonLd } from "@/lib/seo";
 import { getRooms } from "@/lib/rooms";
 
@@ -26,6 +27,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
       </main>
       <Footer rooms={rooms} />
       <FloatingActions />
+      <Analytics />
     </>
   );
 }
