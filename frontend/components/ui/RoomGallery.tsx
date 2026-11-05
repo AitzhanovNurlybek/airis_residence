@@ -5,8 +5,15 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { IconClose } from "@/components/ui/Icons";
+import type { Lang } from "@/lib/routes";
 
-export function RoomGallery({ images, name }: { images: string[]; name: string }) {
+const T = {
+  ru: { open: "Открыть фото на весь экран", photo: "фото", show: "Показать фото", close: "Закрыть" },
+  en: { open: "Open the photo full screen", photo: "photo", show: "Show photo", close: "Close" },
+} as const;
+
+export function RoomGallery({ images, name, lang = "ru" }: { images: string[]; name: string; lang?: Lang }) {
+  const t = T[lang];
   const [active, setActive] = useState(0);
   const [zoom, setZoom] = useState(false);
 
@@ -17,7 +24,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
           type="button"
           onClick={() => setZoom(true)}
           className="relative block aspect-4/3 w-full cursor-zoom-in overflow-hidden rounded-card border border-white/10 shadow-lift md:shadow-deep"
-          aria-label="Открыть фото на весь экран"
+          aria-label={t.open}
         >
           <AnimatePresence mode="wait">
             <motion.span
@@ -30,7 +37,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
             >
               <Image
                 src={images[active]}
-                alt={`${name} — фото ${active + 1}`}
+                alt={`${name} — ${t.photo} ${active + 1}`}
                 fill
                 priority={active === 0}
                 sizes="(max-width: 1024px) 100vw, 55vw"
@@ -47,7 +54,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
                 key={src}
                 type="button"
                 onClick={() => setActive(i)}
-                aria-label={`Показать фото ${i + 1}`}
+                aria-label={`${t.show} ${i + 1}`}
                 aria-current={i === active}
                 className={`relative aspect-4/3 overflow-hidden rounded-xl border transition-[border-color,opacity,transform] duration-200 ease-airis ${
                   i === active
@@ -79,7 +86,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
           >
             <button
               type="button"
-              aria-label="Закрыть"
+              aria-label={t.close}
               className="glass absolute top-5 right-5 grid size-11 place-items-center rounded-full text-cream"
               onClick={() => setZoom(false)}
             >
@@ -94,7 +101,7 @@ export function RoomGallery({ images, name }: { images: string[]; name: string }
             >
               <Image
                 src={images[active]}
-                alt={`${name} — фото ${active + 1}`}
+                alt={`${name} — ${t.photo} ${active + 1}`}
                 fill
                 sizes="90vw"
                 className="object-contain"

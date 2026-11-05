@@ -15,6 +15,7 @@ import { Location } from "@/components/sections/Location";
 import { Faq } from "@/components/sections/Faq";
 import { Corporate } from "@/components/sections/Corporate";
 import { CtaBook } from "@/components/sections/CtaBook";
+import { GuideTeaser } from "@/components/content/GuideTeaser";
 import { JsonLd } from "@/components/JsonLd";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 import { faqItems } from "@/lib/faq";
@@ -56,6 +57,7 @@ export default async function HomePage() {
       <Amenities />
       <Location withEvents />
       <EventsNearby />
+      <GuideTeaser />
       <Faq />
       {/* Отзывы — внизу, перед кнопкой брони (просьба владельца 2026-10-05):
           последний довод перед решением, и здесь же форма для тех, кто

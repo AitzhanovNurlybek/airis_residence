@@ -11,8 +11,21 @@ import { TiltCard } from "@/components/ui/TiltCard";
 import { IconArrow } from "@/components/ui/Icons";
 import { types as typesWord } from "@/lib/plural";
 import { RoomName } from "@/components/ui/RoomName";
+import { formatPriceEn, guestsEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
 
-function RoomCard({ room, index }: { room: Room; index: number }) {
+/**
+ * Карточки номеров. Для английских страниц номера приходят уже с
+ * английскими текстами (lib/en.ts → roomEn), здесь — только подписи.
+ */
+const T = {
+  ru: { perNight: "за ночь", more: "Подробнее", book: "Забронировать", alt: "отель Airis Residence в Алматы" },
+  en: { perNight: "per night", more: "Details", book: "Book", alt: "Airis Residence hotel, Almaty" },
+} as const;
+
+function RoomCard({ room, index, lang }: { room: Room; index: number; lang: Lang }) {
+  const t = T[lang];
+  const en = lang === "en";
   // Первый номер — крупной карточкой: 5 карточек ложатся в сетку 3+3 без дыр.
   const wide = index === 0;
 
@@ -29,7 +42,7 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
           >
             <Image
               src={room.images[0]}
-              alt={`${room.shortName} — ${room.area}, отель Airis Residence в Алматы`}
+              alt={`${room.shortName} — ${room.area}, ${t.alt}`}
               fill
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 40vw"
               className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] can-hover:group-hover:scale-[1.07]"
@@ -37,8 +50,8 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
             <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/25 to-transparent" />
 
             <span className="absolute top-4 left-4 rounded-full border border-white/15 bg-ink-950/65 px-3 py-1.5 text-[0.7rem] tracking-wide text-cream/90 backdrop-blur-md">
-              {room.area} · до {room.capacity}{" "}
-              {room.capacity === 1 ? "гостя" : "гостей"}
+              {room.area} ·{" "}
+              {en ? guestsEn(room.capacity) : `до ${room.capacity} ${room.capacity === 1 ? "гостя" : "гостей"}`}
             </span>
           </div>
 
@@ -51,23 +64,23 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
             <div className="mt-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-4 border-t border-white/8 pt-5 md:mt-6">
               <div>
                 <span className="block text-[0.7rem] tracking-[0.14em] text-muted uppercase">
-                  за ночь
+                  {t.perNight}
                 </span>
                 <span className="mt-1 block font-display text-2xl text-sand-200">
-                  {formatPrice(room.price)}
+                  {en ? formatPriceEn(room.price) : formatPrice(room.price)}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <Link
-                  href={`/nomera/${room.slug}`}
+                  href={en ? `/en/rooms/${room.slug}` : `/nomera/${room.slug}`}
                   className="rounded-full border border-white/12 px-4 py-2.5 text-sm text-cream/85 transition-colors hover:border-sand-300/50 hover:text-cream"
                 >
-                  Подробнее
+                  {t.more}
                 </Link>
                 <a
-                  href={getRoomBookingHref(room.beRoomType)}
-                  aria-label={`Забронировать ${room.shortName}`}
+                  href={getRoomBookingHref(room.beRoomType, lang)}
+                  aria-label={`${t.book} ${room.shortName}`}
                   className="grid size-10 place-items-center rounded-full bg-linear-to-b from-wine-500 to-wine-700 text-white transition-transform can-hover:hover:scale-105"
                 >
                   <IconArrow className="size-4" />
@@ -81,24 +94,47 @@ function RoomCard({ room, index }: { room: Room; index: number }) {
   );
 }
 
-export function Rooms({ rooms = fallbackRooms }: { rooms?: Room[] }) {
+export function Rooms({
+  rooms = fallbackRooms,
+  lang = "ru",
+  heading = true,
+}: {
+  rooms?: Room[];
+  lang?: Lang;
+  /** false — без своего заголовка: на посадочных страницах он уже есть. */
+  heading?: boolean;
+}) {
   return (
-    <section id="nomera" className="relative scroll-mt-24 py-20 md:py-32">
+    <section id="nomera" className={`relative scroll-mt-24 ${heading ? "py-20 md:py-32" : "py-8 md:py-12"}`}>
       <div className="container-page">
-        <SectionHead
-          eyebrow="Номера"
-          title={
-            <>
-              {rooms.length} {typesWord(rooms.length)} номеров —
-              <br className="hidden md:block" /> от компактного до просторного Comfort Plus
-            </>
-          }
-          description="Все номера с кондиционером, сейфом, мини-баром и собственной ванной комнатой. Завтрак включён в стоимость любого тарифа."
-        />
+        {heading &&
+          (lang === "en" ? (
+            <SectionHead
+              eyebrow="Rooms"
+              title={
+                <>
+                  {rooms.length} room types —
+                  <br className="hidden md:block" /> from compact singles to the spacious Comfort Plus
+                </>
+              }
+              description="Every room has air conditioning, a safe, a minibar and a private bathroom. Breakfast is included in rates with breakfast."
+            />
+          ) : (
+            <SectionHead
+              eyebrow="Номера"
+              title={
+                <>
+                  {rooms.length} {typesWord(rooms.length)} номеров —
+                  <br className="hidden md:block" /> от компактного до просторного Comfort Plus
+                </>
+              }
+              description="Все номера с кондиционером, сейфом, мини-баром и собственной ванной комнатой. Завтрак включён в стоимость любого тарифа."
+            />
+          ))}
 
-        <div className="mt-10 grid gap-5 md:mt-14 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-7">
+        <div className={`grid gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-7 ${heading ? "mt-10 md:mt-14" : ""}`}>
           {rooms.map((room, i) => (
-            <RoomCard key={room.slug} room={room} index={i} />
+            <RoomCard key={room.slug} room={room} index={i} lang={lang} />
           ))}
         </div>
       </div>

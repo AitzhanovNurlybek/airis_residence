@@ -13,7 +13,15 @@
  *
  * Ссылки из WhatsApp-бота приходят с `?lang=en|kk|ru`: гость пишет
  * по-английски — страница и форма открываются по-английски.
+ *
+ * С 2026-11-05 у английского свои страницы под /en (lib/routes.ts), и
+ * переводчик делает только казахский. `?lang=en` на русской странице прокси
+ * перенаправляет на английскую пару (proxy.ts). Выбор «EN», сохранённый
+ * раньше, на русской странице с парой уводит на неё же по-английски, а на
+ * странице без пары (оферта) по-прежнему включает переводчик.
  */
+
+import { langOf } from "./routes";
 
 export type Language = "ru" | "kk" | "en";
 
@@ -77,5 +85,8 @@ export function applyLanguageFromUrl(): boolean {
 
 /** На каком языке запускать форму Exely. */
 export function bookingEngineLanguage(): Language {
+  // Английские страницы (/en) — настоящие, без переводчика: форма на них
+  // всегда по-английски, что бы ни лежало в куке от прошлых визитов.
+  if (typeof window !== "undefined" && langOf(window.location.pathname) === "en") return "en";
   return languageFromUrl() ?? savedLanguage();
 }

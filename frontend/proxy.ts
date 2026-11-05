@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { counterpart, langOf } from "@/lib/routes";
+
 /**
  * Ранняя проверка входа в закрытые разделы.
  *
@@ -27,7 +29,7 @@ const GUARDED = [
 ];
 
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, searchParams } = request.nextUrl;
 
   for (const area of GUARDED) {
     if (!pathname.startsWith(area.prefix)) continue;
@@ -40,11 +42,37 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Язык — после проверки входа: /admin?lang=en не должен проскочить её.
+  // ?lang=en на русской странице — ссылка из WhatsApp-бота или старая
+  // реклама на Европу. С 2026-11-05 у английского свои страницы (/en),
+  // поэтому ведём на английскую пару, сохраняя остальные параметры: даты
+  // брони, номер, utm-метки, gclid рекламы. Пары нет (оферта) — страница
+  // открывается как раньше, и английский делает переводчик.
+  // Временный редирект (307), а не постоянный: пары страниц могут
+  // поменяться, а браузер постоянный запоминает навсегда.
+  if (searchParams.get("lang") === "en" && langOf(pathname) === "ru") {
+    const target = counterpart(pathname, "en");
+    if (target) {
+      const url = request.nextUrl.clone();
+      url.pathname = target;
+      url.searchParams.delete("lang");
+      return NextResponse.redirect(url, 307);
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  // Только закрытые разделы. Публичные страницы и обработчики /api сюда не
-  // попадают: лишний слой на каждом запросе к сайту не нужен.
-  matcher: ["/admin/:path*", "/corp/:path*"],
+  // Закрытые разделы — всегда; публичные страницы — только когда в адресе
+  // ?lang=en. Остальные запросы к сайту сюда не попадают: лишний слой на
+  // каждом запросе не нужен.
+  matcher: [
+    "/admin/:path*",
+    "/corp/:path*",
+    {
+      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      has: [{ type: "query", key: "lang", value: "en" }],
+    },
+  ],
 };

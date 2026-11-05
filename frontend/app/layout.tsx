@@ -100,7 +100,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   const media = mediaOrigin();
 
   return (
-    <html lang="ru" className={`${display.variable} ${sans.variable} antialiased`}>
+    // suppressHydrationWarning: на английских страницах (/en) язык документа
+    // меняет скрипт в app/en/layout.tsx ещё до гидрации — расхождение
+    // атрибута lang ожидаемое.
+    <html lang="ru" className={`${display.variable} ${sans.variable} antialiased`} suppressHydrationWarning>
       {media && (
         <head>
           <link rel="preconnect" href={media} crossOrigin="" />

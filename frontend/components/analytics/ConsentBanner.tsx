@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import type { Lang } from "@/lib/routes";
+
 const KEY = "airis-consent";
 
 /** Часовые пояса «Europe/…», где согласие не требуется: Россия, Беларусь, Турция и т. п. */
@@ -23,7 +25,23 @@ function gtag(...args: unknown[]) {
  * Европы. Гостям из Казахстана он не нужен и только мешал бы забронировать.
  * Ответ запоминается: второй раз баннер не появляется.
  */
-export function ConsentBanner() {
+const T = {
+  ru: {
+    text: "Мы используем cookie, чтобы понимать, как гости находят сайт, и показывать им актуальные предложения.",
+    more: "Подробнее",
+    yes: "Согласен",
+    no: "Только необходимые",
+  },
+  en: {
+    text: "We use cookies to understand how guests find our website and to show them relevant offers.",
+    more: "Privacy policy (in Russian)",
+    yes: "Accept",
+    no: "Necessary only",
+  },
+} as const;
+
+export function ConsentBanner({ lang = "ru" }: { lang?: Lang }) {
+  const t = T[lang];
   const [show, setShow] = useState(false);
 
   useEffect(() => {
@@ -61,10 +79,9 @@ export function ConsentBanner() {
       className="fixed inset-x-3 bottom-3 z-[60] mx-auto max-w-xl rounded-card border border-white/10 bg-ink-900/95 p-4 text-sm text-cream/85 shadow-2xl backdrop-blur md:bottom-5 md:p-5"
     >
       <p>
-        Мы используем cookie, чтобы понимать, как гости находят сайт, и показывать
-        им актуальные предложения.{" "}
+        {t.text}{" "}
         <a href="/politika-konfidencialnosti" className="underline underline-offset-2 hover:text-sand-300">
-          Подробнее
+          {t.more}
         </a>
       </p>
       <div className="mt-3 flex gap-2">
@@ -73,14 +90,14 @@ export function ConsentBanner() {
           onClick={() => answer(true)}
           className="rounded-full bg-sand-400 px-4 py-2 font-medium text-ink-950 hover:bg-sand-300"
         >
-          Согласен
+          {t.yes}
         </button>
         <button
           type="button"
           onClick={() => answer(false)}
           className="rounded-full border border-white/20 px-4 py-2 hover:border-white/40"
         >
-          Только необходимые
+          {t.no}
         </button>
       </div>
     </div>

@@ -5,13 +5,39 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { navLinks, site } from "@/lib/site";
+import { navLinksEn } from "@/lib/en";
 import { getBookingHref, bookingLinkTarget } from "@/lib/booking";
+import { homeOf, type Lang } from "@/lib/routes";
 import { buttonClass } from "@/components/ui/Button";
 import { IconClose, IconMenu, IconPhone } from "@/components/ui/Icons";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { Logo } from "@/components/ui/Logo";
 
-export function Header() {
+const T = {
+  ru: {
+    home: "на главную",
+    nav: "Основная навигация",
+    mobileNav: "Мобильная навигация",
+    book: "Забронировать",
+    bookRoom: "Забронировать номер",
+    open: "Открыть меню",
+    close: "Закрыть меню",
+  },
+  en: {
+    home: "home page",
+    nav: "Main navigation",
+    mobileNav: "Mobile navigation",
+    book: "Book now",
+    bookRoom: "Book a room",
+    open: "Open menu",
+    close: "Close menu",
+  },
+} as const;
+
+export function Header({ lang = "ru" }: { lang?: Lang }) {
+  const t = T[lang];
+  const links: readonly { href: string; label: string; accent?: boolean }[] = lang === "en" ? navLinksEn : navLinks;
+  const bookingHref = getBookingHref({}, lang);
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -40,13 +66,13 @@ export function Header() {
         style={{ height: "var(--header-h)" }}
       >
         <div className="container-page flex h-full items-center justify-between gap-6">
-          <Link href="/" aria-label={`${site.name} — на главную`} className="shrink-0">
+          <Link href={homeOf(lang)} aria-label={`${site.name} — ${t.home}`} className="shrink-0">
             <Logo className="h-8 w-auto md:h-9" />
           </Link>
 
-          <nav className="hidden items-center gap-5 xl:flex 2xl:gap-7" aria-label="Основная навигация">
-            {navLinks.map((link) =>
-              "accent" in link && link.accent ? (
+          <nav className="hidden items-center gap-5 xl:flex 2xl:gap-7" aria-label={t.nav}>
+            {links.map((link) =>
+              link.accent ? (
                 <Link
                   key={link.href}
                   href={link.href}
@@ -67,7 +93,7 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <LanguageSwitcher className="hidden sm:flex" withGoogleElement />
+            <LanguageSwitcher className="hidden sm:flex" withGoogleElement lang={lang} />
 
             <a
               href={`tel:${site.contacts.phonePrimaryRaw}`}
@@ -78,18 +104,18 @@ export function Header() {
             </a>
 
             <a
-              href={getBookingHref()}
+              href={bookingHref}
               target={bookingLinkTarget}
               rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
               className={buttonClass("primary", "md", "hidden sm:inline-flex")}
             >
-              Забронировать
+              {t.book}
             </a>
 
             <button
               type="button"
               onClick={() => setOpen(true)}
-              aria-label="Открыть меню"
+              aria-label={t.open}
               className="glass grid size-11 place-items-center rounded-full text-cream xl:hidden"
             >
               <IconMenu className="size-5" />
@@ -112,17 +138,17 @@ export function Header() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                aria-label="Закрыть меню"
+                aria-label={t.close}
                 className="glass grid size-11 place-items-center rounded-full text-cream"
               >
                 <IconClose className="size-5" />
               </button>
             </div>
 
-            <nav className="container-page mt-6 flex flex-col" aria-label="Мобильная навигация">
-              <LanguageSwitcher className="mb-5 w-fit" />
+            <nav className="container-page mt-6 flex flex-col" aria-label={t.mobileNav}>
+              <LanguageSwitcher className="mb-5 w-fit" lang={lang} />
 
-              {navLinks.map((link, i) => (
+              {links.map((link, i) => (
                 <motion.div
                   key={link.href}
                   initial={{ opacity: 0, y: 20 }}
@@ -133,7 +159,7 @@ export function Header() {
                     href={link.href}
                     onClick={() => setOpen(false)}
                     className={`block border-b border-white/8 py-4 font-display text-2xl sm:py-5 sm:text-3xl ${
-                      "accent" in link && link.accent ? "text-sand-300" : "text-cream"
+                      link.accent ? "text-sand-300" : "text-cream"
                     }`}
                   >
                     {link.label}
@@ -144,13 +170,13 @@ export function Header() {
 
             <div className="container-page mt-8 space-y-3 sm:mt-10 sm:space-y-4">
               <a
-                href={getBookingHref()}
+                href={bookingHref}
                 target={bookingLinkTarget}
                 rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
                 onClick={() => setOpen(false)}
                 className={buttonClass("primary", "lg", "w-full")}
               >
-                Забронировать номер
+                {t.bookRoom}
               </a>
               <a
                 href={`tel:${site.contacts.phonePrimaryRaw}`}

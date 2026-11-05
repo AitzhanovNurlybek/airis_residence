@@ -12,6 +12,49 @@ import {
   IconWalk,
   IconWhatsApp,
 } from "@/components/ui/Icons";
+import { airportEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
+
+const T = {
+  ru: {
+    walk: (m: number) => `пешком ${m} минут`,
+    min: "мин",
+    bus: "автобус",
+    trolley: "троллейбус",
+    or: " или ",
+    then: ", затем ",
+    transfer: "Написать о трансфере",
+    eyebrow: "Из аэропорта",
+    title: "Как добраться до отеля",
+    airport: "Аэропорт",
+    district: "Алмалинский район",
+    car: "На машине",
+    public: "На общественном транспорте",
+    google: "Маршрут в Google Maps",
+    twoGis: "Открыть в 2ГИС",
+    source:
+      "Маршруты — по данным 2ГИС до адреса отеля, сентябрь 2026. Время и интервалы примерные: точное расписание на сегодня покажет приложение.",
+  },
+  en: {
+    walk: (m: number) => `${m} min walk`,
+    min: "min",
+    bus: "bus",
+    trolley: "trolleybus",
+    or: " or ",
+    then: ", then ",
+    transfer: "Ask about a transfer",
+    eyebrow: "From the airport",
+    title: "How to get to the hotel",
+    airport: "Airport",
+    district: "Almaly district",
+    car: "By car",
+    public: "By public transport",
+    google: "Route in Google Maps",
+    twoGis: "Open in 2GIS",
+    source:
+      "Routes are based on 2GIS data to the hotel's address, September 2026. Times and intervals are approximate — your maps app will show today's schedule.",
+  },
+} as const;
 
 /**
  * Как добраться из аэропорта.
@@ -35,28 +78,29 @@ const optionIcon: Record<string, (p: { className?: string }) => React.ReactEleme
   "bus-3-night": IconMoon,
 };
 
-function describeSteps(steps: readonly AirportStep[]): string {
+function describeSteps(steps: readonly AirportStep[], lang: Lang): string {
+  const t = T[lang];
   return steps
     .map((step) =>
       step.kind === "walk"
-        ? `пешком ${step.minutes} минут`
-        : `${step.kind === "bus" ? "автобус" : "троллейбус"} ${step.lines.join(" или ")}`,
+        ? t.walk(step.minutes)
+        : `${step.kind === "bus" ? t.bus : t.trolley} ${step.lines.join(t.or)}`,
     )
-    .join(", затем ");
+    .join(t.then);
 }
 
-function RouteStrip({ steps }: { steps: readonly AirportStep[] }) {
+function RouteStrip({ steps, lang }: { steps: readonly AirportStep[]; lang: Lang }) {
   return (
     <ol
       className="mt-4 flex flex-wrap items-center gap-y-2"
-      aria-label={describeSteps(steps)}
+      aria-label={describeSteps(steps, lang)}
     >
       {steps.map((step, index) => (
         <li key={index} className="flex items-center">
           {step.kind === "walk" && (
             <span className="inline-flex items-center gap-1 text-xs text-muted">
               <IconWalk className="size-4" />
-              {step.minutes} мин
+              {step.minutes} {T[lang].min}
             </span>
           )}
           {step.kind === "bus" && (
@@ -80,8 +124,9 @@ function RouteStrip({ steps }: { steps: readonly AirportStep[] }) {
   );
 }
 
-function OptionCard({ option }: { option: AirportOption }) {
+function OptionCard({ option, lang }: { option: AirportOption; lang: Lang }) {
   const Icon = optionIcon[option.id] ?? IconTransfer;
+  const data = lang === "en" ? airportEn : airport;
   return (
     <li className="rounded-2xl border border-white/8 bg-ink-950/40 p-5">
       <div className="flex gap-4">
@@ -94,17 +139,17 @@ function OptionCard({ option }: { option: AirportOption }) {
             <span className="text-sm text-sand-400 tabular-nums">{option.price}</span>
           </div>
           <p className="mt-1 text-xs text-muted">{option.time}</p>
-          {option.steps && <RouteStrip steps={option.steps} />}
+          {option.steps && <RouteStrip steps={option.steps} lang={lang} />}
           <p className="mt-3 text-sm leading-relaxed text-cream/70">{option.note}</p>
           {option.id === "transfer" && (
             <a
-              href={airport.transferWhatsapp}
+              href={data.transferWhatsapp}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonClass("outline", "md", "mt-4 h-10 px-5")}
             >
               <IconWhatsApp className="size-4" />
-              Написать о трансфере
+              {T[lang].transfer}
             </a>
           )}
         </div>
@@ -113,30 +158,33 @@ function OptionCard({ option }: { option: AirportOption }) {
   );
 }
 
-function Group({ title, options }: { title: string; options: readonly AirportOption[] }) {
+function Group({ title, options, lang }: { title: string; options: readonly AirportOption[]; lang: Lang }) {
   return (
     <div>
       <h4 className="eyebrow">{title}</h4>
       <ul className="mt-4 space-y-3">
         {options.map((option) => (
-          <OptionCard key={option.id} option={option} />
+          <OptionCard key={option.id} option={option} lang={lang} />
         ))}
       </ul>
     </div>
   );
 }
 
-export function AirportRoutes() {
-  const car = airport.options.filter((option) => option.group === "car");
-  const bus = airport.options.filter((option) => option.group === "bus");
+export function AirportRoutes({ lang = "ru" }: { lang?: Lang }) {
+  const t = T[lang];
+  const data = lang === "en" ? airportEn : airport;
+  const options: readonly AirportOption[] = data.options;
+  const car = options.filter((option) => option.group === "car");
+  const bus = options.filter((option) => option.group === "bus");
 
   return (
     <div id="iz-aeroporta" className="mt-16 scroll-mt-24 md:mt-24">
       <Reveal>
         <div className="rounded-card border border-white/10 bg-ink-900 p-6 md:p-10">
-          <p className="eyebrow">Из аэропорта</p>
+          <p className="eyebrow">{t.eyebrow}</p>
           <h3 className="mt-3 font-display text-2xl leading-tight font-semibold text-cream md:text-3xl">
-            Как добраться до отеля
+            {t.title}
           </h3>
 
           {/* Путь одной линией: откуда, сколько, куда. Первое, что хочет
@@ -146,18 +194,18 @@ export function AirportRoutes() {
               <IconPlane className="size-5" />
             </span>
             <span className="hidden shrink-0 text-sm sm:block">
-              <span className="block text-cream">Аэропорт</span>
-              <span className="block text-xs text-muted">{airport.code}</span>
+              <span className="block text-cream">{t.airport}</span>
+              <span className="block text-xs text-muted">{data.code}</span>
             </span>
             <span className="relative flex-1">
               <span aria-hidden className="block border-t border-dashed border-sand-400/45" />
               <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-ink-900 px-3 text-sm whitespace-nowrap text-sand-300 tabular-nums">
-                {airport.distance}
+                {data.distance}
               </span>
             </span>
             <span className="hidden shrink-0 text-right text-sm sm:block">
               <span className="block text-cream">Airis Residence</span>
-              <span className="block text-xs text-muted">Алмалинский район</span>
+              <span className="block text-xs text-muted">{t.district}</span>
             </span>
             <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-sand-400/50 text-sand-300">
               <IconPin className="size-5" />
@@ -167,7 +215,7 @@ export function AirportRoutes() {
               полуслове («Аэропор»). Здесь им хватает всей ширины. */}
           <div className="mt-2 flex justify-between text-xs sm:hidden">
             <span>
-              <span className="block text-cream">Аэропорт {airport.code}</span>
+              <span className="block text-cream">{t.airport} {data.code}</span>
             </span>
             <span className="text-right">
               <span className="block text-cream">Airis Residence</span>
@@ -175,36 +223,33 @@ export function AirportRoutes() {
           </div>
 
           <div className="mt-10 grid gap-8 lg:grid-cols-2 lg:gap-10">
-            <Group title="На машине" options={car} />
-            <Group title="На общественном транспорте" options={bus} />
+            <Group title={t.car} options={car} lang={lang} />
+            <Group title={t.public} options={bus} lang={lang} />
           </div>
 
-          <p className="mt-8 text-sm leading-relaxed text-cream/70">{airport.payment}</p>
+          <p className="mt-8 text-sm leading-relaxed text-cream/70">{data.payment}</p>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <a
-              href={airport.routeGoogle}
+              href={data.routeGoogle}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonClass("primary", "md")}
             >
-              Маршрут в Google Maps
+              {t.google}
               <IconArrow className="size-4" />
             </a>
             <a
-              href={airport.route2gis}
+              href={data.route2gis}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonClass("outline", "md")}
             >
-              Открыть в 2ГИС
+              {t.twoGis}
             </a>
           </div>
 
-          <p className="mt-5 text-xs leading-relaxed text-muted">
-            Маршруты — по данным 2ГИС до адреса отеля, сентябрь 2026. Время и интервалы
-            примерные: точное расписание на сегодня покажет приложение.
-          </p>
+          <p className="mt-5 text-xs leading-relaxed text-muted">{t.source}</p>
         </div>
       </Reveal>
     </div>

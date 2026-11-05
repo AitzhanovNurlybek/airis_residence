@@ -6,17 +6,34 @@ import { AnimatePresence, motion } from "motion/react";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
 import { faqItems } from "@/lib/faq";
+import { faqItemsEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
 
-export function Faq() {
+export function Faq({
+  lang = "ru",
+  items,
+  title,
+}: {
+  lang?: Lang;
+  /** Свои вопросы — для посадочных страниц и путеводителя. */
+  items?: readonly { q: string; a: string }[];
+  title?: string;
+}) {
   const [open, setOpen] = useState<number | null>(0);
+  const list = items ?? (lang === "en" ? faqItemsEn : faqItems);
+  const en = lang === "en";
 
   return (
     <section className="relative py-20 md:py-32">
       <div className="container-page max-w-4xl">
-        <SectionHead eyebrow="Вопросы" title="Частые вопросы" align="center" />
+        <SectionHead
+          eyebrow={en ? "Questions" : "Вопросы"}
+          title={title ?? (en ? "Frequently asked questions" : "Частые вопросы")}
+          align="center"
+        />
 
         <div className="mt-12 divide-y divide-white/8 border-y border-white/8">
-          {faqItems.map((item, i) => {
+          {list.map((item, i) => {
             const isOpen = open === i;
             return (
               <Reveal key={item.q} delay={i * 0.04} depth={false}>

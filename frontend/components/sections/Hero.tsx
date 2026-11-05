@@ -14,18 +14,49 @@ import { IconPhone, IconPin } from "@/components/ui/Icons";
 import '../be-forms/be-style.css';
 import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
 import { rooms as roomsWord } from "@/lib/plural";
+import { formatPriceEn, siteEn } from "@/lib/en";
+import { DirectBadge } from "@/components/ui/DirectBadge";
+import type { Lang } from "@/lib/routes";
 
 // WebGL грузится только в браузере, только на десктопе и только после
 // основного контента: на телефоне это лишние ~500 КБ и нагрев батареи.
 const HeroScene = dynamic(() => import("@/components/three/HeroScene"), { ssr: false });
 
-const facts = [
-  { value: `${site.roomsCount}`, label: "номеров" },
-  { value: "24/7", label: "стойка регистрации" },
-  { value: "0 ₸", label: "завтрак включён" },
-];
+const FACTS = {
+  ru: [
+    { value: `${site.roomsCount}`, label: "номеров" },
+    { value: "24/7", label: "стойка регистрации" },
+    { value: "0 ₸", label: "завтрак включён" },
+  ],
+  en: [
+    { value: `${site.roomsCount}`, label: "rooms" },
+    { value: "24/7", label: "front desk" },
+    { value: "0 ₸", label: "breakfast included" },
+  ],
+};
 
-export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) {
+const T = {
+  ru: {
+    alt: "Лобби отеля Airis Residence в Алматы",
+    place: `${site.address.city}, ${site.address.street}`,
+    h1a: "Отель в центре Алматы,",
+    h1b: "где хочется остаться дольше",
+    book: "Забронировать",
+    call: `Позвонить ${site.contacts.phonePrimary}`,
+  },
+  en: {
+    alt: "Lobby of Airis Residence hotel in Almaty",
+    place: `${siteEn.address.street}, ${siteEn.address.city}`,
+    h1a: "A hotel in Almaty city centre",
+    h1b: "you won't want to leave",
+    book: "Book now",
+    call: `Call ${site.contacts.phonePrimary}`,
+  },
+} as const;
+
+export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom?: number; lang?: Lang }) {
+  const t = T[lang];
+  const facts = FACTS[lang];
   const ref = useRef<HTMLElement>(null);
   // Параллакс фона отключался и раньше, а вот появление заголовка и
   // фактов ехало снизу при любом режиме: CSS-правило reduced-motion на
@@ -61,7 +92,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
       >
         <Image
           src="/images/hotel/lobby.jpg"
-          alt="Лобби отеля Airis Residence в Алматы"
+          alt={t.alt}
           fill
           priority
           sizes="100vw"
@@ -87,7 +118,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
       >
         <div className="max-w-3xl">
           <motion.a
-            href={site.address.mapUrl}
+            href={lang === "en" ? site.address.googleMapsUrl : site.address.mapUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="glass inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.7rem] text-cream/85 transition-colors hover:text-sand-200 sm:px-4 sm:text-xs"
@@ -96,7 +127,7 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             transition={{ duration: 0.6, delay: 0.1 }}
           >
             <IconPin className="size-3.5 shrink-0 text-sand-400" />
-            {site.address.city}, {site.address.street}
+            {t.place}
           </motion.a>
 
           <motion.h1
@@ -105,8 +136,8 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           >
-            <span className="text-gradient-sand">Отель в центре Алматы,</span>{" "}
-            <span className="text-cream/95">где хочется остаться дольше</span>
+            <span className="text-gradient-sand">{t.h1a}</span>{" "}
+            <span className="text-cream/95">{t.h1b}</span>
           </motion.h1>
 
           <motion.p
@@ -115,10 +146,29 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
-            {site.roomsCount} {roomsWord(site.roomsCount)} в двух шагах от проспекта Абая. Завтрак включён,
-            стойка регистрации круглосуточно. От{" "}
-            <span className="text-sand-200">{formatPrice(priceFrom)}</span> за ночь.
+            {lang === "en" ? (
+              <>
+                {site.roomsCount} rooms a short walk from Abay Avenue. Breakfast included, 24/7 front
+                desk, English-speaking staff. From{" "}
+                <span className="text-sand-200">{formatPriceEn(priceFrom)}</span> per night.
+              </>
+            ) : (
+              <>
+                {site.roomsCount} {roomsWord(site.roomsCount)} в двух шагах от проспекта Абая. Завтрак включён,
+                стойка регистрации круглосуточно. От{" "}
+                <span className="text-sand-200">{formatPrice(priceFrom)}</span> за ночь.
+              </>
+            )}
           </motion.p>
+
+          <motion.div
+            className="mt-4"
+            initial={{ opacity: 0, y: reduced ? 0 : 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.9, delay: 0.38 }}
+          >
+            <DirectBadge lang={lang} />
+          </motion.div>
 
           <motion.dl
             className="mt-7 grid grid-cols-3 gap-4 md:mt-9 md:flex md:flex-wrap md:gap-x-10"
@@ -152,16 +202,16 @@ export function Hero({ priceFrom = fallbackPriceFrom }: { priceFrom?: number }) 
               крупные кнопки, а сама форма ждёт на /bronirovanie. */}
           <div className="flex gap-2.5 sm:hidden">
             <a
-              href={getBookingHref()}
+              href={getBookingHref({}, lang)}
               target={bookingLinkTarget}
               rel={bookingLinkTarget ? "noopener noreferrer" : undefined}
               className={buttonClass("primary", "lg", "flex-1")}
             >
-              Забронировать
+              {t.book}
             </a>
             <a
               href={`tel:${site.contacts.phonePrimaryRaw}`}
-              aria-label={`Позвонить ${site.contacts.phonePrimary}`}
+              aria-label={t.call}
               className={buttonClass("outline", "lg", "aspect-square !px-0")}
             >
               <IconPhone className="size-5" />

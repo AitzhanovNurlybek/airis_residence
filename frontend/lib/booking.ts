@@ -11,6 +11,8 @@
  * └──────────────────────────────────────────────────────────────────┘
  */
 
+import type { Lang } from "./routes";
+
 export type BookingMode =
   /** Ссылка на внешний движок брони / платёжную страницу банка. */
   | "engine"
@@ -67,12 +69,15 @@ export const isBookingLive = true;
  *
  * Это НЕ то же самое, что живая бронь, хотя раньше было завязано на одну
  * проверку. Форма Exely работает всегда, а приём карт появляется в ней
- * только когда отель подключит эквайринг — ответа банка пока нет. Оставить
- * их слитыми значило бы пообещать гостю оплату картой заодно с бронью.
+ * только когда отель подключит эквайринг. Оставить их слитыми значило бы
+ * пообещать гостю оплату картой заодно с бронью.
  *
- * Когда эквайринг подключат — поменять на true, больше ничего не нужно.
+ * Включено 2026-11-05: владелица подтвердила 2026-10-15, что оплата онлайн
+ * принимается, в том числе с карт иностранных банков (site.policy.onlinePayment),
+ * и консьерж говорит это гостям с тех пор. Страница «Как оплатить» до сих пор
+ * писала «подключается» — гость получал от бота одно, а на сайте читал другое.
  */
-export const isOnlinePaymentLive = false;
+export const isOnlinePaymentLive = true;
 
 export type BookingQuery = {
   checkIn?: string; // YYYY-MM-DD
@@ -87,7 +92,7 @@ export type BookingQuery = {
  * До подключения движка — на внутреннюю страницу /bronirovanie
  * с формой заявки. После подключения — на движок/платёжку.
  */
-export function getBookingHref(query: BookingQuery = {}): string {
+export function getBookingHref(query: BookingQuery = {}, lang: Lang = "ru"): string {
   if (bookingConfig.mode === "engine" && bookingConfig.url) {
     let url: URL;
     try {
@@ -108,7 +113,7 @@ export function getBookingHref(query: BookingQuery = {}): string {
   if (query.adults) params.set("adults", String(query.adults));
   if (query.room) params.set("room", query.room);
   const qs = params.toString();
-  return `/booking${qs ? `?${qs}` : ""}`;
+  return `${lang === "en" ? "/en/booking" : "/booking"}${qs ? `?${qs}` : ""}`;
 }
 
 /**
@@ -119,8 +124,9 @@ export function getBookingHref(query: BookingQuery = {}): string {
  * на общую форму: пусть гость выберет сам. Это лучше пустого параметра,
  * на котором движок спотыкается.
  */
-export function getRoomBookingHref(beRoomType?: string): string {
-  return beRoomType ? `/booking?room-type=${encodeURIComponent(beRoomType)}` : "/booking";
+export function getRoomBookingHref(beRoomType?: string, lang: Lang = "ru"): string {
+  const page = lang === "en" ? "/en/booking" : "/booking";
+  return beRoomType ? `${page}?room-type=${encodeURIComponent(beRoomType)}` : page;
 }
 
 /** Внешняя ссылка открывается в новой вкладке, внутренняя — нет. */

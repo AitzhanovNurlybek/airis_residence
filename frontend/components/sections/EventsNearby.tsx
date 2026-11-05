@@ -1,5 +1,22 @@
 import { Reveal } from "@/components/ui/Reveal";
 import { eventVenues } from "@/lib/site";
+import { eventVenuesEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
+
+const T = {
+  ru: {
+    eyebrow: "Событийный центр города",
+    title: "До больших концертов и матчей — пешком",
+    text: "Главные площадки Алматы стоят в соседних кварталах. В день события, когда центр забит и такси не поймать, до стадиона можно дойти за двадцать минут.",
+    note: "Расстояния — пешком по улицам, а не по прямой. Афишу площадок стоит сверять перед поездкой: даты меняются.",
+  },
+  en: {
+    eyebrow: "Events in the city",
+    title: "Walk to big concerts and matches",
+    text: "Almaty's main venues are a few blocks away. On event day, when the centre is jammed and taxis are hard to get, you can walk to the stadium in about twenty minutes.",
+    note: "Distances are walking distances along the streets, not straight lines. Check the venues' schedules before your trip — dates change.",
+  },
+} as const;
 
 /**
  * Событийный крючок для туристов — сразу под картой.
@@ -18,7 +35,9 @@ import { eventVenues } from "@/lib/site";
  * звёзды» велик, но это пустая фраза: её пишут все. Проверяемый факт с числом
  * работает лучше и, в отличие от обещания, не может оказаться неправдой.
  */
-export function EventsNearby() {
+export function EventsNearby({ lang = "ru" }: { lang?: Lang }) {
+  const t = T[lang];
+  const venues = lang === "en" ? eventVenuesEn : eventVenues;
   return (
     <section
       aria-labelledby="sobytiya-title"
@@ -26,22 +45,18 @@ export function EventsNearby() {
     >
       <div className="container-page py-14 md:py-16">
         <Reveal>
-          <p className="eyebrow">Событийный центр города</p>
+          <p className="eyebrow">{t.eyebrow}</p>
           <h2
             id="sobytiya-title"
             className="mt-4 max-w-3xl font-display text-[clamp(1.6rem,3.2vw,2.3rem)] leading-[1.15] font-semibold text-cream"
           >
-            До больших концертов и матчей — пешком
+            {t.title}
           </h2>
-          <p className="mt-4 max-w-2xl text-[1.02rem] leading-relaxed text-muted">
-            Главные площадки Алматы стоят в соседних кварталах. В день события,
-            когда центр забит и такси не поймать, до стадиона можно дойти
-            за двадцать минут.
-          </p>
+          <p className="mt-4 max-w-2xl text-[1.02rem] leading-relaxed text-muted">{t.text}</p>
         </Reveal>
 
         <ul className="mt-10 grid gap-5 md:grid-cols-3">
-          {eventVenues.map((venue, index) => (
+          {venues.map((venue, index) => (
             <Reveal key={venue.name} delay={0.05 * index}>
               <li className="h-full rounded-2xl border border-white/10 bg-ink-950/50 p-6">
                 <div className="flex items-baseline justify-between gap-3">
@@ -62,10 +77,7 @@ export function EventsNearby() {
           ))}
         </ul>
 
-        <p className="mt-8 text-xs leading-relaxed text-muted">
-          Расстояния — пешком по улицам, а не по прямой. Афишу площадок стоит
-          сверять перед поездкой: даты меняются.
-        </p>
+        <p className="mt-8 text-xs leading-relaxed text-muted">{t.note}</p>
       </div>
     </section>
   );

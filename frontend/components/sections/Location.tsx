@@ -3,6 +3,8 @@ import { SectionHead } from "@/components/ui/SectionHead";
 import { AirportRoutes } from "@/components/sections/AirportRoutes";
 import { Reveal } from "@/components/ui/Reveal";
 import { IconClock, IconMail, IconPhone, IconPin } from "@/components/ui/Icons";
+import { nearbyEn, siteEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
 
 /**
  * Карта грузится статичным iframe без API-ключа.
@@ -22,7 +24,8 @@ import { IconClock, IconMail, IconPhone, IconPin } from "@/components/ui/Icons";
  * `withEvents` — на главной, где под этим блоком идут площадки событий:
  * тогда стадион и театр не повторяются здесь во второй раз.
  */
-export function Location({ withEvents = false }: { withEvents?: boolean }) {
+export function Location({ withEvents = false, lang = "ru" }: { withEvents?: boolean; lang?: Lang }) {
+  if (lang === "en") return <LocationEn withEvents={withEvents} />;
   const googleSrc = `https://maps.google.com/maps?q=${site.address.lat},${site.address.lng}&z=17&output=embed&hl=ru`;
   const twoGisOptions = {
     pos: { lat: site.address.lat, lon: site.address.lng, zoom: 16 },
@@ -140,6 +143,109 @@ export function Location({ withEvents = false }: { withEvents?: boolean }) {
         </div>
 
         <AirportRoutes />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Английская версия блока. Карта — только Google и на всех экранах: виджет
+ * 2ГИС по-русски, а иностранному гостю привычнее Google Maps.
+ */
+function LocationEn({ withEvents }: { withEvents: boolean }) {
+  const googleSrc = `https://maps.google.com/maps?q=${site.address.lat},${site.address.lng}&z=16&output=embed&hl=en`;
+  const venues = new Set<string>(eventVenues.map((venue) => venue.name));
+  const places = withEvents ? nearbyEn.filter((place) => !venues.has(place.ruName)) : nearbyEn;
+
+  return (
+    <section id="raspolozhenie" className="relative scroll-mt-24 py-20 md:py-32">
+      <div className="container-page">
+        <SectionHead
+          eyebrow="Location"
+          title="Almaly district, 800 m from Abay Avenue"
+          description="A quiet street, with everything you need close by: the metro, theatres, museums and the city's business centre."
+        />
+
+        <div className="mt-10 grid gap-7 md:mt-14 md:gap-8 lg:grid-cols-[1.15fr_1fr] lg:gap-10">
+          <Reveal className="order-2 lg:order-1">
+            <div className="h-full overflow-hidden rounded-card border border-white/10 shadow-deep">
+              <iframe
+                src={googleSrc}
+                title={`Map: ${site.name}, ${siteEn.address.full}`}
+                className="h-[22rem] w-full lg:h-full lg:min-h-[28rem]"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                style={{ border: 0, filter: "grayscale(0.35) contrast(1.05)" }}
+              />
+            </div>
+          </Reveal>
+
+          <div className="order-1 space-y-8 lg:order-2">
+            <Reveal direction="right">
+              <div className="rounded-card border border-white/10 bg-ink-900 p-6 md:p-7">
+                <address className="space-y-5 text-sm not-italic">
+                  <a
+                    href={site.address.googleMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex gap-3.5 transition-colors hover:text-sand-300"
+                  >
+                    <IconPin className="mt-0.5 size-5 shrink-0 text-sand-400" />
+                    <span>
+                      <span className="block text-cream">{siteEn.address.street}</span>
+                      <span className="mt-1 block text-muted">
+                        {siteEn.address.district}, {siteEn.address.city}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted">
+                        For a taxi driver: <span lang="ru">{site.address.street}</span>
+                      </span>
+                    </span>
+                  </a>
+
+                  <div className="hairline" />
+
+                  <a
+                    href={`tel:${site.contacts.phonePrimaryRaw}`}
+                    className="flex min-h-11 items-center gap-3.5 py-1 text-cream transition-colors can-hover:hover:text-sand-300"
+                  >
+                    <IconPhone className="mt-0.5 size-5 shrink-0 text-sand-400" />
+                    {site.contacts.phonePrimary}
+                  </a>
+                  <a
+                    href={`mailto:${site.contacts.email}`}
+                    className="flex gap-3.5 break-all text-cream transition-colors hover:text-sand-300"
+                  >
+                    <IconMail className="mt-0.5 size-5 shrink-0 text-sand-400" />
+                    {site.contacts.email}
+                  </a>
+                  <p className="flex gap-3.5 text-muted">
+                    <IconClock className="mt-0.5 size-5 shrink-0 text-sand-400" />
+                    {siteEn.hours}
+                  </p>
+                </address>
+              </div>
+            </Reveal>
+
+            <Reveal direction="right" delay={0.1}>
+              <div>
+                <h3 className="eyebrow">Near the hotel</h3>
+                <ul className="mt-5 divide-y divide-white/8">
+                  {places.map((place) => (
+                    <li key={place.name} className="flex items-baseline justify-between gap-6 py-3.5 text-sm">
+                      <span className="text-cream/85">{place.name}</span>
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sand-400 tabular-nums">{place.distance}</span>
+                        {place.walk && <span className="mt-0.5 block text-xs text-muted">{place.walk}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+
+        <AirportRoutes lang="en" />
       </div>
     </section>
   );

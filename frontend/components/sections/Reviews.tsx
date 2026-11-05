@@ -2,6 +2,7 @@ import { ReviewForm } from "@/components/sections/ReviewForm";
 import { Reveal } from "@/components/ui/Reveal";
 import { BACKEND_URL, CONTENT_TAG } from "@/lib/rooms";
 import { reviews } from "@/lib/site";
+import { reviewsEn } from "@/lib/en";
 
 type SiteReview = { id: number; name: string; text: string; stars: number; stay: string; created_at: string };
 
@@ -149,6 +150,103 @@ export async function Reviews() {
             <p className="mt-8 text-sm text-muted">Или на картах — там отзыв прочитают те, кто ещё выбирает:</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               {reviews.write.map((place) => (
+                <a
+                  key={place.url}
+                  href={place.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex flex-col rounded-xl border border-white/10 px-5 py-4 transition-colors hover:border-sand-400/50 hover:bg-white/5"
+                >
+                  <span className="font-medium text-cream">
+                    {place.name} <span className="text-sand-300 transition-transform group-hover:translate-x-0.5">→</span>
+                  </span>
+                  <span className="mt-1 text-xs text-muted">{place.note}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Отзывы на английской странице: те же выдержки с Яндекс Карт в переводе,
+ * с прямой пометкой «перевод с русского» и ссылкой на оригинал. Отзывы с
+ * нашего сайта и форма здесь не показываются — они на русском, а писать
+ * иностранцу удобнее туда, где его отзыв прочитают такие же гости
+ * (TripAdvisor стоит первым).
+ */
+export function ReviewsEn() {
+  return (
+    <section id="otzyvy" aria-labelledby="otzyvy-title" className="scroll-mt-24 border-y border-white/8 bg-ink-900/40">
+      <div className="container-page py-14 md:py-20">
+        <Reveal>
+          <p className="eyebrow">Guest reviews</p>
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-x-10 gap-y-4">
+            <h2
+              id="otzyvy-title"
+              className="max-w-2xl font-display text-[clamp(1.6rem,3.2vw,2.3rem)] leading-[1.15] font-semibold text-cream"
+            >
+              What our guests say
+            </h2>
+            <a href={reviewsEn.rating.url} target="_blank" rel="noopener noreferrer" className="group flex items-baseline gap-3">
+              <span className="font-display text-4xl leading-none font-semibold text-sand-300">{reviewsEn.rating.value}</span>
+              <span className="text-sm leading-snug text-muted transition-colors group-hover:text-cream">
+                on {reviewsEn.rating.source}
+                <br />
+                {reviewsEn.rating.count}
+              </span>
+            </a>
+          </div>
+        </Reveal>
+
+        <ul className="mt-10 grid gap-5 md:grid-cols-3">
+          {reviewsEn.items.map((item, index) => (
+            <Reveal key={item.author} delay={0.05 * index}>
+              <li className="flex h-full flex-col rounded-2xl border border-white/10 bg-ink-950/50 p-6">
+                <Stars count={item.stars} />
+                <blockquote className="mt-4 flex-1 text-[0.95rem] leading-relaxed text-cream/85">
+                  &ldquo;{item.text}&rdquo;
+                </blockquote>
+                <p className="mt-5 border-t border-white/8 pt-4 text-sm text-muted">
+                  <span className="notranslate text-cream/80">{item.author}</span>
+                  {" · "}
+                  {item.date}
+                </p>
+              </li>
+            </Reveal>
+          ))}
+        </ul>
+
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+          {reviewsEn.links.map((link) => (
+            <a
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sand-300 underline decoration-sand-400/40 underline-offset-4 transition-colors hover:text-cream"
+            >
+              {link.name} →
+            </a>
+          ))}
+          <span className="text-xs text-muted">
+            Excerpts from reviews on Yandex Maps, translated from Russian. Rating as of{" "}
+            {new Date(reviewsEn.checked).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.
+          </span>
+        </div>
+
+        <Reveal>
+          <div className="mt-12 rounded-2xl border border-sand-400/20 bg-ink-950/50 p-6 md:p-8">
+            <h3 className="font-display text-xl font-semibold text-cream">Stayed with us? Leave a review</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+              A couple of lines about what you liked and what we could do better helps other travellers
+              choose — and helps us improve.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {reviewsEn.write.map((place) => (
                 <a
                   key={place.url}
                   href={place.url}

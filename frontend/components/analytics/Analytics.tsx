@@ -2,6 +2,7 @@ import Script from "next/script";
 
 import { ConsentBanner } from "./ConsentBanner";
 import { ClickTracking } from "./ClickTracking";
+import type { Lang } from "@/lib/routes";
 
 /**
  * Google Analytics 4 — с режимом согласия (Consent Mode v2).
@@ -51,7 +52,7 @@ gtag('js', new Date());
 gtag('config', '${GA_ID}');
 `;
 
-export function Analytics() {
+export function Analytics({ lang = "ru" }: { lang?: Lang }) {
   if (process.env.NODE_ENV !== "production") return null;
   return (
     <>
@@ -60,7 +61,7 @@ export function Analytics() {
       </Script>
       <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
       <ClickTracking />
-      <ConsentBanner />
+      <ConsentBanner lang={lang} />
     </>
   );
 }

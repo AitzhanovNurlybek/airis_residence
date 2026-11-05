@@ -1,5 +1,7 @@
 import { LazyVideo } from "@/components/ui/LazyVideo";
 import { getSiteVideos } from "@/lib/siteVideos";
+import { videoTitlesEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
 
 /**
  * Видеообзоры отеля на главной: кухня, общие зоны.
@@ -13,23 +15,30 @@ import { getSiteVideos } from "@/lib/siteVideos";
  * же «посмотрите, как выглядит». Гость на этом месте уже поверил, что
  * отель настоящий, и ему нужна следующая ступень, а не третий заголовок.
  */
-export async function VideoShowcase() {
-  const videos = await getSiteVideos();
+export async function VideoShowcase({ lang = "ru" }: { lang?: Lang }) {
+  const en = lang === "en";
+  // Подписи роликов пишут в админке по-русски. На английской странице —
+  // перевод по slug, а если его нет — общий заголовок без русского текста.
+  const videos = (await getSiteVideos()).map((item) =>
+    en
+      ? { ...item, title: videoTitlesEn[item.slug]?.title ?? "Hotel video", summary: videoTitlesEn[item.slug]?.summary ?? "" }
+      : item,
+  );
   if (videos.length === 0) return null;
 
   const single = videos.length === 1;
 
   const intro = (
     <div>
-      <p className="eyebrow">Видео</p>
+      <p className="eyebrow">{en ? "Video" : "Видео"}</p>
       <h2
         id="video-title"
         className="mt-3 font-display text-[clamp(1.5rem,3vw,2.2rem)] leading-tight text-cream"
       >
-        Посмотрите, как здесь на самом деле
+        {en ? "See what it's really like" : "Посмотрите, как здесь на самом деле"}
       </h2>
       <p className="mt-3 text-[0.95rem] leading-relaxed text-muted">
-        Снято на телефон, без постановки и ретуши.
+        {en ? "Shot on a phone, no staging or retouching." : "Снято на телефон, без постановки и ретуши."}
       </p>
     </div>
   );
@@ -60,7 +69,7 @@ export async function VideoShowcase() {
               <LazyVideo
                 src={videos[0].video}
                 poster={videos[0].videoPoster || undefined}
-                label={`Смотреть видео: ${videos[0].title}`}
+                label={`${en ? "Watch video" : "Смотреть видео"}: ${videos[0].title}`}
               />
               <figcaption className="mt-4 lg:hidden">
                 <h3 className="font-display text-xl text-cream">{videos[0].title}</h3>
@@ -79,7 +88,7 @@ export async function VideoShowcase() {
                   <LazyVideo
                     src={item.video}
                     poster={item.videoPoster || undefined}
-                    label={`Смотреть видео: ${item.title}`}
+                    label={`${en ? "Watch video" : "Смотреть видео"}: ${item.title}`}
                   />
                   <figcaption className="mt-4">
                     <h3 className="font-display text-xl text-cream">{item.title}</h3>

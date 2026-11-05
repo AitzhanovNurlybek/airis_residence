@@ -1,22 +1,30 @@
 import { amenities } from "@/lib/site";
+import { amenitiesEn } from "@/lib/en";
+import type { Lang } from "@/lib/routes";
 import { amenityIcons } from "@/components/ui/Icons";
 import { SectionHead } from "@/components/ui/SectionHead";
 import { Reveal } from "@/components/ui/Reveal";
 
-export function Amenities() {
+export function Amenities({ lang = "ru" }: { lang?: Lang }) {
+  const en = lang === "en";
+  const items = en ? amenitiesEn : amenities;
   return (
     <section className="relative py-16 md:py-28">
       <div className="container-page">
         <SectionHead
-          eyebrow="Что входит"
-          title="Услуги отеля"
-          description="Без скрытых доплат: всё перечисленное входит в стоимость проживания."
+          eyebrow={en ? "What's included" : "Что входит"}
+          title={en ? "Hotel services" : "Услуги отеля"}
+          description={
+            en
+              ? "No hidden extras: everything listed here comes with your stay."
+              : "Без скрытых доплат: всё перечисленное входит в стоимость проживания."
+          }
           align="center"
         />
 
         {/* На телефоне две колонки: восемь строк подряд читаются как список дел */}
         <div className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-white/8 bg-white/8 md:mt-14 lg:grid-cols-4">
-          {amenities.map((item, i) => {
+          {items.map((item, i) => {
             const Icon = amenityIcons[item.icon];
             return (
               <Reveal key={item.title} delay={(i % 4) * 0.06} depth={false}>

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { rooms as fallbackRooms, site, type Room } from "./site";
 import { rooms as roomsWord } from "@/lib/plural";
+import { counterpart, langOf, type Lang } from "./routes";
+import { amenitiesEn, roomEn, siteEn } from "./en";
 
 export const BASE_URL = site.url;
 
@@ -19,6 +21,21 @@ export function pageMetadata({
   noindex?: boolean;
 }): Metadata {
   const url = new URL(path, BASE_URL).toString();
+  const lang = langOf(path);
+
+  // Пара на другом языке — для поисковика (hreflang). Русская версия —
+  // x-default: её показывают тем, чей язык не русский и не английский.
+  // Страница без пары (оферта, политика) остаётся без языковых ссылок.
+  const ruPath = counterpart(path, "ru");
+  const enPath = counterpart(path, "en");
+  const languages =
+    ruPath && enPath
+      ? {
+          ru: new URL(ruPath, BASE_URL).toString(),
+          en: new URL(enPath, BASE_URL).toString(),
+          "x-default": new URL(ruPath, BASE_URL).toString(),
+        }
+      : undefined;
 
   // Корневой лейаут дописывает к каждому заголовку «| Airis Residence».
   // Половина страниц называет отель и сама — в выдаче получалось
@@ -31,11 +48,12 @@ export function pageMetadata({
   return {
     title: brandAlreadyThere ? { absolute: title } : title,
     description,
-    alternates: { canonical: url },
+    alternates: languages ? { canonical: url, languages } : { canonical: url },
     robots: noindex ? { index: false, follow: false } : { index: true, follow: true },
     openGraph: {
       type: "website",
-      locale: site.locale,
+      locale: lang === "en" ? "en_US" : site.locale,
+      ...(languages ? { alternateLocale: lang === "en" ? [site.locale] : ["en_US"] } : {}),
       url,
       siteName: site.name,
       title,
@@ -61,25 +79,29 @@ const abs = (p: string) => new URL(p, BASE_URL).toString();
  * Главная разметка. Тип Hotel наследует LocalBusiness — Google
  * использует её для карточки организации и для блока «Отели».
  */
-export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
+export function hotelJsonLd(rooms: Room[] = fallbackRooms, lang: Lang = "ru") {
+  const en = lang === "en";
+  const roomPath = (slug: string) => (en ? `/en/rooms/${slug}` : `/nomera/${slug}`);
   return {
     "@context": "https://schema.org",
     "@type": "Hotel",
     "@id": `${BASE_URL}/#hotel`,
     name: site.name,
     legalName: site.legalName,
-    url: BASE_URL,
+    url: en ? abs("/en") : BASE_URL,
     image: [abs("/images/hotel/lobby.jpg"), abs("/images/rooms/standart/01.jpg")],
     // «34 номеров» — ошибка склонения, а описание из разметки читают и
     // поисковики, и ИИ-помощники, и оно же попадает в выдачу. Число здесь
     // всегда двузначное, поэтому правило простое: 2–4 в конце — «номера»,
     // кроме 12–14, где всегда «номеров».
-    description: `Отель ${site.name} в центре Алматы: ${site.roomsCount} ${roomsWord(site.roomsCount)}, завтрак включён, круглосуточная стойка регистрации. ${site.address.street}.`,
+    description: en
+      ? `${site.name} is a hotel in Almaty city centre: ${site.roomsCount} rooms, breakfast included, 24/7 front desk. ${siteEn.address.street}.`
+      : `Отель ${site.name} в центре Алматы: ${site.roomsCount} ${roomsWord(site.roomsCount)}, завтрак включён, круглосуточная стойка регистрации. ${site.address.street}.`,
     telephone: site.contacts.phonePrimaryRaw,
     email: site.contacts.email,
     priceRange: "₸₸",
     currenciesAccepted: "KZT",
-    paymentAccepted: site.policy.payment.join(", "),
+    paymentAccepted: (en ? siteEn.policy.payment : site.policy.payment).join(", "),
     checkinTime: site.policy.checkIn,
     checkoutTime: site.policy.checkOut,
     petsAllowed: site.policy.pets,
@@ -87,8 +109,8 @@ export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
     numberOfRooms: site.roomsCount,
     address: {
       "@type": "PostalAddress",
-      streetAddress: site.address.street,
-      addressLocality: site.address.city,
+      streetAddress: en ? siteEn.address.street : site.address.street,
+      addressLocality: en ? siteEn.address.city : site.address.city,
       addressRegion: site.address.region,
       postalCode: site.address.postalCode,
       addressCountry: site.address.country,
@@ -113,7 +135,16 @@ export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
       opens: "00:00",
       closes: "23:59",
     },
-    amenityFeature: [
+    amenityFeature: en
+      ? [
+          ...amenitiesEn.slice(0, 5).map((item) => ({
+            "@type": "LocationFeatureSpecification",
+            name: item.title,
+            value: true,
+          })),
+          { "@type": "LocationFeatureSpecification", name: "Free parking", value: true },
+        ]
+      : [
       { "@type": "LocationFeatureSpecification", name: "Бесплатный Wi-Fi", value: true },
       { "@type": "LocationFeatureSpecification", name: "Завтрак включён", value: true },
       { "@type": "LocationFeatureSpecification", name: "Кондиционер", value: true },
@@ -127,28 +158,31 @@ export function hotelJsonLd(rooms: Room[] = fallbackRooms) {
       price: room.price,
       priceCurrency: "KZT",
       availability: "https://schema.org/InStock",
-      url: abs(`/nomera/${room.slug}`),
+      url: abs(roomPath(room.slug)),
     })),
     sameAs: [site.contacts.whatsapp, site.address.mapUrl],
   };
 }
 
-export function roomJsonLd(room: Room) {
+export function roomJsonLd(room: Room, lang: Lang = "ru") {
+  const en = lang === "en";
+  const path = en ? `/en/rooms/${room.slug}` : `/nomera/${room.slug}`;
+  const text = en ? roomEn(room) : room;
   return {
     "@context": "https://schema.org",
     "@type": "HotelRoom",
-    "@id": `${BASE_URL}/nomera/${room.slug}#room`,
+    "@id": `${BASE_URL}${path}#room`,
     name: room.shortName,
-    description: room.description,
+    description: text.description,
     image: room.images.map(abs),
-    url: abs(`/nomera/${room.slug}`),
+    url: abs(path),
     occupancy: {
       "@type": "QuantitativeValue",
       maxValue: room.capacity,
       unitCode: "C62",
     },
-    bed: { "@type": "BedDetails", typeOfBed: room.beds },
-    amenityFeature: room.features.map((name) => ({
+    bed: { "@type": "BedDetails", typeOfBed: text.beds },
+    amenityFeature: text.features.map((name) => ({
       "@type": "LocationFeatureSpecification",
       name,
       value: true,
@@ -159,12 +193,12 @@ export function roomJsonLd(room: Room) {
       price: room.price,
       priceCurrency: "KZT",
       availability: "https://schema.org/InStock",
-      url: abs(`/nomera/${room.slug}`),
+      url: abs(path),
       priceSpecification: {
         "@type": "UnitPriceSpecification",
         price: room.price,
         priceCurrency: "KZT",
-        unitText: "за ночь",
+        unitText: en ? "per night" : "за ночь",
       },
     },
   };
