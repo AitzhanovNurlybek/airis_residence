@@ -230,32 +230,32 @@ def wa_link(phone: str) -> str:
 def front_desk_lines(*, request: str, room: str = "", guest: str = "", phone: str = "",
                      urgent: bool = False, booking_ref: str = "", arrival: str = "",
                      said: list[str] | None = None) -> list[str]:
-    """Сообщение стойке одним списком строк — его же повторяет утренняя сводка."""
-    lines = (["🛎 Стойке: гость сообщил о приезде", ""] if arrival
-             else ["🛎 Просьба гостя — нужен сотрудник", ""])
-    кто = ", ".join(x for x in (guest, phone) if x)
+    """Сообщение стойке — коротко, на один взгляд с телефона.
+
+    Было больше десяти строк со служебными пояснениями, и каждое приходило на
+    два телефона; 2026-11-06 отель сказал, что бот «работу не облегчает».
+    Теперь: что случилось, кто, что гость писал своими словами, ссылка, чтобы
+    ответить. Всё остальное — в переписке.
+    """
+    шапка = f"🛎 Приезд гостя: {arrival}" if arrival else "🛎 Нужна помощь стойки"
+    if urgent:
+        шапка += " · ⚡ Срочно, сегодня"
+    кто = " · ".join(x for x in (
+        ", ".join(x for x in (guest, phone) if x),
+        f"бронь {booking_ref}" if booking_ref else "",
+        f"номер {room}" if room else "",
+    ) if x)
+    lines = [шапка, request]
     if кто:
         lines.append(f"Гость: {кто}")
-    if booking_ref:
-        lines.append(f"Бронь: {booking_ref}")
-    if room:
-        lines.append(f"Живёт в номере: {room}")
-    if arrival:
-        lines.append(f"Приезд: {arrival}")
-    lines.append(f"{'Что передать' if arrival else 'Просьба'}: {request}")
-    if urgent:
-        lines.append("Срочно: нужно сегодня")
-    реплики = [" ".join(str(x).split())[:200] for x in (said or []) if str(x).strip()]
+    реплики = [" ".join(str(x).split())[:150] for x in (said or []) if str(x).strip()]
     if реплики:
         # Своими словами гостя, а не пересказом бота: «приедем к 10, сумки
         # оставим» стойка должна прочитать так, как обещали гостю.
-        lines += ["", "Гость писал:"] + [f"«{x}»" for x in реплики[-4:]]
+        lines.append("Писал: " + " ".join(f"«{x}»" for x in реплики[-2:]))
     ссылка = wa_link(phone)
-    lines += ["", "Вся переписка — в WhatsApp отеля, в чате с этим гостем."]
     if ссылка:
-        lines.append(f"Написать гостю: {ссылка}")
-    if not arrival:
-        lines.append("Свяжитесь с гостем или подойдите в номер — бот этого сделать не может.")
+        lines.append(f"Ответить гостю: {ссылка}")
     return lines
 
 

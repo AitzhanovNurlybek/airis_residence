@@ -62,8 +62,8 @@ BOOKING_CREATED = (
 #: предлагаем: отель просил говорить о нём, только когда гость спросит.
 BEFORE_ARRIVAL = (
     "{name}, завтра ждём вас в Airis Residence.\n\n"
-    "Бронь {number}, заезд с {check_in_time}, стойка работает круглосуточно.\n\n"
-    "Подскажите, во сколько примерно приедете? Предупредим стойку."
+    "Бронь {number}, заезд с {check_in_time}, заселяем круглосуточно.\n\n"
+    "Подскажите, во сколько примерно приедете?"
 )
 
 #: После выезда — уходит на следующий день.
@@ -101,8 +101,8 @@ BOOKING_CREATED_EN = (
 
 BEFORE_ARRIVAL_EN = (
     "{name}, we look forward to seeing you at Airis Residence tomorrow.\n\n"
-    "Booking {number}, check-in from {check_in_time}. The front desk is open 24/7.\n\n"
-    "What time do you expect to arrive? We'll let the front desk know."
+    "Booking {number}, check-in from {check_in_time}, we check guests in 24/7.\n\n"
+    "What time do you expect to arrive?"
 )
 
 AFTER_DEPARTURE_EN = (
