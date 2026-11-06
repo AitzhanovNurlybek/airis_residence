@@ -5281,16 +5281,17 @@ async def qa_reception_arrival() -> None:
             await ses.execute(_delete(FrontDeskNote).where(FrontDeskNote.chat_id.like("7701999000%")))
             await ses.commit()
 
-        # Просто время приезда через три дня — стойку сразу не дёргаем.
+        # Просто время приезда через три дня — тоже сразу (решение отеля 2026-11-06).
         ответ = await _tool_front_desk(
             {"name": "Айгерим", "phone": "+77019990000", "chat_id": чат},
             {"request": "Приедут около 10 утра, хотят оставить сумки до заезда", "needs_action": False,
              "arrival_date": день.isoformat(), "arrival_time": "около 10:00",
              "booking_ref": "20261018-509506-1"},
             said=["Здравствуйте", "мы пораньше приедем, часов в 10, сумки оставим можно?"])
-        check("время приезда без просьбы — стойке сразу НЕ уходит", len(ушло) == 0, str(len(ушло)))
-        check("модели: записано в утренний список, гостю «Записали, ждём вас»",
-              "утренн" in ответ and "Записали, ждём вас" in ответ and "не обещай" in ответ, ответ[:160])
+        check("время приезда без просьбы — стойке сразу", len(ушло) == 1, str(len(ушло)))
+        check("модели: гостю «Записали, ждём вас», ранний заезд не обещать",
+              "Записали, ждём вас" in ответ and "не обещай" in ответ, ответ[:160])
+        ушло.clear()
 
         # Просьба (ранний заезд) — сразу, коротко.
         ответ = await _tool_front_desk(
@@ -5342,7 +5343,7 @@ async def qa_reception_arrival() -> None:
         await _tool_front_desk({"name": "Поздний", "phone": "+77019990004", "chat_id": "77019990004qa@c.us"},
                                {"request": "Прилетают ночью, рейс в 3:40", "needs_action": False,
                                 "arrival_date": день.isoformat(), "arrival_time": "ночью, рейс в 3:40"})
-        check("ночной приезд через три дня — сразу не уходит", len(ушло) == 2, str(len(ушло)))
+        check("ночной приезд через три дня — тоже сразу", len(ушло) == 3, str(len(ушло)))
 
         ушло.clear()
         async with _S() as ses:
@@ -5462,15 +5463,15 @@ async def qa_arrival_from_booking() -> None:
         check("день приезда взят из брони", пометка is not None and пометка.arrival_date == день,
               str(пометка and пометка.arrival_date))
         check("и номер брони", пометка is not None and пометка.booking_ref == "QA-ARR-1")
-        check("ждёт утреннего списка", пометка is not None and not пометка.reminded)
-        check("стойку сразу не дёргаем", len(ушло) == 0, str(len(ушло)))
+        check("и напомнит утром в день приезда", пометка is not None and not пометка.reminded)
+        check("стойке ушло сразу", len(ушло) == 1, str(len(ушло)))
         check("модели — «Записали, ждём вас»", "Записали, ждём вас" in ответ, ответ[:120])
 
         # Брони нет — дня нет, значит в список не попадёт: передаём сразу.
         await _tool_front_desk(
             {"name": "Тест", "phone": "+77019990078", "chat_id": "77019990078qa@c.us"},
             {"request": "Приедут около 19:00", "needs_action": False, "arrival_time": "около 19:00"})
-        check("без брони и без даты — сразу стойке", len(ушло) == 1, str(len(ушло)))
+        check("без брони и без даты — тоже сразу", len(ушло) == 2, str(len(ушло)))
     finally:
         _nt._tell_hotel = было
         await _убрать()
