@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import './be-style.css';
 import { bookingEngineLanguage } from "@/lib/language";
 import { restoreUtm } from "@/lib/utm";
+import { BookingPageEvent } from "@/components/analytics/BookingPageEvent";
 
 export function BeBookingForm() {
     const pathname = usePathname();
@@ -60,6 +61,9 @@ export function BeBookingForm() {
     }, [pathname]);
 
     return (
-        <div ref={containerRef} id="be-booking-form" />
+        <>
+            <BookingPageEvent />
+            <div ref={containerRef} id="be-booking-form" />
+        </>
     );
 }
