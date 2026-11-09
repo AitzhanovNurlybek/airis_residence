@@ -55,9 +55,9 @@ from .dialogs import (
 )
 from .guest_messages import (
     CALL_NOT_ANSWERED,
-    CANT_ANSWER,
     FRONT_DESK_PHONE,
     UNREADABLE,
+    cant_answer,
     guest_language,
     in_language,
     render,
@@ -672,8 +672,8 @@ async def whatsapp_webhook(
                 f"обработка упала: {error}",
                 {"phone": message.phone, "name": message.sender_name, "chat_id": message.chat_id},
                 message.text or "")
-            reply = Reply(in_language(CANT_ANSWER, guest_language(message.text or "", message.phone),
-                                      phone=FRONT_DESK_PHONE))
+            reply = Reply(cant_answer(guest_language(message.text or "", message.phone),
+                                      FRONT_DESK_PHONE))
 
         # Пустой ответ — решение, а не сбой: на второй снимок подряд гость
         # уже получил «передали на стойку», третий такой же ни к чему.

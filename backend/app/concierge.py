@@ -35,6 +35,7 @@ from .guest_messages import (
     CANT_ANSWER,
     FRONT_DESK_PHONE,
     KAZAKH_LETTERS,
+    cant_answer,
     guest_language,
     in_language,
     language_of,
@@ -2076,7 +2077,7 @@ async def answer(
 
     async def _запасной(причина: str) -> dict[str, Any]:
         await _сказать_о_запасном_ответе(причина, guest, message)
-        return {"text": in_language(CANT_ANSWER, язык, phone=FRONT_DESK_PHONE),
+        return {"text": cant_answer(язык, FRONT_DESK_PHONE),
                 "ok": False, "reason": причина}
 
     if not settings.anthropic_api_key:
