@@ -136,6 +136,52 @@ FINAL_NOTE = """ЭТО ВТОРОЕ И ПОСЛЕДНЕЕ СООБЩЕНИЕ. П
 Поэтому: попрощайся, оставь дверь открытой и прямо скажи, что больше не побеспокоишь. Не повторяй первое сообщение и не задавай новых вопросов по существу."""
 
 
+#: Причины «не писать», которые не решение модели, а сбой по дороге к ней.
+#: Их не запоминаем: следующий запуск спросит снова.
+_СБОИ = ("нет ключа Anthropic", "модель ответила", "модель недоступна",
+         "ответ модели не разобран", "модель согласилась писать, но текста не дала")
+
+
+async def _decision_key(chat_id: str, step: int) -> str:
+    """Ключ одной паузы в разговоре: чат, последняя реплика в нём и шаг дожима.
+
+    Любая новая реплика — гостя, бота, сотрудника, сам дожим — меняет
+    последнюю запись, и с ней ключ: решение «не писать» живёт ровно одну паузу.
+    """
+    from .db import SessionLocal  # noqa: PLC0415 — как в остальных помощниках
+
+    async with SessionLocal() as session:
+        last = (await session.execute(
+            select(func.max(DialogMessage.id))
+            .where(DialogMessage.channel == CHANNEL)
+            .where(DialogMessage.chat_id == chat_id)
+        )).scalar()
+    return f"fu-no:{chat_id}:{last}:{step}"[:120]
+
+
+async def _decided_not_to_write(key: str) -> bool:
+    """Модель уже сказала «не писать» по этой паузе."""
+    from .db import ChannelReceipt, SessionLocal  # noqa: PLC0415
+
+    async with SessionLocal() as session:
+        return await session.get(ChannelReceipt, key) is not None
+
+
+async def _remember_not_to_write(key: str) -> None:
+    """Запомнить «не писать», чтобы через час не спрашивать о том же.
+
+    До 2026-11-23 решение «не писать» нигде не оставалось, и каждый
+    ежечасный запуск спрашивал модель о той же паузе заново, до 72 часов
+    подряд. За 60 дней это около 1030 обращений к модели ради 12 отправленных
+    дожимов: медиана 39 вопросов на один разговор при одном и том же ответе.
+    Это была самая дорогая часть счёта Anthropic.
+    """
+    from .db import SessionLocal  # noqa: PLC0415
+    from .dialogs import seen_before  # noqa: PLC0415
+
+    await seen_before(SessionLocal, "followup", key)
+
+
 def _who(chat_id: str) -> str:
     """Как назвать чат в логе и отчёте.
 
@@ -416,12 +462,19 @@ async def plan(session: AsyncSession, settings: Any) -> list[Nudge]:
         talk = await _history(session, chat_id)
         if not talk:
             continue
+        # По этой паузе модель уже ответила «не писать» — спрашивать снова
+        # бессмысленно: разговор тот же, ответ будет тот же, а вопрос платный.
+        ключ = await _decision_key(chat_id, step)
+        if await _decided_not_to_write(ключ):
+            continue
         язык = guest_language(
             "", chat_id.split("@")[0],
             [m["text"] for m in reversed(talk) if m["role"] == "Гость"])
         write, why, text = await _decide(settings, talk, hours, step, brief, язык)
         if not write:
             logger.info("Дожим %s: не пишем — %s", _who(chat_id), why or "разговор закончен")
+            if not why.startswith(_СБОИ):
+                await _remember_not_to_write(ключ)
             continue
         out.append(Nudge(chat_id=chat_id, text=text, step=step, reason=why))
     return out

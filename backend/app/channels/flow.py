@@ -26,7 +26,15 @@ from ..almaty import today as hotel_today
 from ..concierge import answer
 from ..db import SessionLocal
 from ..corp_guest import find_corporate
-from ..dialogs import guest_texts, last_message_at, load_history, pause_hours, save_turn, seen_before
+from ..dialogs import (
+    guest_texts,
+    last_message_at,
+    load_history,
+    pause_hours,
+    remember_guest,
+    save_turn,
+    seen_before,
+)
 from ..knowledge import KnowledgeUnavailable, load_facts
 from ..payment_docs import match_and_apply, read_document
 from ..guest_messages import (
@@ -67,6 +75,48 @@ class Reply:
 #: гость прислал три снимка брони и получил три одинаковых «Получили ваш
 #: файл» подряд — по-русски.
 FILE_WINDOW = 600
+
+#: Документы, текст которых читаем сами, без модели. Реквизиты для счёта
+#: компании присылают вордом (2026-11-16 стойка просила их в чате), а модель
+#: читает только PDF и картинки — такой файл уходил на стойку непрочитанным.
+TEXT_DOCS = (".docx", ".txt")
+#: Сколько текста документа класть в разговор. Реквизиты — полстраницы;
+#: длиннее — уже не реквизиты, и в каждом следующем ответе этот текст снова
+#: уходит в модель.
+DOC_TEXT_LIMIT = 3000
+#: Распакованный docx больше этого — не реквизиты, а что-то, что читать незачем.
+DOCX_XML_LIMIT = 5 * 1024 * 1024
+
+
+def document_text(data: bytes, filename: str) -> str:
+    """Текст из docx или txt. Пусто — не текстовый документ или прочитать не вышло."""
+    import html  # noqa: PLC0415
+    import io  # noqa: PLC0415
+    import re  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+
+    low = (filename or "").lower()
+    if low.endswith(".txt"):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("cp1251", errors="replace")
+    elif low.endswith(".docx"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                if archive.getinfo("word/document.xml").file_size > DOCX_XML_LIMIT:
+                    return ""
+                xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
+        except (zipfile.BadZipFile, KeyError, OSError, ValueError):
+            return ""
+        xml = re.sub(r"</w:p>|<w:br[^>]*/>", "\n", xml)
+        xml = re.sub(r"<w:tab[^>]*/>|</w:tc>", "\t", xml)
+        text = html.unescape(re.sub(r"<[^>]+>", "", xml))
+    else:
+        return ""
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text).strip()
+    return text[:DOC_TEXT_LIMIT]
 
 
 async def _language(message: Incoming) -> str:
@@ -151,6 +201,15 @@ async def handle_text(settings, booking, message: Incoming, *, language: str = "
         )
     else:
         log.warning("консьерж не ответил: %s", reply.get("reason"))
+        # Реплика гостя без ответа — всё равно в историю. Иначе, пока бот
+        # лежит (10–23 ноября 2026 кончились кредиты), гостя в базе нет вовсе:
+        # ответ сотрудника не считается ответом в живом разговоре и бота не
+        # останавливает, а вернувшийся бот не знает, о чём его спрашивали.
+        if message.text:
+            try:
+                await remember_guest(SessionLocal, CHANNEL, message.chat_id, message.text)
+            except Exception as error:  # noqa: BLE001 — гостю ответить важнее
+                log.warning("реплика без ответа не сохранилась: %s", error)
 
     return Reply(reply["text"], photos[:MAX_PHOTOS])
 
@@ -174,6 +233,18 @@ async def handle_file(settings, booking, channel: WhatsAppChannel, message: Inco
     except Exception as error:  # noqa: BLE001
         log.warning("файл не скачался: %s", error)
         return await _передали("файл не скачался, бот его не видел")
+
+    имя_файла = message.file_name or ""
+    if имя_файла.lower().endswith(TEXT_DOCS):
+        текст_документа = document_text(data, имя_файла)
+        if not текст_документа:
+            return await _передали("документ не прочитался")
+        # Дальше — обычная реплика: консьерж видит текст, передаёт стойке, что
+        # нужно, и помнит документ в разговоре.
+        пометка = (f"[Гость прислал документ «{имя_файла[:80]}». Текст документа:\n"
+                   f"{текст_документа}\n— конец документа]")
+        текст = f"{пометка}\n{message.text}" if message.text else пометка
+        return await handle_text(settings, booking, replace(message, text=текст), language=язык)
 
     try:
         doc = await read_document(settings, data, message.file_name or "document.pdf")
