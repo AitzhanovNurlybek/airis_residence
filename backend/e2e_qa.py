@@ -5263,7 +5263,7 @@ async def qa_reception_arrival() -> None:
           {"arrival_date", "arrival_time", "booking_ref"} <= set(FRONT_DESK_TOOL["input_schema"]["properties"]))
     check("в напоминании порядка — приезд сначала стойке",
           "Гость сообщает, когда приедет" in FIRST_ACTION and "СНАЧАЛА вызови front_desk_request" in FIRST_ACTION)
-    check("ранний заезд не обещать", "Ранний заезд не обещай" in FIRST_ACTION)
+    check("ранний заезд не обещать", "ранний заезд не обещай" in FIRST_ACTION.lower())
 
     ушло: list[str] = []
 
@@ -6643,6 +6643,38 @@ async def qa_text_documents() -> None:
           "без номера документа, ИИН" in EXTRACT_PROMPT)
 
 
+async def qa_late_arrival() -> None:
+    """Опоздание — «спасибо, что предупредили», без советов про вещи до 14:00.
+
+    2026-11-23 в 23:39 гость написал «Поезд задерживается на 40 минут», а бот
+    ответил «если приедете раньше 14:00 — вещи можно оставить на стойке».
+    """
+    head("Опоздание и подсказка про вещи")
+
+    from app.concierge import _tool_front_desk  # noqa: PLC0415
+    from app.front_desk import before_check_in  # noqa: PLC0415
+
+    check("«около 10:00» — раньше заезда", before_check_in("около 10:00"))
+    check("«в 8 вечера» — нет", not before_check_in("в 8 вечера"))
+    check("«ночью» — раньше заезда", before_check_in("ночью"))
+    check("без времени — нет", not before_check_in(""))
+
+    гость = {"phone": "", "name": "", "chat_id": ""}
+    поезд = await _tool_front_desk(гость, {
+        "request": "Гость сообщает, что поезд задерживается на 40 минут",
+        "arrival_date": str(hotel_today()), "needs_action": False},
+        said=["Добрый вечер. Поезд задерживается на 40 минут"])
+    check("опоздание: просят ответить «спасибо, что предупредили»",
+          "Спасибо, что предупредили" in поезд, поезд[:200])
+    check("опоздание без времени: про вещи и ранний заезд не писать",
+          "ранний заезд и вещи не пиши" in поезд and "оставить вещи до заезда можно" not in поезд,
+          поезд[:300])
+    утро = await _tool_front_desk(гость, {
+        "request": "Приезд", "arrival_date": str(hotel_today() + timedelta(days=1)),
+        "arrival_time": "9:00", "needs_action": False})
+    check("приезд в 9 утра: про вещи подсказка есть", "оставить вещи до заезда можно" in утро, утро[:300])
+
+
 async def _with_phrase(section) -> None:  # noqa: ANN001
     """Раздел о запасной фразе — с фразой, даже если включён тихий режим.
 
@@ -6762,6 +6794,7 @@ async def main() -> int:
     await qa_fallback_once()
     await qa_grid_and_details()
     await qa_text_documents()
+    await qa_late_arrival()
 
     total = passed + len(failed)
     print(f"\n── Итог ──\n  {passed} из {total}")

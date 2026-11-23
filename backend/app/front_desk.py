@@ -46,23 +46,17 @@ _НОЧЬ = re.compile(r"ноч|night|midnight|полуноч|рано утро�
 _ПОСЛЕ_ПОЛУДНЯ = re.compile(r"вечер|дня|после обеда|evening|afternoon|tonight|кешке|түстен кейін", re.I)
 
 
-def early_arrival(time_text: str) -> bool:
-    """Приезд ночью или до 9 утра: утренний список в 07:30 для него поздно.
-
-    «около 2:00», «around 2am», «ночью, рейс в 3:40», «в 5 утра» — рано;
-    «в 8 вечера», «около 10:00», «after 18:00» — нет.
-    """
+def _hour(time_text: str) -> int | None:
+    """Час приезда из слов гостя, 0–23. None — часа в тексте нет."""
     text = time_text or ""
-    if _НОЧЬ.search(text):
-        return True
     совпадения = list(_ВРЕМЯ.finditer(text))
     if not совпадения:
-        return False
+        return None
     # Сначала «10:30» и «2am», потом голые числа: «в 5 утра».
     лучшее = next((m for m in совпадения if m.group(2) or m.group(3)), совпадения[0])
     час = int(лучшее.group(1))
     if час > 23:
-        return False
+        return None
     суффикс = (лучшее.group(3) or "").lower()
     if суффикс.startswith("p") and час < 12:
         час += 12
@@ -70,7 +64,33 @@ def early_arrival(time_text: str) -> bool:
         час = 0
     elif not суффикс and час < 12 and _ПОСЛЕ_ПОЛУДНЯ.search(text):
         час += 12
-    return час < 9
+    return час
+
+
+def early_arrival(time_text: str) -> bool:
+    """Приезд ночью или до 9 утра: утренний список в 07:30 для него поздно.
+
+    «около 2:00», «around 2am», «ночью, рейс в 3:40», «в 5 утра» — рано;
+    «в 8 вечера», «около 10:00», «after 18:00» — нет.
+    """
+    if _НОЧЬ.search(time_text or ""):
+        return True
+    час = _hour(time_text)
+    return час is not None and час < 9
+
+
+def before_check_in(time_text: str) -> bool:
+    """Гость приезжает раньше 14:00 — тогда к месту сказать про вещи и ранний заезд.
+
+    2026-11-23 гость написал в полночь «поезд задерживается на 40 минут»,
+    а бот ответил «если приедете раньше 14:00 — вещи можно оставить».
+    Подсказку про вещи модель повторяла всегда, даже когда к делу она не
+    относилась. Нет времени в словах гостя — и подсказки нет.
+    """
+    if _НОЧЬ.search(time_text or ""):
+        return True
+    час = _hour(time_text)
+    return час is not None and час < 14
 
 
 async def save_note(*, chat_id: str, phone: str, guest_name: str, request: str,
