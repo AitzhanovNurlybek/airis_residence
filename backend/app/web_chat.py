@@ -20,21 +20,22 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 
 from . import almaty
 from .booking_system import get_booking_system
 from .concierge import WEB_CHANNEL, WEB_WHATSAPP, answer
 from .config import Settings, get_settings
 from . import db as _db
-from .db import ChannelReceipt
-from .dialogs import load_history, save_turn
+from .db import ChannelReceipt, DialogMessage
+from .dialogs import CONTINUES_FOR, _openable, content_of, save_turn
 from .throttle import client_ip
 
 logger = logging.getLogger(__name__)
@@ -70,36 +71,65 @@ def _address_key(request: Request, settings: Settings) -> str:
     return hashlib.sha256(f"{соль}|{client_ip(request)}".encode()).hexdigest()[:16]
 
 
-async def _limit(address: str, session_id: str, settings: Settings) -> str:
-    """Какой предел исчерпан ('' — никакой)."""
+async def _open_turn(
+    address: str, session_id: str, settings: Settings, depth: int
+) -> tuple[str, list[dict[str, Any]]]:
+    """Пределы, отметка и история — одним соединением.
+
+    База в Сиднее, функции на Vercel — в США: каждый запрос в базу — перелёт
+    через океан (~0,25 с). Сначала здесь было три отдельных подсчёта, отметка
+    и чтение истории в разных соединениях — 10 перелётов, и ответ в чате шёл
+    10 с (замер 2026-11-25). Теперь три предела считаются одним запросом,
+    а отметка и история идут в той же сессии.
+
+    Возвращает (исчерпанный предел или '', история для модели).
+    """
     if not settings.web_chat_enabled:
-        return "off"
+        return "off", []
     сейчас = almaty.now()
     сутки = сейчас - timedelta(days=1)
     полночь = сейчас.replace(hour=0, minute=0, second=0, microsecond=0)
-    base = select(func.count()).select_from(ChannelReceipt).where(ChannelReceipt.channel == RECEIPTS)
+    t = ChannelReceipt.created_at
     async with _db.SessionLocal() as db:
-        за_день = (await db.execute(base.where(ChannelReceipt.created_at >= полночь))).scalar_one()
+        за_день, с_адреса, за_визит = (
+            await db.execute(
+                select(
+                    func.count().filter(t >= полночь),
+                    func.count().filter(and_(t >= сутки, ChannelReceipt.message_id.like(f"{address}|%"))),
+                    func.count().filter(and_(t >= сутки, ChannelReceipt.message_id.like(f"%|{session_id}|%"))),
+                ).where(ChannelReceipt.channel == RECEIPTS, t >= min(полночь, сутки))
+            )
+        ).one()
         if за_день >= settings.web_chat_daily_limit:
-            return "day"
-        с_адреса = (await db.execute(base.where(
-            ChannelReceipt.created_at >= сутки,
-            ChannelReceipt.message_id.like(f"{address}|%")))).scalar_one()
+            return "day", []
         if с_адреса >= PER_ADDRESS_DAY:
-            return "address"
-        за_визит = (await db.execute(base.where(
-            ChannelReceipt.created_at >= сутки,
-            ChannelReceipt.message_id.like(f"%|{session_id}|%")))).scalar_one()
+            return "address", []
         if за_визит >= PER_VISIT:
-            return "visit"
-    return ""
+            return "visit", []
 
-
-async def _count(address: str, session_id: str) -> None:
-    async with _db.SessionLocal() as db:
         db.add(ChannelReceipt(message_id=f"{address}|{session_id}|{uuid.uuid4().hex}"[:120],
                               channel=RECEIPTS))
+        rows = (
+            await db.execute(
+                select(DialogMessage)
+                .where(
+                    DialogMessage.channel == WEB_CHANNEL,
+                    DialogMessage.chat_id == session_id,
+                    DialogMessage.created_at >= сейчас - CONTINUES_FOR,
+                )
+                .order_by(DialogMessage.id.desc())
+                .limit(max(0, depth))
+            )
+        ).scalars().all()
         await db.commit()
+    history = [{"role": r.role, "content": content_of(r.content)} for r in reversed(rows)]
+    return "", _openable(history)
+
+
+async def _limit(address: str, session_id: str, settings: Settings) -> str:
+    """Какой предел исчерпан ('' — никакой). Для проверок: пишет отметку."""
+    предел, _ = await _open_turn(address, session_id, settings, 0)
+    return предел
 
 
 def _for_site(text: str) -> str:
@@ -112,24 +142,35 @@ def _for_site(text: str) -> str:
 async def web_chat(
     data: WebChatIn,
     request: Request,
+    response: Response,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     message = data.message.strip()
     if not message:
         return {"text": "", "ok": False}
 
+    # Server-Timing: в DevTools видно, куда ушли секунды ответа.
+    t0 = time.perf_counter()
+    фазы: list[str] = []
+
+    def отметить(имя: str) -> None:
+        nonlocal t0
+        t = time.perf_counter()
+        фазы.append(f"{имя};dur={(t - t0) * 1000:.0f}")
+        t0 = t
+
     address = _address_key(request, settings)
+    depth = max(0, settings.concierge_history_depth)
     try:
-        предел = await _limit(address, data.session, settings)
+        предел, history = await _open_turn(address, data.session, settings, depth)
     except Exception as error:  # noqa: BLE001 — без базы считать нечем, не рискуем
         logger.warning("Чат на сайте: пределы не посчитаны: %s", error)
-        предел = "day"
+        предел, history = "day", []
+    отметить("db")
     if предел:
+        response.headers["Server-Timing"] = ", ".join(фазы)
         return {"text": LIMIT_TEXT[предел], "ok": False, "limited": True}
 
-    await _count(address, data.session)
-    depth = max(0, settings.concierge_history_depth)
-    history = await load_history(_db.SessionLocal, WEB_CHANNEL, data.session, depth)
     try:
         reply = await answer(
             settings,
@@ -145,12 +186,15 @@ async def web_chat(
         from .concierge import web_cant_answer  # noqa: PLC0415
 
         return {"text": web_cant_answer(), "ok": False}
+    отметить("model")
 
     if reply.get("ok") and reply.get("messages"):
         try:
             await save_turn(_db.SessionLocal, WEB_CHANNEL, data.session, reply["messages"], len(history))
         except Exception as error:  # noqa: BLE001 — гость ответ получит, история — нет
             logger.warning("Чат на сайте: история не сохранена: %s", error)
+    отметить("save")
+    response.headers["Server-Timing"] = ", ".join(фазы)
 
     photos = [
         {"url": p.get("url", ""), "room": p.get("room", "")}
