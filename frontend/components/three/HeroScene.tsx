@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Float, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
@@ -12,6 +12,10 @@ import * as THREE from "three";
  *
  * Реагирует на: прокрутку страницы (вращение + отъезд камеры)
  * и на положение курсора (лёгкий параллакс).
+ *
+ * Рисует кадры, только пока hero виден и вкладка открыта. Раньше сцена
+ * крутила 60 кадров в секунду всё время, пока открыта главная, — это
+ * и было подтормаживание при прокрутке ниже (2026-11-24).
  */
 
 const WINE = "#a01a54";
@@ -87,7 +91,8 @@ function Panel({
   scale?: number;
   tone?: "dark" | "wine" | "sand";
 }) {
-  const color = tone === "wine" ? WINE : tone === "sand" ? "#3a3128" : "#1a151a";
+  const color =
+    tone === "wine" ? WINE : tone === "sand" ? "#3a3128" : "#1a151a";
   return (
     <Float speed={1.1} rotationIntensity={0.25} floatIntensity={0.5}>
       <RoundedBox
@@ -129,19 +134,49 @@ function Rig({ scrollRef }: { scrollRef: React.RefObject<number> }) {
         3,
         delta,
       );
-      group.current.position.y = THREE.MathUtils.damp(group.current.position.y, progress * 1.4, 3, delta);
+      group.current.position.y = THREE.MathUtils.damp(
+        group.current.position.y,
+        progress * 1.4,
+        3,
+        delta,
+      );
     }
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, 7 + progress * 2.5, 3, delta);
+    camera.position.z = THREE.MathUtils.damp(
+      camera.position.z,
+      7 + progress * 2.5,
+      3,
+      delta,
+    );
     camera.lookAt(0, 0, 0);
   });
 
   return (
     <group ref={group}>
       <Arch />
-      <Panel position={[-2.85, 0.15, 0.4]} rotation={[0, 0.42, -0.06]} tone="dark" scale={1.05} />
-      <Panel position={[2.85, -0.15, 0.4]} rotation={[0, -0.42, 0.06]} tone="dark" scale={1.05} />
-      <Panel position={[-1.35, -0.55, 1.5]} rotation={[0, 0.22, 0.04]} tone="wine" scale={0.7} />
-      <Panel position={[1.5, 0.6, 1.7]} rotation={[0, -0.26, -0.05]} tone="sand" scale={0.62} />
+      <Panel
+        position={[-2.85, 0.15, 0.4]}
+        rotation={[0, 0.42, -0.06]}
+        tone="dark"
+        scale={1.05}
+      />
+      <Panel
+        position={[2.85, -0.15, 0.4]}
+        rotation={[0, -0.42, 0.06]}
+        tone="dark"
+        scale={1.05}
+      />
+      <Panel
+        position={[-1.35, -0.55, 1.5]}
+        rotation={[0, 0.22, 0.04]}
+        tone="wine"
+        scale={0.7}
+      />
+      <Panel
+        position={[1.5, 0.6, 1.7]}
+        rotation={[0, -0.26, -0.05]}
+        tone="sand"
+        scale={0.62}
+      />
       <Dust />
     </group>
   );
@@ -149,10 +184,25 @@ function Rig({ scrollRef }: { scrollRef: React.RefObject<number> }) {
 
 export default function HeroScene() {
   const scrollRef = useRef(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) =>
+      setVisible(entry.isIntersecting),
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const onScroll = () => {
-      scrollRef.current = Math.min(1, window.scrollY / (window.innerHeight || 1));
+      scrollRef.current = Math.min(
+        1,
+        window.scrollY / (window.innerHeight || 1),
+      );
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -160,21 +210,44 @@ export default function HeroScene() {
   }, []);
 
   return (
-    <Canvas
-      className="absolute inset-0"
-      dpr={[1, 1.75]}
-      camera={{ position: [0, 0, 7], fov: 42 }}
-      gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
-      style={{ pointerEvents: "none" }}
-    >
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[4, 6, 5]} intensity={1.1} color="#fff3e2" />
-      <pointLight position={[-5, -2, 3]} intensity={38} color={WINE} distance={16} decay={2} />
-      <pointLight position={[5, 3, -2]} intensity={26} color={SAND} distance={18} decay={2} />
-      <Rig scrollRef={scrollRef} />
-      {/* Цвет тумана обязан совпадать с --color-ink-950, иначе на границе
+    <div ref={wrapRef} className="absolute inset-0">
+      <Canvas
+        className="absolute inset-0"
+        frameloop={visible ? "always" : "never"}
+        dpr={[1, 1.5]}
+        camera={{ position: [0, 0, 7], fov: 42 }}
+        gl={{
+          antialias: true,
+          alpha: true,
+          powerPreference: "high-performance",
+        }}
+        style={{ pointerEvents: "none" }}
+      >
+        <ambientLight intensity={0.35} />
+        <directionalLight
+          position={[4, 6, 5]}
+          intensity={1.1}
+          color="#fff3e2"
+        />
+        <pointLight
+          position={[-5, -2, 3]}
+          intensity={38}
+          color={WINE}
+          distance={16}
+          decay={2}
+        />
+        <pointLight
+          position={[5, 3, -2]}
+          intensity={26}
+          color={SAND}
+          distance={18}
+          decay={2}
+        />
+        <Rig scrollRef={scrollRef} />
+        {/* Цвет тумана обязан совпадать с --color-ink-950, иначе на границе
           сцены и страницы видно стык */}
-      <fog attach="fog" args={["#1a1417", 8, 17]} />
-    </Canvas>
+        <fog attach="fog" args={["#1a1417", 8, 17]} />
+      </Canvas>
+    </div>
   );
 }

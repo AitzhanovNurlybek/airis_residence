@@ -10,12 +10,16 @@ import Lenis from "lenis";
  */
 export function SmoothScroll() {
   useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     if (reduced) return;
 
+    // Раньше каждый поворот колеса доезжал 1,15 с — на слух «плавно», а на
+    // деле страница отставала от руки и это читалось как лаг (2026-11-24).
+    // lerp 0.14: плавность остаётся, догоняет за ~0,3 с.
     const lenis = new Lenis({
-      duration: 1.15,
-      easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      lerp: 0.14,
       smoothWheel: true,
       // На тач-устройствах нативный скролл ощущается лучше и не ломает fixed-элементы.
       syncTouch: false,

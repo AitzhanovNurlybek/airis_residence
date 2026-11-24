@@ -42,7 +42,16 @@ export function Header({ lang = "ru" }: { lang?: Lang }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
+    // Плавный скролл шлёт событие каждый кадр. Состояние трогаем только
+    // при смене, иначе React каждый кадр перепроверяет шапку — это было
+    // заметно на слабых телефонах (замер 2026-11-25).
+    let last: boolean | null = null;
+    const onScroll = () => {
+      const v = window.scrollY > 24;
+      if (v === last) return;
+      last = v;
+      setScrolled(v);
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);

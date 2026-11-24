@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import dynamic from "next/dynamic";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
 
 import { site, priceFrom as fallbackPriceFrom, formatPrice } from "@/lib/site";
@@ -80,6 +80,20 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
   // и мешает дотянуться до кнопок при коротком свайпе.
   const parallax = !reduced && isDesktop;
 
+  // Сцену WebGL подключаем, когда браузер освободился после загрузки:
+  // three.js — самый тяжёлый кусок главной, и в первые секунды он спорил
+  // за процессор с гидратацией и виджетом бронирования (2026-11-25).
+  const [sceneReady, setSceneReady] = useState(false);
+  useEffect(() => {
+    if (!parallax) return;
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(() => setSceneReady(true), { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(() => setSceneReady(true), 1500);
+    return () => clearTimeout(id);
+  }, [parallax]);
+
   return (
     <section
       ref={ref}
@@ -106,7 +120,7 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
       <span className="grain-layer -z-10" />
 
       {/* WebGL-слой — только десктоп */}
-      {parallax && (
+      {parallax && sceneReady && (
         <div className="pointer-events-none absolute inset-0 -z-10 opacity-70 mix-blend-screen">
           <HeroScene />
         </div>

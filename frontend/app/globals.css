@@ -230,6 +230,54 @@ svg {
   }
 }
 
+/* Отель в 3D (components/hotel3d): отъезд из номера к плану этажа.
+   Два одинаковых кадра, чтобы анимация запускалась заново при каждом выходе. */
+@keyframes h3d-out-a {
+  from {
+    transform: scale(2.6);
+    opacity: 0.35;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes h3d-out-b {
+  from {
+    transform: scale(2.6);
+    opacity: 0.35;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* Кружки номеров появляются один раз — без бесконечной пульсации. */
+@keyframes h3d-pop {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.h3d-pop {
+  animation: h3d-pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+@keyframes h3d-wait-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.h3d-wait {
+  animation: h3d-wait-in 0.3s ease 1s both;
+}
+
 @keyframes airis-scroll-hint {
   0% {
     transform: translateY(-60%);
