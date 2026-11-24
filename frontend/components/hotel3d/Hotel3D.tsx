@@ -6,6 +6,8 @@ import { useMemo, useRef, useState } from "react";
 
 import points from "@/lib/hotel3d-points.json";
 
+import { ASSISTANT_NAME, ReceptionChat } from "./ReceptionChat";
+
 /**
  * Отель в 3D: здание → «снимаем крышу» → этажи → заходим в номер.
  *
@@ -48,7 +50,8 @@ export type CatInfo = {
 
 type Point = { id: string; cat: Cat; x: number; y: number; area: number };
 type Floor = 1 | 2 | 3;
-type View = "hotel" | Floor;
+type View = "hotel" | Floor | "lobby";
+type Spot = { x: number; y: number };
 type Tod = "eve" | "day";
 type Step = { src: string; then?: () => void };
 
@@ -83,11 +86,16 @@ const CAT_ORDER: Cat[] = [
   "single",
 ];
 const VIEW_LABEL: Record<string, string> = {
+  lobby: "Ресепшн",
   hotel: "Здание",
   "3": "3 этаж",
   "2": "2 этаж",
   "1": "1 этаж",
 };
+/** Кнопки снизу/сбоку: ресепшн отдельно от этажей (он не в цепочке крыши). */
+const NAV: View[] = ["lobby", "hotel", 3, 2, 1];
+/** Входные двери лобби на виде сверху (hero-night/day, кадр в кадр). */
+const ENTRANCE: Spot = { x: 52.5, y: 76 };
 /** Наезд камеры на номер перед роликом входа. */
 const ZOOM = 2.6;
 const ZOOM_MS = 800;
@@ -95,9 +103,10 @@ const IMG_SIZES = "(max-width: 1280px) 100vw, 1280px";
 
 const slug = (cat: Cat) => cat.replace("_", "-");
 
-/** Кадр: hotel:<tod> · floor:<n>:<tod> · room:<slug>:<tod>. */
+/** Кадр: hotel:<tod> · lobby:<tod> · floor:<n>:<tod> · room:<slug>:<tod>. */
 function keyOf(view: View, room: Point | null, tod: Tod) {
   if (room) return `room:${slug(room.cat)}:${tod}`;
+  if (view === "lobby") return `lobby:${tod}`;
   return view === "hotel" ? `hotel:${tod}` : `floor:${view}:${tod}`;
 }
 
@@ -105,6 +114,7 @@ function keyOf(view: View, room: Point | null, tod: Tod) {
 function basePath(key: string) {
   const [kind, a, b] = key.split(":");
   if (kind === "hotel") return a === "day" ? "/3d/hero-day" : "/3d/hero-night";
+  if (kind === "lobby") return `/3d/reception-${a}`;
   if (kind === "floor")
     return b === "day" ? `/3d/floor-${a}-day` : `/3d/floor-${a}`;
   return `/3d/rooms/${a}-${b}`;
@@ -113,6 +123,8 @@ function basePath(key: string) {
 function altOf(key: string) {
   const [kind, a] = key.split(":");
   if (kind === "hotel") return "Отель Airis Residence в Алматы, вид сверху";
+  if (kind === "lobby")
+    return `Стойка регистрации Airis Residence, администратор ${ASSISTANT_NAME}`;
   if (kind === "floor") return `${a} этаж отеля Airis Residence, вид без крыши`;
   return "Номер отеля Airis Residence внутри";
 }
@@ -135,12 +147,19 @@ function prefersReducedMotion() {
   }
 }
 
-export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
+export function Hotel3D({
+  cats,
+  intro: withIntro = true,
+}: {
+  cats: Record<Cat, CatInfo>;
+  /** Вступительный облёт. На главной его не надо: он и так идёт в первом экране. */
+  intro?: boolean;
+}) {
   const [view, setView] = useState<View>("hotel");
   const [tod, setTod] = useState<Tod>("eve");
   const [room, setRoom] = useState<Point | null>(null);
-  const [zoom, setZoom] = useState<Point | null>(null);
-  const [back, setBack] = useState<{ p: Point; n: number } | null>(null);
+  const [zoom, setZoom] = useState<Spot | null>(null);
+  const [back, setBack] = useState<{ p: Spot; n: number } | null>(null);
   const [mounted, setMounted] = useState<string[]>(["hotel:eve"]);
   const [busy, setBusy] = useState(false);
   const [videoOn, setVideoOn] = useState(false);
@@ -205,7 +224,7 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
     if (started.current) return;
     started.current = true;
     window.setTimeout(() => need("floor:3:eve", "hotel:day"), 1500);
-    if (prefersReducedMotion()) return;
+    if (!withIntro || prefersReducedMotion()) return;
     let seen = false;
     try {
       seen = sessionStorage.getItem("airis3d-intro") === "1";
@@ -228,6 +247,21 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
 
   function navigate(from: View, target: View) {
     if (target === from) return;
+    if (target === "lobby") {
+      enterLobby(from);
+      return;
+    }
+    if (from === "lobby") {
+      // Со стойки — наплывом; к зданию ещё и с отъездом от дверей.
+      const k = keyOf(target, null, tod);
+      ready(k).then(() => {
+        need(k);
+        if (target === "hotel")
+          setBack((b) => ({ p: ENTRANCE, n: (b?.n ?? 0) + 1 }));
+        setView(target);
+      });
+      return;
+    }
     const a = ORDER.indexOf(from);
     const b = ORDER.indexOf(target);
     if (b < a) {
@@ -266,6 +300,45 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
       return;
     }
     navigate(view, target);
+  }
+
+  /** Войти в отель: наезд на двери → проход к стойке → приветствие. */
+  function enterLobby(from: View) {
+    const k = keyOf("lobby", null, tod);
+    const walk = `/3d/lobby-in-${tod}.mp4`;
+    const greet = { src: `/3d/greet-${tod}.mp4` };
+    need(k);
+    setHover(null);
+    setFocusCat(null);
+    if (from !== "hotel") {
+      // С этажа идти через улицу странно — сразу к стойке и приветствие.
+      ready(k).then(() => {
+        setView("lobby");
+        run([greet]);
+      });
+      return;
+    }
+    setBusy(true);
+    setZoom(ENTRANCE);
+    const v = videoRef.current;
+    if (v && v.getAttribute("src") !== walk) {
+      v.src = walk;
+      v.load();
+    }
+    window.setTimeout(
+      () =>
+        run([
+          {
+            src: walk,
+            then: () => {
+              setView("lobby");
+              setZoom(null);
+            },
+          },
+          greet,
+        ]),
+      prefersReducedMotion() ? 0 : ZOOM_MS - 100,
+    );
   }
 
   function enterRoom(p: Point) {
@@ -318,7 +391,7 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
   // ── Данные этажа ──────────────────────────────────────────────────────
   const floorPoints = useMemo<Point[]>(
     () =>
-      view === "hotel"
+      view === "hotel" || view === "lobby"
         ? []
         : ((points as Record<string, Point[]>)[String(view)] ?? []),
     [view],
@@ -330,7 +403,8 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
   }, [floorPoints]);
 
   const info = room ? cats[room.cat] : null;
-  const showSpots = !busy && !room && !zoom && view !== "hotel";
+  const showSpots =
+    !busy && !room && !zoom && view !== "hotel" && view !== "lobby";
 
   return (
     <div>
@@ -339,7 +413,7 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
           <div className="relative aspect-[1920/1086] select-none">
             {mounted.map((k) => {
               const active = k === current;
-              const isFloor = k.startsWith("floor:");
+              const isFloor = k.startsWith("floor:") || k.startsWith("hotel:");
               const zin = isFloor && active ? zoom : null;
               const zout = isFloor && active && !zoom ? back : null;
               const b = basePath(k);
@@ -512,13 +586,20 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
             )}
 
             {view === "hotel" && !busy && !room && (
-              <div className="absolute inset-x-0 bottom-3 z-20 flex justify-center md:bottom-5">
+              <div className="absolute inset-x-0 bottom-3 z-20 flex justify-center gap-2 md:bottom-5 md:gap-3">
+                <button
+                  type="button"
+                  onClick={() => go("lobby")}
+                  className="rounded-full bg-sand-300 px-4 py-2 text-xs font-medium text-ink-950 shadow-lift transition-colors hover:bg-sand-200 md:px-6 md:py-3 md:text-sm"
+                >
+                  Войти в отель
+                </button>
                 <button
                   type="button"
                   onClick={() => go(3)}
-                  className="rounded-full bg-sand-300 px-4 py-2 text-xs font-medium text-ink-950 shadow-lift transition-colors hover:bg-sand-200 md:px-6 md:py-3 md:text-sm"
+                  className="rounded-full border border-white/25 bg-ink-950/75 px-4 py-2 text-xs font-medium text-cream shadow-lift transition-colors hover:border-sand-300/70 md:px-6 md:py-3 md:text-sm"
                 >
-                  Заглянуть внутрь
+                  Снять крышу
                 </button>
               </div>
             )}
@@ -550,23 +631,38 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
           aria-label="Этажи отеля"
           className="mt-3 flex justify-center gap-2 md:pointer-events-none md:absolute md:inset-y-0 md:right-4 md:z-20 md:mt-0 md:flex-col md:justify-center"
         >
-          {ORDER.map((v) => (
+          {NAV.map((v) => (
             <button
               key={String(v)}
               type="button"
               disabled={busy}
               aria-current={view === v && !room ? "true" : undefined}
               onClick={() => go(v)}
-              className={`rounded-full border px-3 py-2 text-xs transition-colors disabled:opacity-60 md:pointer-events-auto md:min-w-[5.5rem] md:px-4 ${
+              className={`rounded-full border px-2.5 py-2 text-xs transition-colors disabled:opacity-60 sm:px-3 md:pointer-events-auto md:min-w-[5.5rem] md:px-4 ${
                 view === v
                   ? "border-sand-300 bg-sand-300 text-ink-950"
                   : "border-white/15 bg-ink-950/80 text-cream/85 hover:border-sand-300/60 hover:text-cream"
               }`}
             >
-              {VIEW_LABEL[String(v)]}
+              {typeof v === "number" ? (
+                <>
+                  {v}
+                  <span className="hidden sm:inline"> этаж</span>
+                  <span className="sm:hidden"> эт.</span>
+                </>
+              ) : (
+                VIEW_LABEL[String(v)]
+              )}
             </button>
           ))}
         </nav>
+
+        {/* Чат со стойкой: на широком экране поверх кадра справа от
+            администратора, на узком — под кадром. Один экземпляр, чтобы
+            переписка не раздваивалась. */}
+        {view === "lobby" && !room && (
+          <ReceptionChat className="mt-4 h-[30rem] lg:absolute lg:top-4 lg:right-[7.5rem] lg:bottom-4 lg:z-20 lg:mt-0 lg:h-auto lg:w-[23rem]" />
+        )}
       </div>
 
       {/* Карточка номера под кадром — на телефоне */}
@@ -582,7 +678,7 @@ export function Hotel3D({ cats }: { cats: Record<Cat, CatInfo> }) {
       )}
 
       {/* Легенда */}
-      {!room && (
+      {!room && view !== "lobby" && (
         <div className="mt-5 flex flex-wrap gap-2">
           {CAT_ORDER.filter((k) => view === "hotel" || counts[k]).map((k) => (
             <button

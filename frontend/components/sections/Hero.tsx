@@ -1,8 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
 
 import { site, priceFrom as fallbackPriceFrom, formatPrice } from "@/lib/site";
@@ -10,17 +9,22 @@ import { getBookingHref, bookingLinkTarget } from "@/lib/booking";
 import { BookingBar } from "@/components/ui/BookingBar";
 import { useIsDesktop, usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { buttonClass } from "@/components/ui/Button";
-import { IconPhone, IconPin } from "@/components/ui/Icons";
-import '../be-forms/be-style.css';
-import {BeSearchForm} from "@/components/be-forms/BeSearchForm";
+import { IconCube, IconPhone, IconPin } from "@/components/ui/Icons";
+import "../be-forms/be-style.css";
+import { BeSearchForm } from "@/components/be-forms/BeSearchForm";
 import { rooms as roomsWord } from "@/lib/plural";
 import { formatPriceEn, siteEn } from "@/lib/en";
 import { DirectBadge } from "@/components/ui/DirectBadge";
 import type { Lang } from "@/lib/routes";
 
-// WebGL грузится только в браузере, только на десктопе и только после
-// основного контента: на телефоне это лишние ~500 КБ и нагрев батареи.
-const HeroScene = dynamic(() => import("@/components/three/HeroScene"), { ssr: false });
+// Фон первого экрана — облёт отеля из «Отель в 3D» (2026-11-25): 5 с,
+// первый и последний кадр совпадают, поэтому петля без шва. Раньше здесь было
+// фото лобби под тёмной вуалью и абстрактная сцена three.js — 240 КБ
+// скриптов и WebGL ради декора. Ролик весит 460 КБ (на телефоне 90 КБ),
+// декодируется видеокартой и сразу показывает сам отель.
+const HERO_VIDEO = "/3d/intro.mp4";
+const HERO_VIDEO_MOBILE = "/3d/hero-loop-960.mp4";
+const HERO_POSTER = "/3d/hero-night-960.webp";
 
 const FACTS = {
   ru: [
@@ -54,7 +58,13 @@ const T = {
   },
 } as const;
 
-export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom?: number; lang?: Lang }) {
+export function Hero({
+  priceFrom = fallbackPriceFrom,
+  lang = "ru",
+}: {
+  priceFrom?: number;
+  lang?: Lang;
+}) {
   const t = T[lang];
   const facts = FACTS[lang];
   const ref = useRef<HTMLElement>(null);
@@ -80,51 +90,51 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
   // и мешает дотянуться до кнопок при коротком свайпе.
   const parallax = !reduced && isDesktop;
 
-  // Сцену WebGL подключаем, когда браузер освободился после загрузки:
-  // three.js — самый тяжёлый кусок главной, и в первые секунды он спорил
-  // за процессор с гидратацией и виджетом бронирования (2026-11-25).
-  const [sceneReady, setSceneReady] = useState(false);
-  useEffect(() => {
-    if (!parallax) return;
-    if ("requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(() => setSceneReady(true), { timeout: 3000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const id = setTimeout(() => setSceneReady(true), 1500);
-    return () => clearTimeout(id);
-  }, [parallax]);
-
   return (
     <section
       ref={ref}
       className="relative isolate flex min-h-[100svh] flex-col justify-end overflow-hidden pt-[calc(var(--header-h)+1rem)] pb-10 md:pb-20"
     >
-      {/* Фон: фото лобби с параллаксом */}
+      {/* Фон: облёт отеля в 3D с параллаксом. Без анимаций (системная
+          настройка) — неподвижный кадр того же вида. */}
       <motion.div
         className="absolute inset-0 -z-20"
         style={reduced ? undefined : { scale: bgScale, y: bgY }}
       >
-        <Image
-          src="/images/hotel/lobby.jpg"
-          alt={t.alt}
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover object-center"
-        />
+        {reduced ? (
+          <Image
+            src={HERO_POSTER}
+            alt={t.alt}
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover object-[46%_50%]"
+          />
+        ) : (
+          <video
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            poster={HERO_POSTER}
+            aria-label={t.alt}
+            className="absolute inset-0 h-full w-full object-cover object-[46%_50%]"
+          >
+            <source
+              src={HERO_VIDEO_MOBILE}
+              type="video/mp4"
+              media="(max-width: 767px)"
+            />
+            <source src={HERO_VIDEO} type="video/mp4" />
+          </video>
+        )}
       </motion.div>
 
-      {/* Затемнение: снизу почти в чёрный, чтобы текст читался на любом фото */}
-      <div className="absolute inset-0 -z-10 bg-linear-to-b from-ink-950/88 via-ink-950/72 to-ink-950" />
-      <div className="absolute inset-0 -z-10 bg-radial-[at_50%_35%] from-transparent to-ink-950/70" />
-      <span className="grain-layer -z-10" />
-
-      {/* WebGL-слой — только десктоп */}
-      {parallax && sceneReady && (
-        <div className="pointer-events-none absolute inset-0 -z-10 opacity-70 mix-blend-screen">
-          <HeroScene />
-        </div>
-      )}
+      {/* Затемнение: сверху под меню и снизу под текст. Середина открыта —
+          отель должно быть видно. */}
+      <div className="absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-b from-ink-950/80 to-transparent" />
+      <div className="absolute inset-0 -z-10 bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/10" />
 
       <motion.div
         className="container-page relative"
@@ -132,7 +142,9 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
       >
         <div className="max-w-3xl">
           <motion.a
-            href={lang === "en" ? site.address.googleMapsUrl : site.address.mapUrl}
+            href={
+              lang === "en" ? site.address.googleMapsUrl : site.address.mapUrl
+            }
             target="_blank"
             rel="noopener noreferrer"
             className="glass inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.7rem] text-cream/85 transition-colors hover:text-sand-200 sm:px-4 sm:text-xs"
@@ -162,15 +174,20 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
           >
             {lang === "en" ? (
               <>
-                {site.roomsCount} rooms a short walk from Abay Avenue. Breakfast included, 24/7 front
-                desk, English-speaking staff. From{" "}
-                <span className="text-sand-200">{formatPriceEn(priceFrom)}</span> per night.
+                {site.roomsCount} rooms a short walk from Abay Avenue. Breakfast
+                included, 24/7 front desk, English-speaking staff. From{" "}
+                <span className="text-sand-200">
+                  {formatPriceEn(priceFrom)}
+                </span>{" "}
+                per night.
               </>
             ) : (
               <>
-                {site.roomsCount} {roomsWord(site.roomsCount)} в двух шагах от проспекта Абая. Завтрак включён,
-                стойка регистрации круглосуточно. От{" "}
-                <span className="text-sand-200">{formatPrice(priceFrom)}</span> за ночь.
+                {site.roomsCount} {roomsWord(site.roomsCount)} в двух шагах от
+                проспекта Абая. Завтрак включён, стойка регистрации
+                круглосуточно. От{" "}
+                <span className="text-sand-200">{formatPrice(priceFrom)}</span>{" "}
+                за ночь.
               </>
             )}
           </motion.p>
@@ -183,6 +200,19 @@ export function Hero({ priceFrom = fallbackPriceFrom, lang = "ru" }: { priceFrom
           >
             <DirectBadge lang={lang} />
           </motion.div>
+
+          {lang === "ru" && (
+            <motion.a
+              href="#tur"
+              className="glass mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm text-cream transition-colors hover:text-sand-200"
+              initial={{ opacity: 0, y: reduced ? 0 : 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.9, delay: 0.42 }}
+            >
+              <IconCube className="size-4 text-sand-300" />
+              Войти в отель в 3D и поговорить с администратором →
+            </motion.a>
+          )}
 
           <motion.dl
             className="mt-7 grid grid-cols-3 gap-4 md:mt-9 md:flex md:flex-wrap md:gap-x-10"

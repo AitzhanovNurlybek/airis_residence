@@ -573,6 +573,51 @@ READ_ONLY_TOOLS = [AVAILABILITY_TOOL, BOOKING_LINK_TOOL, CANCEL_REQUEST_TOOL,
 FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOOL,
               FRONT_DESK_TOOL]
 
+#: Чат на сайте — виртуальная стойка в «Отель в 3D» (2026-11-25).
+#:
+#: Собеседник анонимен: телефона нет, и сказанному «я гость из 204-го» верить
+#: не на чем. Поэтому в руках только то, что можно показать любому: номера с
+#: фото, наличие с ценой и ссылка на бронь. Поиск броней, отмена и просьбы на
+#: стойку остаются в WhatsApp, где гость узнан по номеру телефона, — иначе
+#: любой посетитель сайта слал бы «просьбы» ресепшену от чужого имени.
+WEB_CHANNEL = "web"
+WEB_TOOL_NAMES = {"room_page", "check_availability", "booking_link"}
+WEB_ASSISTANT_NAME = "Алия"
+WEB_WHATSAPP = "https://wa.me/77003002526"
+WEB_CHAT_RULES = f"""
+
+─────────────────────────────────────────────────
+КАНАЛ: ЧАТ НА САЙТЕ — ВИРТУАЛЬНАЯ СТОЙКА В «ОТЕЛЬ В 3D»
+
+Посетитель сайта «подошёл к стойке» в 3D-туре по отелю и пишет в окно чата.
+Ты — {WEB_ASSISTANT_NAME}, виртуальный администратор отеля (ИИ-помощник).
+
+- Спросят, живой ли ты человек, — честно скажи, что ты виртуальный
+  администратор, а живая стойка круглосуточно: WhatsApp {WEB_WHATSAPP}.
+- Собеседник анонимен: ни телефона, ни имени у тебя нет. Брони не ищи и
+  чужие брони не обсуждай. Изменить или отменить бронь, оставить просьбу
+  для стойки — только через WhatsApp {WEB_WHATSAPP}.
+- Отвечай коротко: одно–три предложения. Без звёздочек, решёток и других
+  значков разметки — окно чата показывает текст как есть.
+- Главное — помочь выбрать номер и забронировать напрямую на сайте: когда
+  гость определился с датами или номером, дай ссылку на бронь.
+- На темы не про отель, поездку и Алматы вежливо возвращай разговор к отелю.
+"""
+
+
+def web_cant_answer() -> str:
+    """Что видит посетитель сайта, если модель не ответила.
+
+    В WhatsApp при сбое бот молчит, а стойку будит тревога. На сайте молчание
+    выглядит сломанной страницей, а тревога на каждый сбой у анонимного
+    посетителя — спам стойке. Поэтому — честная фраза с живыми контактами.
+    """
+    return (
+        "Сейчас не получается ответить. Напишите нам в WhatsApp "
+        f"{WEB_WHATSAPP} или позвоните на стойку {FRONT_DESK_PHONE} — "
+        "мы на связи круглосуточно."
+    )
+
 
 #: Последнее, что модель читает перед сообщением гостя.
 #:
@@ -2269,9 +2314,13 @@ async def answer(
     today: str,
     booking: BookingSystem | None = None,
     guest: dict[str, str] | None = None,
+    channel: str = "whatsapp",
 ) -> dict[str, Any]:
     """
     Ответ консьержа на одно сообщение.
+
+    `channel` — откуда пишут. `web` (чат на сайте) — анонимный посетитель:
+    только безопасные инструменты и свои правила, см. WEB_CHAT_RULES.
 
     `history` — прошлые реплики в формате [{"role": ..., "content": ...}].
     Хранение диалога — забота канала: у WhatsApp и Instagram свои
@@ -2291,6 +2340,9 @@ async def answer(
             or guest_language(message, (guest or {}).get("phone", ""), _guest_texts(history)))
 
     async def _запасной(причина: str) -> dict[str, Any]:
+        if channel == WEB_CHANNEL:
+            logger.warning("Чат на сайте: запасной ответ (%s)", причина)
+            return {"text": web_cant_answer(), "ok": False, "reason": причина}
         await _сказать_о_запасном_ответе(причина, guest, message)
         # Что сказать гостю, решает cant_answer: пока включён
         # SILENT_WHEN_CANT_ANSWER (2026-11-10), гость не получает ничего,
@@ -2343,10 +2395,18 @@ async def answer(
             # В FULL_TOOLS поиск уже есть; здесь добавляем его к чтению.
             tools.append(FIND_TOOL)
 
+    if channel == WEB_CHANNEL:
+        can_book = can_find = False
+        tools = [ROOM_PAGE_TOOL]
+        if booking is not None:
+            tools += [AVAILABILITY_TOOL, BOOKING_LINK_TOOL]
+
     system = build_system_prompt(
         render_brief(facts), today, availability=mode,
         can_book=can_book, can_find=can_find,
     )
+    if channel == WEB_CHANNEL:
+        system += WEB_CHAT_RULES
 
     # Гость пишет с телефона сотрудника компании, у которой договор с отелем.
     # Тогда меняется и цена, и способ бронирования: публичная форма берёт
@@ -2530,7 +2590,11 @@ async def answer(
                 args = block.get("input") or {}
                 tool_calls.append({"name": name, "input": args})
 
-                if name == "remember_name":
+                if channel == WEB_CHANNEL and name not in WEB_TOOL_NAMES:
+                    # Модель не может вызвать необъявленный инструмент, но
+                    # если однажды сможет — на сайте он не выполнится.
+                    output = "В чате на сайте этот инструмент недоступен."
+                elif name == "remember_name":
                     output = await _tool_remember_name(guest, args)
                 elif name == "cancel_request":
                     output = await _tool_cancel_request(settings, guest, args)

@@ -6675,6 +6675,99 @@ async def qa_late_arrival() -> None:
     check("приезд в 9 утра: про вещи подсказка есть", "оставить вещи до заезда можно" in утро, утро[:300])
 
 
+async def qa_web_chat() -> None:
+    """Чат на сайте (2026-11-25): анонимный посетитель, безопасные инструменты.
+
+    Писать в чат может кто угодно, телефона у него нет. Значит, нельзя ни
+    искать брони, ни слать просьбы на стойку от его имени, а сбой модели не
+    должен будить ресепшн тревогой. И пределы: сверх них модель не зовётся.
+    """
+    import uuid as _uuid  # noqa: PLC0415
+
+    import app.concierge as _c  # noqa: PLC0415
+    import app.web_chat as _w  # noqa: PLC0415
+    from app.config import get_settings as _gs  # noqa: PLC0415
+    from app.db import ChannelReceipt, SessionLocal  # noqa: PLC0415
+
+    print("\n== Чат на сайте ==")
+    запросы: list[dict] = []
+
+    async def _модель(payload, headers, **_kw):  # noqa: ANN001
+        запросы.append(payload)
+        return {"content": [{"type": "text", "text": "Ссылка: https://x/booking?utm_source=whatsapp"}],
+                "stop_reason": "end_turn", "usage": {}}
+
+    async def _сбой(payload, headers, **_kw):  # noqa: ANN001
+        raise RuntimeError("модель лежит")
+
+    async def _факты(_settings, force: bool = False):  # noqa: ANN001
+        return {"hotel": {}, "policy": {}, "rooms": []}
+
+    тревоги: list[str] = []
+
+    async def _тревога(причина, guest, message):  # noqa: ANN001
+        тревоги.append(причина)
+
+    settings = _gs()
+    было = (settings.anthropic_api_key, _c._call_model, _c.load_facts, _c._сказать_о_запасном_ответе)
+    settings.anthropic_api_key, _c._call_model, _c.load_facts = "k", _модель, _факты
+    _c._сказать_о_запасном_ответе = _тревога
+    try:
+        ответ = await _c.answer(settings, message="Сколько стоит номер?", history=[],
+                                today="2026-11-25", booking=StubBookingSystem(), guest={},
+                                channel=_c.WEB_CHANNEL)
+        имена = sorted(t["name"] for t in запросы[-1].get("tools", []))
+        check("на сайте только номера, наличие и ссылка на бронь",
+              имена == sorted(_c.WEB_TOOL_NAMES), str(имена))
+        check("правила сайта в промпте",
+              "ЧАТ НА САЙТЕ" in запросы[-1]["system"][0]["text"])
+        check("ответ на сайте получен", ответ.get("ok") is True, str(ответ.get("text")))
+        check("метка источника на сайте — site_chat",
+              "utm_source=site_chat" in _w._for_site(ответ["text"]))
+
+        запросы.clear()
+        await _c.answer(settings, message="Сколько стоит номер?", history=[],
+                        today="2026-11-25", booking=StubBookingSystem(), guest={"phone": "+77000000000"})
+        имена_wa = {t["name"] for t in запросы[-1].get("tools", [])}
+        check("WhatsApp не задет: там инструментов больше, чем на сайте",
+              имена_wa > set(_c.WEB_TOOL_NAMES) or имена_wa >= set(_c.WEB_TOOL_NAMES), str(sorted(имена_wa)))
+        check("правил сайта в WhatsApp нет", "ЧАТ НА САЙТЕ" not in запросы[-1]["system"][0]["text"])
+
+        _c._call_model = _сбой
+        сбой = await _c.answer(settings, message="привет", history=[], today="2026-11-25",
+                               booking=None, guest={}, channel=_c.WEB_CHANNEL)
+        check("сбой модели на сайте — фраза с WhatsApp, а не тишина",
+              _c.WEB_WHATSAPP in сбой.get("text", "") and сбой.get("ok") is False, str(сбой))
+        check("сбой на сайте не будит стойку тревогой", not тревоги, str(тревоги))
+    finally:
+        (settings.anthropic_api_key, _c._call_model, _c.load_facts,
+         _c._сказать_о_запасном_ответе) = было
+
+    # Пределы считаются по отметкам в базе.
+    адрес = "qa" + _uuid.uuid4().hex[:14]
+    визит = "qa-" + _uuid.uuid4().hex
+    check("новый посетитель не упирается в предел",
+          await _w._limit(адрес, визит, settings) in ("", "day"))
+    async with SessionLocal() as db:
+        for _ in range(_w.PER_VISIT):
+            db.add(ChannelReceipt(message_id=f"{адрес}x|{визит}|{_uuid.uuid4().hex}", channel=_w.RECEIPTS))
+        await db.commit()
+    предел = await _w._limit("другой" + адрес, визит, settings)
+    check("после 30 сообщений за визит — предел визита", предел in ("visit", "day"), repr(предел))
+    было_вкл = settings.web_chat_enabled
+    settings.web_chat_enabled = False
+    try:
+        check("выключенный чат не зовёт модель", await _w._limit(адрес, визит, settings) == "off")
+    finally:
+        settings.web_chat_enabled = было_вкл
+    было_лимит = settings.web_chat_daily_limit
+    settings.web_chat_daily_limit = 0
+    try:
+        check("общий предел в сутки", await _w._limit(адрес, "qa-" + _uuid.uuid4().hex, settings) == "day")
+    finally:
+        settings.web_chat_daily_limit = было_лимит
+
+
 async def _with_phrase(section) -> None:  # noqa: ANN001
     """Раздел о запасной фразе — с фразой, даже если включён тихий режим.
 
@@ -6795,6 +6888,7 @@ async def main() -> int:
     await qa_grid_and_details()
     await qa_text_documents()
     await qa_late_arrival()
+    await qa_web_chat()
 
     total = passed + len(failed)
     print(f"\n── Итог ──\n  {passed} из {total}")

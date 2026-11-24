@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
-import { Hotel3D, type Cat, type CatInfo } from "@/components/hotel3d/Hotel3D";
+import { Hotel3D } from "@/components/hotel3d/Hotel3D";
 import { JsonLd } from "@/components/JsonLd";
 import { CtaBook } from "@/components/sections/CtaBook";
-import { getRoomBookingHref } from "@/lib/booking";
+import { hotel3dCats } from "@/lib/hotel3d";
 import { getRooms } from "@/lib/rooms";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/seo";
-import { formatPrice, site } from "@/lib/site";
+import { site } from "@/lib/site";
 
 export const metadata: Metadata = pageMetadata({
   title: "Отель Airis Residence в 3D — этажи и номера",
@@ -16,53 +16,9 @@ export const metadata: Metadata = pageMetadata({
   image: "/3d/hero-night.webp",
 });
 
-/** Категории модели → номера сайта (slug). Apart на сайте пока без страницы. */
-const SLUG: Record<Exclude<Cat, "apart">, string> = {
-  comfort_plus: "comfort-plus",
-  comfort: "comfort",
-  standart: "standart",
-  twin: "standart-twin",
-  single: "standart-single",
-};
-
 export default async function Hotel3DPage() {
   const rooms = await getRooms();
-  const bySlug = new Map(rooms.map((r) => [r.slug, r]));
-
-  const cats = {} as Record<Cat, CatInfo>;
-  for (const [cat, slug] of Object.entries(SLUG) as [
-    Exclude<Cat, "apart">,
-    string,
-  ][]) {
-    const r = bySlug.get(slug);
-    cats[cat] = {
-      name: r?.shortName ?? slug,
-      price: r?.price ?? null,
-      priceText: r ? `от ${formatPrice(r.price)}` : "",
-      area: r?.area ?? "",
-      capacity: r?.capacity ?? 2,
-      beds: r?.beds ?? "",
-      summary: r?.summary ?? "",
-      images: r?.images?.slice(0, 6) ?? [],
-      href: `/nomera/${slug}`,
-      bookHref: getRoomBookingHref(r?.beRoomType),
-    };
-  }
-  // Apart продаётся в Exely (код 5070642), страницы на сайте пока нет —
-  // в карточке видеообзор номера.
-  cats.apart = {
-    name: "Apart",
-    price: null,
-    priceText: "",
-    area: "",
-    capacity: 2,
-    beds: "двуспальная кровать",
-    summary:
-      "Номер с мини-кухней: варочная панель, раковина, микроволновка, холодильник. Шкаф для вещей, душ. До двух гостей.",
-    images: [],
-    video: "/3d/apart.mp4",
-    bookHref: getRoomBookingHref("5070642"),
-  };
+  const cats = hotel3dCats(rooms);
 
   return (
     <>
@@ -79,10 +35,11 @@ export default async function Hotel3DPage() {
             Загляните в Airis Residence
           </h1>
           <p className="mt-5 text-[1.02rem] leading-relaxed text-muted">
-            Три этажа в центре Алматы, {site.address.street}. Нажмите «Заглянуть
-            внутрь» — крыша поднимется, и вы увидите этажи. Кружки — номера:
-            нажмите на любой, и камера зайдёт внутрь. Вечер или день —
-            переключатель в углу. Понравился номер — бронируйте здесь же,
+            Три этажа в центре Алматы, {site.address.street}. «Войти в отель» —
+            пройдёте к стойке, где вас встретит виртуальный администратор: ей
+            можно задать любой вопрос об отеле. «Снять крышу» — увидите этажи;
+            кружки — номера, нажмите на любой, и камера зайдёт внутрь. Вечер или
+            день — переключатель в углу. Понравился номер — бронируйте здесь же,
             напрямую, без наценки площадок.
           </p>
         </header>

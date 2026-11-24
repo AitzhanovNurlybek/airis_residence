@@ -20,6 +20,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { faqJsonLd, pageMetadata } from "@/lib/seo";
 import { faqItems } from "@/lib/faq";
 import { getPriceFrom, getRooms } from "@/lib/rooms";
+import { hotel3dCats } from "@/lib/hotel3d";
 import { rooms as roomsWord } from "@/lib/plural";
 
 // Цену берём из базы, а не из запасного списка в коде: её меняют
@@ -50,10 +51,13 @@ export default async function HomePage() {
           они теперь рядом с картой, где и отвечают на вопрос «что рядом». */}
       <Hero priceFrom={priceFrom} />
       <Rooms rooms={rooms} />
+      {/* 3D сразу после номеров (просьба владельца 2026-11-25: «чтобы сразу
+          было видно»). Не выше номеров: цена и номера — первое, за чем
+          приходят (замер 2026-09-30), а 3D-облёт и так в первом экране. */}
+      <Tour3D cats={hotel3dCats(rooms)} />
       <About />
       <Gallery />
       <VideoShowcase />
-      <Tour3D />
       <Amenities />
       <Location withEvents />
       <EventsNearby />
