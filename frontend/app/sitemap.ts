@@ -39,6 +39,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { path: "/kak-oplatit", priority: 0.6, freq: "monthly" },
     { path: "/korporativnym-klientam", priority: 0.7, freq: "monthly" },
     { path: "/almaty", priority: 0.6, freq: "monthly" },
+    { path: "/otel-3d", priority: 0.7, freq: "monthly" },
     { path: "/o-kompanii", priority: 0.5, freq: "yearly" },
     { path: "/oferta", priority: 0.3, freq: "yearly" },
     { path: "/politika-konfidencialnosti", priority: 0.3, freq: "yearly" },
