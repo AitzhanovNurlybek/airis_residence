@@ -352,10 +352,12 @@ def lobby():
     box("lobby_roof", 0, y_e, H1, ANNEX_X, Y1 - 3.8, H1 + 0.35, "roof", "roof_lobby")
     # фойе — между основным и доп. корпусом (рисунок и подписи отеля,
     # 2026-11-25); вход с северной стороны у доп. корпуса, витрины на юг
-    box("lobby_door", ANNEX_X, -6.9, 0.0, ANNEX_X + 0.06, -5.0, 2.5, "glass", c)
-    box("lobby_canopy", ANNEX_X, -7.3, 2.7, ANNEX_X + 1.4, -4.6, 2.95, "taupe", c)
-    box("lobby_glass_s", -0.06, y_e + 1.0, 0.15, 0.0, Y1 - 1.0, 2.9, "glass", c)
-    zone("entrance", ANNEX_X - 0.6, -5.95)
+    # вход с юга, у доп. корпуса (рисунок и фото входа): слева витрина,
+    # справа двери под навесом
+    box("lobby_glass_s", -0.06, y_e + 4.6, 0.15, 0.0, Y1 - 1.0, 2.9, "glass", c)
+    box("lobby_door", -0.06, y_e + 1.0, 0.0, 0.0, y_e + 3.2, 2.5, "glass", c)
+    box("lobby_canopy", -1.4, y_e + 0.6, 2.7, 0.0, y_e + 3.6, 2.95, "taupe", c)
+    zone("entrance", 0.6, y_e + 2.1)
 
     # ресепшн — новое место: у стены корпуса, напротив входа, рядом с
     # проходом к номерам и лестнице
@@ -384,50 +386,67 @@ def lobby():
         box(f"lobby_sofa{i}", sx, sy, 0, sx + 2.6, sy + 0.9, 0.75, "sofa", c)
     box("lobby_rug", 4.6, y_e + 1.6, 0.02, 8.0, y_e + 6.0, 0.03, "tile", c)
     for i in range(4):
-        box(f"lobby_step{i}", ANNEX_X + 0.3 * i, -7.0, 0, ANNEX_X + 0.3 * (i + 1), -4.9, 0.15 * (4 - i), "walk", c)
+        box(f"lobby_step{i}", -0.3 * (i + 1), y_e + 0.9, 0, -0.3 * i, y_e + 3.3, 0.15 * (4 - i), "walk", c)
 
 
 # ───────────────────────────── доп. корпус ────────────────────────
-# Одноэтажный, по другую сторону фойе от основного корпуса (рисунок
-# управляющей с подписями отеля, 2026-11-25): у фойе Standart и кабинет
-# управляющей, в дальнем конце Apart, служебные кабинеты, коридор.
-B2_Y1 = Y1 - ANNEX_D            # общая стена с фойе
-B2_Y0 = B2_Y1 - 5.5             # восточный фасад
+# Одноэтажный, по другую сторону фойе, параллельно основному корпусу
+# (рисунок управляющей с подписями отеля, 2026-11-25): со стороны входа
+# (юг) два служебных кабинета, дальше у двора Standart и кабинет
+# управляющей, вдоль восточной стены коридор, в северном конце Apart.
+# Контур — по OpenStreetMap (здание 51267893, 1 этаж, ~27 × 16 м, сразу за
+# фойе); южный торец чуть выступает вперёд фойе — как на фото входа.
+B2_Y1 = Y1 - ANNEX_D            # западная стена = восточная стена фойе
+B2_Y0 = -23.6                   # восточный фасад
+B2_X0, B2_X1 = -2.9, 24.0       # юг → север
 
 
 def second_building():
     c = "floor1"
     z = 0.0
     top = H1 - 0.05
-    X0, X1, Y0, Yf = 0.0, ANNEX_X, B2_Y0, B2_Y1
-    box("b2_floor", X0, Y0, -0.05, X1, Yf, 0.0, "slab", c)
+    X0, X1, Y0, Yw = B2_X0, B2_X1, B2_Y0, B2_Y1
+    box("b2_floor", X0, Y0, -0.05, X1, Yw, 0.0, "slab", c)
     box("b2_wall_e", X0, Y0, 0, X1, Y0 + WALL, H1, "taupe", c)
-    box("b2_wall_s", X0, Y0, 0, WALL, Yf, H1, "taupe", c)
-    box("b2_wall_n", X1 - WALL, Y0, 0, X1, Yf, H1, "taupe", c)
-    box("b2_roof", X0, Y0, H1, X1, Yf, H1 + 0.35, "roof", "roof_lobby")
-    for i, xc in enumerate((1.8, 5.4, 9.0)):
-        box(f"b2_win_{i}", xc - 0.9, Y0 - 0.06, 0.9, xc + 0.9, Y0, 2.4, "glass", c)
-    xa, xb = WALL, X1 - WALL
-    ya, yb = Y0 + WALL, Yf
-    # Apart — северный конец целиком
-    rect_walls("b2_apart", 7.3, ya, xb, yb, z, top, "wall_in", c)
-    room(1, "f1_apart", "apart", 7.3 + PART, ya + PART, xb - PART, yb - PART, z, c, +1, sofa=False)
-    bathroom("b2_apart_bath", 7.45, ya + 0.15, 9.2, ya + 2.2, z, c)
-    # у фойе: Standart и кабинет управляющей
-    ym = yb - 2.9
-    rect_walls("b2_std", 4.9, ym, 7.3, yb, z, top, "wall_in", c)
-    room(1, "f1_std_b2", "standart", 4.9 + PART, ym + PART, 7.3 - PART, yb - PART, z, c, +1, sofa=False)
-    rect_walls("b2_office", 3.4, ym, 4.9, yb, z, top, "wall_in", c)
-    box("b2_office_floor", 3.4, ym, z + 0.02, 4.9, yb, z + 0.035, "service", c)
-    box("b2_office_desk", 3.6, ym + 0.4, z, 4.7, ym + 1.5, z + 0.75, "wood", c)
-    box("b2_hall", 3.4, ya, z + 0.02, 7.3, ym, z + 0.035, "corridor", c)
-    # служебные кабинеты — южный конец
-    yc = (ya + yb) / 2
-    for i, (p0, p1) in enumerate(((ya, yc), (yc, yb))):
-        rect_walls(f"b2_staff{i}", xa, p0, 3.4, p1, z, top, "wall_in", c)
-        box(f"b2_staff{i}_floor", xa, p0, z + 0.02, 3.4, p1, z + 0.035, "service", c)
-        box(f"b2_staff{i}_desk", xa + 0.4, p0 + 1.0, z, xa + 1.1, p0 + 2.8, z + 0.75, "wood", c)
-    zone("staff", 1.85, yc)
+    box("b2_wall_s", X0, Y0, 0, X0 + WALL, Yw, H1, "taupe", c)
+    box("b2_wall_n", X1 - WALL, Y0, 0, X1, Yw, H1, "taupe", c)
+    # к фойе стена общая; севернее фойе — своя стена во двор
+    box("b2_wall_w", ANNEX_X, Yw - WALL, 0, X1, Yw, H1, "taupe", c)
+    box("b2_wall_w_s", X0, Yw - WALL, 0, 0.0, Yw, H1, "taupe", c)
+    box("b2_roof", X0, Y0, H1, X1, Yw, H1 + 0.35, "roof", "roof_lobby")
+    # окна: южный торец (кабинеты), двор (Standart, Apart), восток
+    box("b2_win_s", X0 - 0.06, Y0 + 2.2, 0.9, X0, Y0 + 4.0, 2.4, "glass", c)
+    for i, xc in enumerate((13.0, 16.8, 21.2)):
+        box(f"b2_win_w{i}", xc - 0.9, Yw, 0.9, xc + 0.9, Yw + 0.06, 2.4, "glass", c)
+    for i, xc in enumerate((1.0, 5.0, 12.0, 21.2)):
+        box(f"b2_win_e{i}", xc - 0.9, Y0 - 0.06, 0.9, xc + 0.9, Y0, 2.4, "glass", c)
+
+    xa, xb = X0 + WALL, X1 - WALL
+    ya, yb = Y0 + WALL, Yw - WALL
+    ymid = (ya + yb) / 2
+    # Apart — северный конец во всю ширину
+    # Apart — северный конец во всю ширину (кухня и спальня)
+    rect_walls("b2_apart", 18.6, ya, xb, yb, z, top, "wall_in", c)
+    room(1, "f1_apart", "apart", 18.6 + PART, ymid + PART, xb - PART, yb - PART, z, c, +1)
+    bathroom("b2_apart_bath", 18.75, ya + 0.15, 21.0, ya + 2.6, z, c)
+    box("b2_apart_kitchen", 21.6, ya + 0.3, z, xb - 0.2, ya + 0.95, z + 0.9, "desk", c)
+    # у двора: Standart и кабинет управляющей; восточная половина — холл
+    rect_walls("b2_std", 11.5, ymid, 18.6, yb, z, top, "wall_in", c)
+    room(1, "f1_std_b2", "standart", 11.5 + PART, ymid + PART, 18.6 - PART, yb - PART, z, c, +1, sofa=False)
+    bathroom("b2_std_bath", 16.4, ymid + 0.15, 18.45, ymid + 2.4, z, c)
+    rect_walls("b2_office", 7.0, ymid, 11.5, yb, z, top, "wall_in", c)
+    box("b2_office_floor", 7.0, ymid, z + 0.02, 11.5, yb, z + 0.035, "service", c)
+    box("b2_office_desk", 8.2, yb - 1.8, z, 10.4, yb - 1.0, z + 0.75, "wood", c)
+    box("b2_hall", 7.0, ya, z + 0.02, 18.6, ymid, z + 0.035, "corridor", c)
+    for i in range(3):
+        box(f"b2_hall_sofa{i}", 9.0 + i * 3.2, ya + 0.5, z, 11.0 + i * 3.2, ya + 1.4, z + 0.75, "sofa", c)
+    # служебные кабинеты — южный конец, два рядом
+    for i, (p0, p1) in enumerate(((ya, ymid), (ymid, yb))):
+        rect_walls(f"b2_staff{i}", xa, p0, 7.0, p1, z, top, "wall_in", c)
+        box(f"b2_staff{i}_floor", xa, p0, z + 0.02, 7.0, p1, z + 0.035, "service", c)
+        for j in range(2):
+            box(f"b2_staff{i}_desk{j}", xa + 1.2 + j * 3.2, p0 + 1.2, z, xa + 3.0 + j * 3.2, p0 + 1.9, z + 0.75, "wood", c)
+    zone("staff", 2.0, ymid)
 
 
 # ───────────────────────────── 2–3 этажи ──────────────────────────
@@ -611,7 +630,7 @@ def site():
                 text(f"label_{len(labels_done)}", name, 5.0, "label", "labels",
                      ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0.12), rot_z=ang)
                 labels_done.add(name)
-        elif "building" in t and e["id"] != 51267895:
+        elif "building" in t and e["id"] not in (51267895, 51267893):
             try:
                 levels = float(str(t.get("building:levels", "2")).split(";")[0])
             except ValueError:
@@ -678,6 +697,16 @@ def shot(name, cam_loc, look, lens, hide=(), res=(1920, 1080)):
 bpy.context.view_layer.update()
 mid = world_of(L / 2, D_UP / 2, 4)
 east = world_of(L / 2 - 4, -45, 0)
+# Камера всех кадров тура — с юга, как на рисунке управляющей: слева
+# основной корпус, посередине фойе со входом, справа доп. корпус
+# (2026-11-25; до этого смотрели с юго-востока: камера -6,-30,36).
+CAM_L = world_of(*[float(v) for v in os.environ.get("AIRIS_CAM", "-40,-4,37").split(",")])
+CAM_LOOK = world_of(*[float(v) for v in os.environ.get("AIRIS_LOOK", "11,-4,3").split(",")])
+# Этажи — с той же стороны, но круче сверху: иначе длинный корпус уходит
+# вдаль и комнаты сжимаются в полосу. Переход «здание → 3 этаж» в ролике
+# сам опускает камеру из одного ракурса в другой.
+FCAM_L = world_of(*[float(v) for v in os.environ.get("AIRIS_FCAM", "-20,-4,52").split(",")])
+FCAM_LOOK = world_of(*[float(v) for v in os.environ.get("AIRIS_FLOOK", "10.5,-4,0").split(",")])
 # Кадры для Higgsfield: одна камера на все четыре вида — тогда переход
 # «крыша уходит → этаж» в видео совпадает. Подписи улиц не даём: генератор
 # портит кириллицу, их кладёт сайт поверх картинки.
@@ -685,7 +714,7 @@ east = world_of(L / 2 - 4, -45, 0)
 # камеру → доли ширины и высоты кадра. По ним сайт ставит кружки на картинки.
 if "точки" in ARGS:
     from bpy_extras.object_utils import world_to_camera_view
-    cam_l, look = world_of(-6, -30, 36), world_of(L / 2 + 0.5, D_UP / 2 - 3.5, 2)
+    cam_l, look = FCAM_L, FCAM_LOOK
     cam.location, target.location, cam.data.lens = cam_l, look, 30
     scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
     bpy.context.view_layer.update()
@@ -709,13 +738,20 @@ if "точки" in ARGS:
     os._exit(0)
 
 if "кадры" in ARGS:
-    scene.cycles.samples = 64
-    cam_l, look = world_of(-6, -30, 36), world_of(L / 2 + 0.5, D_UP / 2 - 3.5, 2)
+    scene.cycles.samples = 16 if FAST else 64
+    cam_l, look = CAM_L, CAM_LOOK
+    if "проба" in ARGS:
+        shot("s0_exterior", cam_l, look, 30, hide=("labels",), res=(960, 540))
+        shot("s3_floor1", FCAM_L, FCAM_LOOK, 30, hide=("floor2", "floor3", "roof", "roof_lobby", "facade", "labels"), res=(960, 540))
+        shot("s1_floor3", FCAM_L, FCAM_LOOK, 30, hide=("roof", "facade", "labels"), res=(960, 540))
+        print("DONE")
+        sys.stdout.flush()
+        os._exit(0)
     if "этаж1" not in ARGS:
         shot("s0_exterior", cam_l, look, 30, hide=("labels",))
-        shot("s1_floor3", cam_l, look, 30, hide=("roof", "facade", "labels"))
-        shot("s2_floor2", cam_l, look, 30, hide=("floor3", "roof", "facade", "labels"))
-    shot("s3_floor1", cam_l, look, 30, hide=("floor2", "floor3", "roof", "roof_lobby", "facade", "labels"))
+        shot("s1_floor3", FCAM_L, FCAM_LOOK, 30, hide=("roof", "facade", "labels"))
+        shot("s2_floor2", FCAM_L, FCAM_LOOK, 30, hide=("floor3", "roof", "facade", "labels"))
+    shot("s3_floor1", FCAM_L, FCAM_LOOK, 30, hide=("floor2", "floor3", "roof", "roof_lobby", "facade", "labels"))
     print("DONE")
     sys.stdout.flush()
     os._exit(0)
