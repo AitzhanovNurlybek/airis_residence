@@ -18,7 +18,7 @@ y — поперёк с востока на запад (0 — восточный
 
 1 этаж — по рисунку и рассказу управляющей (2026-11-25): основной корпус
 (3 Comfort Plus, 2 Standart, Twin, завтрак с кухней, лестница), фойе со
-входом, ресепшн и кофейней, второй одноэтажный корпус справа от входа
+входом, ресепшн и кофейней, доп. одноэтажный корпус за фойе
 (служебные кабинеты, Standart, Apart). 2 и 3 этажи — по планам
 техпаспорта, подписанным отелем (2026-11-25): по 3 Comfort и 1 Twin,
 одноместный (пом. 9) на 2 этаже, остальное Standart.
@@ -295,7 +295,7 @@ def floor_one():
         ("f1_std_w", "standart", 6.4, 10.3, +1),
         ("f1_twin", "twin", 10.3, 14.4, +1),
         ("f1_cp_nw", "comfort_plus", 14.4, L - WALL, +1),
-        ("f1_std_e", "standart", 11.9, 16.6, -1),
+        ("f1_single", "single", 11.9, 16.6, -1),
         ("f1_cp_ne", "comfort_plus", 16.6, L - WALL, -1),
     ]
     for name, cat, x0, x1, side in rooms:
@@ -350,13 +350,12 @@ def lobby():
     box("lobby_wall_n", ANNEX_X - WALL, y_e, 0, ANNEX_X, Y1, H1, "taupe", c)
     box("lobby_wall_e", 0, y_e, 0, ANNEX_X, y_e + WALL, H1, "taupe", c)
     box("lobby_roof", 0, y_e, H1, ANNEX_X, Y1 - 3.8, H1 + 0.35, "roof", "roof_lobby")
-    # большие витрины на восток и юг, вход у северного конца — рядом со
-    # вторым корпусом, как на рисунке и на фото входа
-    box("lobby_glass_e1", 0.8, y_e - 0.06, 0.15, 5.6, y_e, 2.9, "glass", c)
-    box("lobby_door", 7.6, y_e - 0.06, 0.0, 9.3, y_e, 2.5, "glass", c)
-    box("lobby_canopy", 7.0, y_e - 1.4, 2.7, 10.0, y_e, 2.95, "taupe", c)
+    # фойе — между основным и доп. корпусом (рисунок и подписи отеля,
+    # 2026-11-25); вход с северной стороны у доп. корпуса, витрины на юг
+    box("lobby_door", ANNEX_X, -6.9, 0.0, ANNEX_X + 0.06, -5.0, 2.5, "glass", c)
+    box("lobby_canopy", ANNEX_X, -7.3, 2.7, ANNEX_X + 1.4, -4.6, 2.95, "taupe", c)
     box("lobby_glass_s", -0.06, y_e + 1.0, 0.15, 0.0, Y1 - 1.0, 2.9, "glass", c)
-    zone("entrance", 8.45, y_e + 0.6)
+    zone("entrance", ANNEX_X - 0.6, -5.95)
 
     # ресепшн — новое место: у стены корпуса, напротив входа, рядом с
     # проходом к номерам и лестнице
@@ -384,50 +383,51 @@ def lobby():
     for i, (sx, sy) in enumerate(((5.0, y_e + 2.0), (5.0, y_e + 4.6))):
         box(f"lobby_sofa{i}", sx, sy, 0, sx + 2.6, sy + 0.9, 0.75, "sofa", c)
     box("lobby_rug", 4.6, y_e + 1.6, 0.02, 8.0, y_e + 6.0, 0.03, "tile", c)
-    # наружная лестница у входа
     for i in range(4):
-        box(f"lobby_step{i}", 8.0, y_e - 0.3 * (i + 1), 0, 9.6, y_e - 0.3 * i, 0.15 * (4 - i), "walk", c)
+        box(f"lobby_step{i}", ANNEX_X + 0.3 * i, -7.0, 0, ANNEX_X + 0.3 * (i + 1), -4.9, 0.15 * (4 - i), "walk", c)
 
 
-# ───────────────────────────── второй корпус ──────────────────────
-# Одноэтажный, справа от входа (на фото входа — коричневый объём с окном).
-# По рисунку: служебные кабинеты у фасада, кабинет управляющей, Standart
-# и в глубине Apart.
-B2_X0, B2_X1 = ANNEX_X, 21.6
-B2_Y0, B2_Y1 = -6.0, Y1
+# ───────────────────────────── доп. корпус ────────────────────────
+# Одноэтажный, по другую сторону фойе от основного корпуса (рисунок
+# управляющей с подписями отеля, 2026-11-25): у фойе Standart и кабинет
+# управляющей, в дальнем конце Apart, служебные кабинеты, коридор.
+B2_Y1 = Y1 - ANNEX_D            # общая стена с фойе
+B2_Y0 = B2_Y1 - 5.5             # восточный фасад
 
 
 def second_building():
     c = "floor1"
     z = 0.0
     top = H1 - 0.05
-    box("b2_floor", B2_X0, B2_Y0, -0.05, B2_X1, B2_Y1, 0.0, "slab", c)
-    box("b2_wall_e", B2_X0, B2_Y0, 0, B2_X1, B2_Y0 + WALL, H1, "taupe", c)
-    box("b2_wall_n", B2_X1 - WALL, B2_Y0, 0, B2_X1, B2_Y1, H1, "taupe", c)
-    # крыша только у части, что выступает из-под верхних этажей
-    box("b2_roof", B2_X0, B2_Y0, H1, B2_X1, 0.0, H1 + 0.35, "roof", "roof_lobby")
-    # окна фасада: кабинеты
-    for i, xc in enumerate((13.6, 18.8)):
-        box(f"b2_win_{i}", xc - 0.9, B2_Y0 - 0.06, 0.9, xc + 0.9, B2_Y0, 2.4, "glass", c)
-
-    x0, x1 = B2_X0 + WALL, B2_X1 - WALL
-    # Apart в глубине, вдоль стены основного корпуса
-    rect_walls("b2_apart", x0, 0.0, x1, Y1, z, top, "wall_in", c)
-    room(1, "f1_apart", "apart", x0 + PART, PART, x1 - PART, Y1 - PART, z, c, +1, sofa=False)
-    bathroom("b2_apart_bath", x1 - 2.0, 0.15, x1 - 0.15, 2.4, z, c)
-    # Standart и кабинет управляющей — со стороны фойе, дальше коридор
-    rect_walls("b2_std", x0, -3.0, 14.6, 0.0, z, top, "wall_in", c)
-    room(1, "f1_std_b2", "standart", x0 + PART, -3.0 + PART, 14.6 - PART, -PART, z, c, +1, sofa=False)
-    rect_walls("b2_office", 14.6, -3.0, 17.0, 0.0, z, top, "wall_in", c)
-    box("b2_office_floor", 14.6, -3.0, z + 0.02, 17.0, 0.0, z + 0.035, "service", c)
-    box("b2_office_desk", 15.0, -1.4, z, 16.6, -0.7, z + 0.75, "wood", c)
-    box("b2_hall", 17.0, -3.0, z + 0.02, x1, 0.0, z + 0.035, "corridor", c)
-    # два служебных кабинета у фасада
-    for i, (a, b) in enumerate(((x0, 16.2), (16.2, x1))):
-        rect_walls(f"b2_staff{i}", a, B2_Y0 + WALL, b, -3.0, z, top, "wall_in", c)
-        box(f"b2_staff{i}_floor", a, B2_Y0 + WALL, z + 0.02, b, -3.0, z + 0.035, "service", c)
-        box(f"b2_staff{i}_desk", a + 0.8, -4.6, z, a + 2.6, -3.9, z + 0.75, "wood", c)
-    zone("staff", 16.2, -4.3)
+    X0, X1, Y0, Yf = 0.0, ANNEX_X, B2_Y0, B2_Y1
+    box("b2_floor", X0, Y0, -0.05, X1, Yf, 0.0, "slab", c)
+    box("b2_wall_e", X0, Y0, 0, X1, Y0 + WALL, H1, "taupe", c)
+    box("b2_wall_s", X0, Y0, 0, WALL, Yf, H1, "taupe", c)
+    box("b2_wall_n", X1 - WALL, Y0, 0, X1, Yf, H1, "taupe", c)
+    box("b2_roof", X0, Y0, H1, X1, Yf, H1 + 0.35, "roof", "roof_lobby")
+    for i, xc in enumerate((1.8, 5.4, 9.0)):
+        box(f"b2_win_{i}", xc - 0.9, Y0 - 0.06, 0.9, xc + 0.9, Y0, 2.4, "glass", c)
+    xa, xb = WALL, X1 - WALL
+    ya, yb = Y0 + WALL, Yf
+    # Apart — северный конец целиком
+    rect_walls("b2_apart", 7.3, ya, xb, yb, z, top, "wall_in", c)
+    room(1, "f1_apart", "apart", 7.3 + PART, ya + PART, xb - PART, yb - PART, z, c, +1, sofa=False)
+    bathroom("b2_apart_bath", 7.45, ya + 0.15, 9.2, ya + 2.2, z, c)
+    # у фойе: Standart и кабинет управляющей
+    ym = yb - 2.9
+    rect_walls("b2_std", 4.9, ym, 7.3, yb, z, top, "wall_in", c)
+    room(1, "f1_std_b2", "standart", 4.9 + PART, ym + PART, 7.3 - PART, yb - PART, z, c, +1, sofa=False)
+    rect_walls("b2_office", 3.4, ym, 4.9, yb, z, top, "wall_in", c)
+    box("b2_office_floor", 3.4, ym, z + 0.02, 4.9, yb, z + 0.035, "service", c)
+    box("b2_office_desk", 3.6, ym + 0.4, z, 4.7, ym + 1.5, z + 0.75, "wood", c)
+    box("b2_hall", 3.4, ya, z + 0.02, 7.3, ym, z + 0.035, "corridor", c)
+    # служебные кабинеты — южный конец
+    yc = (ya + yb) / 2
+    for i, (p0, p1) in enumerate(((ya, yc), (yc, yb))):
+        rect_walls(f"b2_staff{i}", xa, p0, 3.4, p1, z, top, "wall_in", c)
+        box(f"b2_staff{i}_floor", xa, p0, z + 0.02, 3.4, p1, z + 0.035, "service", c)
+        box(f"b2_staff{i}_desk", xa + 0.4, p0 + 1.0, z, xa + 1.1, p0 + 2.8, z + 0.75, "wood", c)
+    zone("staff", 1.85, yc)
 
 
 # ───────────────────────────── 2–3 этажи ──────────────────────────
