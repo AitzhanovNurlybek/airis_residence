@@ -58,7 +58,7 @@ type Floor = 1 | 2 | 3;
 type View = "hotel" | Floor | "lobby";
 type Spot = { x: number; y: number };
 type Tod = "eve" | "day";
-type Step = { src: string; then?: () => void };
+type Step = { src: string; then?: () => void; rate?: number };
 
 const ORDER: View[] = ["hotel", 3, 2, 1];
 /** Переходы есть только сверху вниз: крыша уходит, этаж уходит. */
@@ -74,6 +74,47 @@ const TRANSITIONS: Record<Tod, Record<string, string>> = {
     "2>1": "/3d/f2-f1-day.mp4",
   },
 };
+/** Переходы между этажами чуть быстрее записи: 5 с ролика → ~3,6 с. */
+const FLOOR_RATE = 1.4;
+/** Дольше этого ролик не ждём — играем с сети как есть. */
+const CLIP_WAIT_MS = 4000;
+
+/**
+ * Ролик перехода целиком в памяти (blob): тогда он не подгружается на ходу
+ * и не замирает посреди спуска. На узких экранах — версия 960 px.
+ */
+const clips = new Map<string, Promise<string>>();
+function clipUrl(src: string) {
+  let small = false;
+  try {
+    small = window.matchMedia("(max-width: 767px)").matches;
+  } catch {
+    /* по умолчанию — полная версия */
+  }
+  return small ? src.replace(/\.mp4$/, "-960.mp4") : src;
+}
+function warmClip(src: string): Promise<string> {
+  const url = clipUrl(src);
+  let p = clips.get(url);
+  if (!p) {
+    p = fetch(url)
+      .then((r) =>
+        r.ok ? r.blob() : Promise.reject(new Error(String(r.status))),
+      )
+      .then((b) => URL.createObjectURL(b))
+      .catch(() => url);
+    clips.set(url, p);
+  }
+  return p;
+}
+function clipReady(src: string): Promise<string> {
+  return Promise.race([
+    warmClip(src),
+    new Promise<string>((r) =>
+      window.setTimeout(() => r(clipUrl(src)), CLIP_WAIT_MS),
+    ),
+  ]);
+}
 export const CAT_COLOR: Record<Cat, string> = {
   comfort_plus: "#d98a2b",
   comfort: "#e9b44c",
@@ -215,6 +256,9 @@ export function Hotel3D({
     // Тот же файл заново не качаем — перематываем в начало.
     if (v.getAttribute("src") !== step.src) v.src = step.src;
     else v.currentTime = 0;
+    // После смены src браузер сбрасывает скорость — ставим заново.
+    v.defaultPlaybackRate = step.rate ?? 1;
+    v.playbackRate = step.rate ?? 1;
     // Автозапуск запрещён или файла нет — не зависаем, а идём дальше.
     v.play().catch(() => next());
   }
@@ -236,7 +280,10 @@ export function Hotel3D({
   function onHeroReady() {
     if (started.current) return;
     started.current = true;
-    window.setTimeout(() => need("floor:3:eve", "hotel:day"), 1500);
+    window.setTimeout(() => {
+      need("floor:3:eve", "hotel:day");
+      warmClip(TRANSITIONS.eve["hotel>3"]);
+    }, 1500);
     if (!withIntro || prefersReducedMotion()) return;
     let seen = false;
     try {
@@ -255,7 +302,10 @@ export function Hotel3D({
     const i = ORDER.indexOf(v);
     const below = ORDER[i + 1];
     if (below !== undefined)
-      window.setTimeout(() => need(keyOf(below, null, tod)), 600);
+      window.setTimeout(() => {
+        need(keyOf(below, null, tod));
+        warmClip(TRANSITIONS[tod][`${v}>${below}`]);
+      }, 600);
   }
 
   function navigate(from: View, target: View) {
@@ -286,21 +336,36 @@ export function Hotel3D({
       });
       return;
     }
-    // Вниз — ролики подряд; кадры этажей грузятся, пока они играют.
-    const steps: Step[] = [];
-    for (let i = a; i < b; i += 1) {
-      const to = ORDER[i + 1];
-      need(keyOf(to, null, tod));
-      steps.push({
-        src: TRANSITIONS[tod][`${ORDER[i]}>${to}`],
-        then: () => setView(to),
-      });
+    // Вниз — один ролик: последний переход к нужному этажу. Через этажи
+    // не листаем (со здания на 1 этаж было три ролика подряд, ~13 с):
+    // сначала наплывом этаж над нужным, потом его ролик.
+    const above = ORDER[b - 1];
+    const src = TRANSITIONS[tod][`${above}>${target}`];
+    const k = keyOf(target, null, tod);
+    need(k);
+    setBusy(true);
+    const play = (url: string) =>
+      run([
+        {
+          src: url,
+          rate: FLOOR_RATE,
+          then: () => {
+            setView(target);
+            warmBelow(target);
+          },
+        },
+      ]);
+    if (above === from) {
+      clipReady(src).then(play);
+      return;
     }
-    steps[steps.length - 1].then = () => {
-      setView(target);
-      warmBelow(target);
-    };
-    run(steps);
+    const ka = keyOf(above, null, tod);
+    need(ka);
+    Promise.all([clipReady(src), ready(ka)]).then(([url]) => {
+      setView(above);
+      // наплыв 600 мс — ролик начинается с того же кадра
+      window.setTimeout(() => play(url), 500);
+    });
   }
 
   function go(target: View) {
