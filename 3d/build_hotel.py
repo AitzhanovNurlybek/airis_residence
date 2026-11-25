@@ -16,9 +16,14 @@
 Локальные оси здания: x — вдоль длинной стороны с юга на север (0…22,8),
 y — поперёк с востока на запад (0 — восточный фасад верхних этажей), z — вверх.
 
-Категории номеров — по площади («чем больше, тем лучше», 2026-11-24) и по
-количеству от отеля: 1 этаж — 3 Comfort Plus, Apart, Twin, 2 Standart,
-одноместный; 2 и 3 этажи — по 3 Comfort и 1 Twin, одноместный на 2 этаже.
+1 этаж — по рисунку и рассказу управляющей (2026-11-25): основной корпус
+(3 Comfort Plus, 2 Standart, Twin, завтрак с кухней, лестница), фойе со
+входом, ресепшн и кофейней, второй одноэтажный корпус справа от входа
+(служебные кабинеты, Standart, Apart). 2 и 3 этажи — по площади из
+техпаспорта: по 3 Comfort и 1 Twin, одноместный на 2 этаже.
+
+Режимы: «кадры» — четыре кадра для Higgsfield («этаж1» — только 1 этаж),
+«точки» — где на кадре центры номеров и подписи зон 1 этажа.
 """
 
 import json
@@ -243,21 +248,29 @@ def windows_long(prefix, xs, y_face, sign, z0, z1, width, c):
 
 
 # ───────────────────────────── 1 этаж ─────────────────────────────
-# Пиксели со скана плана 1 этажа (лист 24, 2600 px по ширине листа):
-# корпус от x=545 до 1480 px (22,80 м), от y=800 до 1360 px (11,96 м);
-# верх плана — запад, низ — восток (к лобби), лево — юг.
-def px(xp):
-    return (xp - 545) * L / 935
+# Планировку 1 этажа нарисовала и объяснила управляющая отеля (видео
+# 2026-11-25): основной корпус — номера, завтрак и лестница; посередине
+# фойе со входом, ресепшн и кофейней; справа второй корпус — служебные
+# кабинеты, Standart и Apart. Наружный контур — по техпаспорту, а
+# перегородки внутри — по её рисунку (рисунок без масштаба, размеры
+# комнат подобраны так, чтобы всё легло в контур).
+#
+# Основной корпус: x 0…22,8 (юг → север), y 3,8…15,76 (восток → запад).
+# Запад (дальний ряд): Comfort Plus, Standart, Twin, Comfort Plus.
+# Восток (у фойе):     завтрак с кухней, проход из фойе, лестница,
+#                      Standart, Comfort Plus.
+Y_E0, Y_E1 = Y1 + WALL, 8.9          # восточный ряд
+Y_C0, Y_C1 = 8.9, 10.3               # коридор
+Y_W0, Y_W1 = 10.3, D_UP - WALL       # западный ряд
+PASSAGE = (7.4, 10.0)                # проём из фойе в корпус
+
+# Места без кружков номеров: сайт кладёт поверх подписи (кириллицу
+# генератор портит, поэтому в кадре текста нет).
+ZONES: list[dict] = []
 
 
-def py(yp):
-    return D_UP - (yp - 800) * D_1 / 560
-
-
-def F1(x0p, x1p, y0p, y1p):
-    """Прямоугольник с плана → (x0, y0, x1, y1) в осях здания."""
-    a, b = sorted((py(y0p), py(y1p)))
-    return px(x0p), a, px(x1p), b
+def zone(key, x, y):
+    ZONES.append({"id": key, "x": x, "y": y})
 
 
 def floor_one():
@@ -265,48 +278,55 @@ def floor_one():
     z = 0.0
     top = H1 - 0.05
     box("f1_floor", 0, Y1, -0.05, L, D_UP, 0.0, "slab", c)
-    # наружные стены: запад и торцы светлые, восток над лобби — тоже стена
     box("f1_wall_w", 0, D_UP - WALL, 0, L, D_UP, H1, "cream", c)
-    box("f1_wall_e", 0, Y1, 0, L, Y1 + WALL, H1, "cream", c)
+    box("f1_wall_e_s", 0, Y1, 0, PASSAGE[0], Y1 + WALL, H1, "cream", c)
+    box("f1_wall_e_n", PASSAGE[1], Y1, 0, L, Y1 + WALL, H1, "cream", c)
     box("f1_wall_s", 0, Y1, 0, WALL, D_UP, H1, "cream", c)
     box("f1_wall_n", L - WALL, Y1, 0, L, D_UP, H1, "cream", c)
 
+    # коридор вдоль корпуса и холл от проёма из фойе
+    box("f1_corr", WALL, Y_C0, z + 0.02, L - WALL, Y_C1, z + 0.035, "corridor", c)
+    box("f1_hall", 6.4, Y_E0, z + 0.02, 10.3, Y_C0, z + 0.035, "corridor", c)
+
     rooms = [
-        # имя, категория, пиксели x0 x1 y0 y1, окно (+1 запад / −1 восток)
-        ("f1_cp1", "comfort_plus", 560, 815, 1088, 1345, -1),     # пом. 3, 29,7 м²
-        ("f1_cp2", "comfort_plus", 1210, 1465, 1185, 1345, -1),   # пом. 16, 20,9 м²
-        ("f1_cp3", "comfort_plus", 1015, 1217, 815, 1078, +1),    # пом. 10, 16,5 м²
-        ("f1_apart", "apart", 818, 1015, 815, 1000, +1),          # пом. 8 + холл 7
-        ("f1_twin", "twin", 1340, 1465, 815, 1078, +1),           # пом. 13, 11,4 м²
-        ("f1_std1", "standart", 560, 686, 815, 1078, +1),         # пом. 5, 11,3 м²
-        ("f1_std2", "standart", 1217, 1340, 815, 1078, +1),       # пом. 12, 10,0 м²
-        ("f1_single", "single", 686, 818, 815, 1078, +1),         # пом. 6, 9,5 м²
+        # имя, категория, x0, x1, ряд (+1 запад / −1 восток)
+        ("f1_cp_sw", "comfort_plus", WALL, 6.4, +1),
+        ("f1_std_w", "standart", 6.4, 10.3, +1),
+        ("f1_twin", "twin", 10.3, 14.4, +1),
+        ("f1_cp_nw", "comfort_plus", 14.4, L - WALL, +1),
+        ("f1_std_e", "standart", 11.9, 16.6, -1),
+        ("f1_cp_ne", "comfort_plus", 16.6, L - WALL, -1),
     ]
-    for name, cat, a, b, cc, d, side in rooms:
-        x0, y0, x1, y1 = F1(a, b, cc, d)
+    for name, cat, x0, x1, side in rooms:
+        y0, y1 = (Y_W0, Y_W1) if side > 0 else (Y_E0, Y_E1)
         rect_walls(name, x0, y0, x1, y1, z, top, "wall_in", c)
-        room(1, name, cat, x0 + PART, y0 + PART, x1 - PART, y1 - PART, z, c, side, sofa=name != "f1_cp3")
+        room(1, name, cat, x0 + PART, y0 + PART, x1 - PART, y1 - PART, z, c, side)
+        w = x1 - x0
+        if side > 0:
+            bathroom(f"{name}_bath", x0 + 0.15, y0 + 0.15, x0 + min(1.7, w * 0.45), y0 + 2.4, z, c)
+        else:
+            bathroom(f"{name}_bath", x0 + 0.15, y1 - 2.4, x0 + min(1.7, w * 0.45), y1 - 0.15, z, c)
 
-    for name, a, b, cc, d in (("f1_bath4", 663, 757, 975, 1075), ("f1_bath9", 940, 1015, 945, 1078),
-                              ("f1_bath11", 1085, 1215, 1000, 1078), ("f1_bath14", 1285, 1370, 980, 1078),
-                              ("f1_bath15", 1365, 1465, 1088, 1185)):
-        x0, y0, x1, y1 = F1(a, b, cc, d)
-        bathroom(name, x0, y0, x1, y1, z, c)
+    # завтрак с кухней — у фойе, в юго-восточном углу корпуса
+    x0, x1, y0, y1 = WALL, 6.4, Y_E0, Y_E1
+    rect_walls("f1_breakfast", x0, y0, x1, y1, z, top, "wall_in", c)
+    box("f1_breakfast_floor", x0 + PART, y0 + PART, z + 0.02, x1 - PART, y1 - PART, z + 0.04, "lobby_floor", c)
+    box("f1_kitchen", x0 + 0.2, y0 + 0.4, z, x0 + 0.85, y1 - 0.4, z + 0.92, "desk", c)
+    box("f1_kitchen_top", x0 + 0.15, y0 + 0.4, z + 0.92, x0 + 0.9, y1 - 0.4, z + 0.96, "ceramic", c)
+    box("f1_buffet", 2.0, y1 - 1.0, z, 5.4, y1 - 0.4, z + 0.9, "wood", c)
+    for i in range(2):
+        for j in range(2):
+            tx, ty = 2.6 + i * 2.0, y0 + 1.1 + j * 1.6
+            cyl(f"f1_bf_table_{i}_{j}", tx, ty, z, z + 0.75, 0.42, "wood", c)
+            for k, (dx, dy) in enumerate(((0.65, 0), (-0.65, 0))):
+                cyl(f"f1_bf_chair_{i}_{j}_{k}", tx + dx, ty + dy, z, z + 0.5, 0.2, "sofa", c)
+    zone("breakfast", 3.3, (y0 + y1) / 2)
 
-    for name, mat_name, a, b, cc, d in (("f1_hall2", "corridor", 815, 915, 1088, 1345),
-                                         ("f1_hall7", "corridor", 818, 940, 1000, 1078),
-                                         ("f1_vest", "corridor", 1090, 1290, 1088, 1150),
-                                         ("f1_wc23", "service", 915, 975, 1145, 1240),
-                                         ("f1_room20", "service", 1035, 1098, 1150, 1345),
-                                         ("f1_room19", "service", 1098, 1210, 1150, 1345)):
-        x0, y0, x1, y1 = F1(a, b, cc, d)
-        box(f"{name}_floor", x0, y0, z + 0.02, x1, y1, z + 0.035, mat_name, c)
-        rect_walls(name, x0, y0, x1, y1, z, top, "wall_in", c)
-    x0, y0, x1, y1 = F1(975, 1035, 1150, 1345)
-    stair("f1", x0, y0, x1, y1, z, c)
+    stair("f1", 10.3, Y_E0, 11.9, Y_E1, z, c)
+    zone("stairs", 11.1, (Y_E0 + Y_E1) / 2)
 
-    # окна запада: по одному на номер
-    xs = [px(v) for v in (623, 752, 915, 1116, 1278, 1402)]
+    # окна запада: по два на большой номер, по одному на остальные
+    xs = [1.8, 4.6, 8.35, 12.35, 16.6, 20.3]
     windows_long("f1_win_w", xs, D_UP, +1, 0.95, 2.45, 1.3, c)
 
 
@@ -320,36 +340,93 @@ def stair(prefix, x0, y0, x1, y1, z, c, height=None):
             x1 - 0.08, y0 + 0.15 + (i + 1) * run, z + (i + 1) * height / 2 / steps, "stair", c)
 
 
-# ───────────────────────────── лобби (Д1) ─────────────────────────
+# ───────────────────────────── фойе (Д1) ──────────────────────────
 def lobby():
     c = "floor1"
-    y_e = Y1 - ANNEX_D            # восточный фасад лобби
+    y_e = Y1 - ANNEX_D            # восточный фасад фойе
     box("lobby_floor", 0, y_e, -0.05, ANNEX_X, Y1, 0.02, "lobby_floor", c)
     box("lobby_wall_s", 0, y_e, 0, WALL, Y1, H1, "taupe", c)
     box("lobby_wall_n", ANNEX_X - WALL, y_e, 0, ANNEX_X, Y1, H1, "taupe", c)
     box("lobby_wall_e", 0, y_e, 0, ANNEX_X, y_e + WALL, H1, "taupe", c)
     box("lobby_roof", 0, y_e, H1, ANNEX_X, Y1 - 3.8, H1 + 0.35, "roof", "roof_lobby")
-    # большие витрины на восток и юг, вход у северного конца
+    # большие витрины на восток и юг, вход у северного конца — рядом со
+    # вторым корпусом, как на рисунке и на фото входа
     box("lobby_glass_e1", 0.8, y_e - 0.06, 0.15, 5.6, y_e, 2.9, "glass", c)
     box("lobby_door", 7.6, y_e - 0.06, 0.0, 9.3, y_e, 2.5, "glass", c)
     box("lobby_canopy", 7.0, y_e - 1.4, 2.7, 10.0, y_e, 2.95, "taupe", c)
     box("lobby_glass_s", -0.06, y_e + 1.0, 0.15, 0.0, Y1 - 1.0, 2.9, "glass", c)
-    # ресепшен, диваны, кафе
-    box("reception", 1.0, Y1 - 2.6, 0, 3.6, Y1 - 1.9, 1.1, "desk", c)
-    box("reception_back", 0.6, Y1 - 0.7, 0, 4.0, Y1 - 0.45, 2.8, "wood", c)
-    box("reception_accent", 1.6, Y1 - 0.75, 0.9, 3.0, Y1 - 0.7, 2.4, "red", c)
-    for i, (sx, sy) in enumerate(((5.2, y_e + 2.2), (5.2, y_e + 4.6))):
-        box(f"lobby_sofa{i}", sx, sy, 0, sx + 2.4, sy + 0.9, 0.75, "sofa", c)
-    box("lobby_rug", 4.8, y_e + 1.8, 0.02, 8.2, y_e + 6.2, 0.03, "tile", c)
-    for i in range(3):
+    zone("entrance", 8.45, y_e + 0.6)
+
+    # ресепшн — новое место: у стены корпуса, напротив входа, рядом с
+    # проходом к номерам и лестнице
+    box("reception", 4.3, 1.2, 0, 7.0, 1.9, 1.1, "desk", c)
+    box("reception_back", 3.9, Y1 - 0.6, 0, 7.3, Y1 - 0.3, 2.8, "wood", c)
+    box("reception_accent", 4.6, Y1 - 0.65, 0.9, 6.6, Y1 - 0.6, 2.4, "red", c)
+    zone("reception", 5.65, 1.55)
+
+    # кофейня — южная часть фойе: полукруглая стойка и столики
+    cx, cy, r = WALL, 0.6, 2.2
+    for i in range(9):
+        a = math.radians(-90 + i * 11.25)
+        bx, by = cx + r * math.cos(a), cy + r * math.sin(a)
+        box(f"coffee_bar_{i}", bx - 0.3, by - 0.3, 0, bx + 0.3, by + 0.3, 1.05, "wood", c)
+    box("coffee_back", WALL, -1.4, 0, WALL + 0.5, 2.6, 2.2, "desk", c)
+    for i in range(2):
         for j in range(2):
-            tx, ty = 1.4 + i * 1.5, y_e + 1.6 + j * 2.0
+            tx, ty = 1.4 + i * 1.6, y_e + 1.6 + j * 1.9
             cyl(f"cafe_table_{i}_{j}", tx, ty, 0, 0.75, 0.38, "wood", c)
             for k, (dx, dy) in enumerate(((0.6, 0), (-0.6, 0))):
                 cyl(f"cafe_chair_{i}_{j}_{k}", tx + dx, ty + dy, 0, 0.5, 0.22, "sofa", c)
-    # наружная лестница на восточной стороне (план участка)
+    zone("coffee", 1.6, -1.6)
+
+    # диваны посередине фойе
+    for i, (sx, sy) in enumerate(((5.0, y_e + 2.0), (5.0, y_e + 4.6))):
+        box(f"lobby_sofa{i}", sx, sy, 0, sx + 2.6, sy + 0.9, 0.75, "sofa", c)
+    box("lobby_rug", 4.6, y_e + 1.6, 0.02, 8.0, y_e + 6.0, 0.03, "tile", c)
+    # наружная лестница у входа
     for i in range(4):
         box(f"lobby_step{i}", 8.0, y_e - 0.3 * (i + 1), 0, 9.6, y_e - 0.3 * i, 0.15 * (4 - i), "walk", c)
+
+
+# ───────────────────────────── второй корпус ──────────────────────
+# Одноэтажный, справа от входа (на фото входа — коричневый объём с окном).
+# По рисунку: служебные кабинеты у фасада, кабинет управляющей, Standart
+# и в глубине Apart.
+B2_X0, B2_X1 = ANNEX_X, 21.6
+B2_Y0, B2_Y1 = -6.0, Y1
+
+
+def second_building():
+    c = "floor1"
+    z = 0.0
+    top = H1 - 0.05
+    box("b2_floor", B2_X0, B2_Y0, -0.05, B2_X1, B2_Y1, 0.0, "slab", c)
+    box("b2_wall_e", B2_X0, B2_Y0, 0, B2_X1, B2_Y0 + WALL, H1, "taupe", c)
+    box("b2_wall_n", B2_X1 - WALL, B2_Y0, 0, B2_X1, B2_Y1, H1, "taupe", c)
+    # крыша только у части, что выступает из-под верхних этажей
+    box("b2_roof", B2_X0, B2_Y0, H1, B2_X1, 0.0, H1 + 0.35, "roof", "roof_lobby")
+    # окна фасада: кабинеты
+    for i, xc in enumerate((13.6, 18.8)):
+        box(f"b2_win_{i}", xc - 0.9, B2_Y0 - 0.06, 0.9, xc + 0.9, B2_Y0, 2.4, "glass", c)
+
+    x0, x1 = B2_X0 + WALL, B2_X1 - WALL
+    # Apart в глубине, вдоль стены основного корпуса
+    rect_walls("b2_apart", x0, 0.0, x1, Y1, z, top, "wall_in", c)
+    room(1, "f1_apart", "apart", x0 + PART, PART, x1 - PART, Y1 - PART, z, c, +1, sofa=False)
+    bathroom("b2_apart_bath", x1 - 2.0, 0.15, x1 - 0.15, 2.4, z, c)
+    # Standart и кабинет управляющей — со стороны фойе, дальше коридор
+    rect_walls("b2_std", x0, -3.0, 14.6, 0.0, z, top, "wall_in", c)
+    room(1, "f1_std_b2", "standart", x0 + PART, -3.0 + PART, 14.6 - PART, -PART, z, c, +1, sofa=False)
+    rect_walls("b2_office", 14.6, -3.0, 17.0, 0.0, z, top, "wall_in", c)
+    box("b2_office_floor", 14.6, -3.0, z + 0.02, 17.0, 0.0, z + 0.035, "service", c)
+    box("b2_office_desk", 15.0, -1.4, z, 16.6, -0.7, z + 0.75, "wood", c)
+    box("b2_hall", 17.0, -3.0, z + 0.02, x1, 0.0, z + 0.035, "corridor", c)
+    # два служебных кабинета у фасада
+    for i, (a, b) in enumerate(((x0, 16.2), (16.2, x1))):
+        rect_walls(f"b2_staff{i}", a, B2_Y0 + WALL, b, -3.0, z, top, "wall_in", c)
+        box(f"b2_staff{i}_floor", a, B2_Y0 + WALL, z + 0.02, b, -3.0, z + 0.035, "service", c)
+        box(f"b2_staff{i}_desk", a + 0.8, -4.6, z, a + 2.6, -3.9, z + 0.75, "wood", c)
+    zone("staff", 16.2, -4.3)
 
 
 # ───────────────────────────── 2–3 этажи ──────────────────────────
@@ -545,6 +622,7 @@ def site():
 
 floor_one()
 lobby()
+second_building()
 box("slab_2", 0, 0, H1, L, D_UP, Z2, "slab", "floor2")
 upper_floor(2, Z2)
 upper_floor(3, Z3)
@@ -620,6 +698,10 @@ if "точки" in ARGS:
             out[n].append({"id": r["name"], "cat": r["cat"], "x": round(v.x * 100, 2),
                            "y": round((1 - v.y) * 100, 2),
                            "area": round((r["x1"] - r["x0"]) * (r["y1"] - r["y0"]), 1)})
+    out["zones"] = []
+    for zn in ZONES:
+        v = world_to_camera_view(scene, cam, world_of(zn["x"], zn["y"], 1.0))
+        out["zones"].append({"id": zn["id"], "x": round(v.x * 100, 2), "y": round((1 - v.y) * 100, 2)})
     json.dump(out, open(os.path.join(OUT, "room_points.json"), "w"), ensure_ascii=False, indent=1)
     print("DONE")
     sys.stdout.flush()
@@ -628,9 +710,10 @@ if "точки" in ARGS:
 if "кадры" in ARGS:
     scene.cycles.samples = 64
     cam_l, look = world_of(-6, -30, 36), world_of(L / 2 + 0.5, D_UP / 2 - 3.5, 2)
-    shot("s0_exterior", cam_l, look, 30, hide=("labels",))
-    shot("s1_floor3", cam_l, look, 30, hide=("roof", "facade", "labels"))
-    shot("s2_floor2", cam_l, look, 30, hide=("floor3", "roof", "facade", "labels"))
+    if "этаж1" not in ARGS:
+        shot("s0_exterior", cam_l, look, 30, hide=("labels",))
+        shot("s1_floor3", cam_l, look, 30, hide=("roof", "facade", "labels"))
+        shot("s2_floor2", cam_l, look, 30, hide=("floor3", "roof", "facade", "labels"))
     shot("s3_floor1", cam_l, look, 30, hide=("floor2", "floor3", "roof", "roof_lobby", "facade", "labels"))
     print("DONE")
     sys.stdout.flush()

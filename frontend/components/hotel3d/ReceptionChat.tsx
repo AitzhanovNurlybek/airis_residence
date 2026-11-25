@@ -14,7 +14,9 @@ import { site } from "@/lib/site";
  * пропадала, если гость сходил посмотреть этажи и вернулся к стойке.
  */
 
-export const ASSISTANT_NAME = "Алия";
+export const ASSISTANT_NAME = "Дана";
+/** Родительный падеж: «Сообщение для Даны». Меняется вместе с именем. */
+const ASSISTANT_NAME_GEN = "Даны";
 
 const STORE_ID = "airis-chat-id";
 const STORE_LOG = "airis-chat-log";
@@ -241,7 +243,7 @@ export function ReceptionChat({ className = "" }: { className?: string }) {
           onChange={(e) => setInput(e.target.value)}
           maxLength={500}
           placeholder="Спросите о номерах, ценах, заезде…"
-          aria-label={`Сообщение для ${ASSISTANT_NAME}`}
+          aria-label={`Сообщение для ${ASSISTANT_NAME_GEN}`}
           className="min-w-0 flex-1 rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm text-cream placeholder:text-muted focus:border-sand-300/60 focus:outline-none"
         />
         <button

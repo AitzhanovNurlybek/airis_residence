@@ -26,9 +26,12 @@ import { ASSISTANT_NAME, ReceptionChat } from "./ReceptionChat";
  * без бесконечной анимации и без размытия фона: на слабых телефонах именно
  * это давало подтормаживание.
  *
- * Расположение категорий по этажам — ориентировочное: номера разложены по
- * площади из техпаспорта и количеству по этажам, которое назвал отель
- * (2026-11-24). Точный номер комнаты подтверждает стойка — так и написано.
+ * Расположение категорий на 2–3 этажах — ориентировочное: номера разложены
+ * по площади из техпаспорта и количеству по этажам, которое назвал отель
+ * (2026-11-24). 1 этаж — по рисунку управляющей (2026-11-25): основной
+ * корпус, фойе с ресепшн и кофейней, второй корпус со служебными
+ * кабинетами, Standart и Apart; подписи этих мест — zones в точках.
+ * Точный номер комнаты подтверждает стойка — так и написано.
  */
 
 export type Cat =
@@ -49,6 +52,8 @@ export type CatInfo = {
 };
 
 type Point = { id: string; cat: Cat; x: number; y: number; area: number };
+/** Подпись места без номера (ресепшн, завтрак…) — только текст, не кнопка. */
+type Zone = { id: string; x: number; y: number };
 type Floor = 1 | 2 | 3;
 type View = "hotel" | Floor | "lobby";
 type Spot = { x: number; y: number };
@@ -85,6 +90,14 @@ const CAT_ORDER: Cat[] = [
   "twin",
   "single",
 ];
+const ZONE_LABEL: Record<string, string> = {
+  reception: "Ресепшн",
+  coffee: "Кофейня",
+  breakfast: "Завтрак",
+  stairs: "Лестница",
+  entrance: "Вход",
+  staff: "Служебные",
+};
 const VIEW_LABEL: Record<string, string> = {
   lobby: "Ресепшн",
   hotel: "Здание",
@@ -393,7 +406,14 @@ export function Hotel3D({
     () =>
       view === "hotel" || view === "lobby"
         ? []
-        : ((points as Record<string, Point[]>)[String(view)] ?? []),
+        : ((points as unknown as Record<string, Point[]>)[String(view)] ?? []),
+    [view],
+  );
+  const zones = useMemo<Zone[]>(
+    () =>
+      (points as unknown as { zones?: Record<string, Zone[]> }).zones?.[
+        String(view)
+      ] ?? [],
     [view],
   );
   const counts = useMemo(() => {
@@ -496,6 +516,21 @@ export function Hotel3D({
                 Пропустить
               </button>
             )}
+
+            {/* Подписи мест без номеров: под кружками, клики проходят насквозь */}
+            {showSpots &&
+              zones.map((z) => (
+                <span
+                  key={z.id}
+                  aria-hidden="true"
+                  style={{ left: `${z.x}%`, top: `${z.y}%` }}
+                  className="h3d-pop pointer-events-none absolute z-[9] flex h-0 w-0 items-center justify-center"
+                >
+                  <span className="shrink-0 rounded-full border border-white/15 bg-ink-950/70 px-1.5 py-0.5 text-[0.55rem] whitespace-nowrap text-cream/90 md:px-2.5 md:text-[0.7rem]">
+                    {ZONE_LABEL[z.id] ?? z.id}
+                  </span>
+                </span>
+              ))}
 
             {/* Номера на этаже. Центр кружка — точка: контейнер нулевого
                 размера с центровкой flex, без transform (его глушит

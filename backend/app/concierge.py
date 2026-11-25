@@ -582,7 +582,7 @@ FULL_TOOLS = [AVAILABILITY_TOOL, CREATE_TOOL, FIND_TOOL, CHANGE_TOOL, CANCEL_TOO
 #: любой посетитель сайта слал бы «просьбы» ресепшену от чужого имени.
 WEB_CHANNEL = "web"
 WEB_TOOL_NAMES = {"room_page", "check_availability", "booking_link"}
-WEB_ASSISTANT_NAME = "Алия"
+WEB_ASSISTANT_NAME = "Дана"
 WEB_WHATSAPP = "https://wa.me/77003002526"
 WEB_CHAT_RULES = f"""
 
