@@ -359,32 +359,20 @@ def lobby():
     box("lobby_canopy", -1.4, y_e + 0.6, 2.7, 0.0, y_e + 3.6, 2.95, "taupe", c)
     zone("entrance", 0.6, y_e + 2.1)
 
-    # ресепшн — новое место: у стены корпуса, напротив входа, рядом с
-    # проходом к номерам и лестнице
-    box("reception", 4.3, 1.2, 0, 7.0, 1.9, 1.1, "desk", c)
-    box("reception_back", 3.9, Y1 - 0.6, 0, 7.3, Y1 - 0.3, 2.8, "wood", c)
-    box("reception_accent", 4.6, Y1 - 0.65, 0.9, 6.6, Y1 - 0.6, 2.4, "red", c)
-    zone("reception", 5.65, 1.55)
-
-    # кофейня — южная часть фойе: полукруглая стойка и столики
-    cx, cy, r = WALL, 0.6, 2.2
-    for i in range(9):
-        a = math.radians(-90 + i * 11.25)
+    # ресепшн — сразу справа от входа (управляющая, 2026-11-27); кофейни
+    # нет; слева от входа до прохода в корпус — зона фойе: полукруглый диван
+    box("reception", 1.0, y_e + 0.6, 0, 3.6, y_e + 1.3, 1.1, "desk", c)
+    box("reception_back", 1.0, y_e + WALL, 0, 3.8, y_e + 0.55, 2.8, "wood", c)
+    box("reception_accent", 1.4, y_e + 0.55, 0.9, 3.4, y_e + 0.6, 2.4, "red", c)
+    zone("reception", 2.4, y_e + 1.0)
+    cx, cy, r = 6.0, y_e + 6.5, 2.4
+    for i in range(10):
+        a = math.radians(60 + i * 24)
         bx, by = cx + r * math.cos(a), cy + r * math.sin(a)
-        box(f"coffee_bar_{i}", bx - 0.3, by - 0.3, 0, bx + 0.3, by + 0.3, 1.05, "wood", c)
-    box("coffee_back", WALL, -1.4, 0, WALL + 0.5, 2.6, 2.2, "desk", c)
-    for i in range(2):
-        for j in range(2):
-            tx, ty = 1.4 + i * 1.6, y_e + 1.6 + j * 1.9
-            cyl(f"cafe_table_{i}_{j}", tx, ty, 0, 0.75, 0.38, "wood", c)
-            for k, (dx, dy) in enumerate(((0.6, 0), (-0.6, 0))):
-                cyl(f"cafe_chair_{i}_{j}_{k}", tx + dx, ty + dy, 0, 0.5, 0.22, "sofa", c)
-    zone("coffee", 1.6, -1.6)
-
-    # диваны посередине фойе
-    for i, (sx, sy) in enumerate(((5.0, y_e + 2.0), (5.0, y_e + 4.6))):
-        box(f"lobby_sofa{i}", sx, sy, 0, sx + 2.6, sy + 0.9, 0.75, "sofa", c)
-    box("lobby_rug", 4.6, y_e + 1.6, 0.02, 8.0, y_e + 6.0, 0.03, "tile", c)
+        box(f"foyer_sofa_{i}", bx - 0.45, by - 0.45, 0, bx + 0.45, by + 0.45, 0.75, "sofa", c)
+    cyl("foyer_rug", cx, cy, 0.02, 0.03, 2.0, "tile", c)
+    cyl("foyer_table", cx, cy, 0, 0.45, 0.6, "wood", c)
+    zone("foyer", cx, cy)
     for i in range(4):
         box(f"lobby_step{i}", -0.3 * (i + 1), y_e + 0.9, 0, -0.3 * i, y_e + 3.3, 0.15 * (4 - i), "walk", c)
 

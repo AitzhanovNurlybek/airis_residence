@@ -138,7 +138,7 @@ const CAT_ORDER: Cat[] = [
 ];
 const ZONE_LABEL: Record<string, string> = {
   reception: "Ресепшн",
-  coffee: "Кофейня",
+  foyer: "Фойе",
   breakfast: "Завтрак",
   stairs: "Лестница",
   entrance: "Вход",
